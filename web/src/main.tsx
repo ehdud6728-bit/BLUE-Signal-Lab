@@ -13,7 +13,7 @@ function App(){
  const [latest,setLatest]=useState<string|null>(null);const [signals,setSignals]=useState<string[]>(tags);const [logic,setLogic]=useState('any');
  const [rows,setRows]=useState<Signal[]>([]),[days,setDays]=useState<Day[]>([]),[total,setTotal]=useState<number|null>(null),[page,setPage]=useState(1);
  const [busy,setBusy]=useState(false),[error,setError]=useState(''),[selected,setSelected]=useState<Signal|null>(null),[status,setStatus]=useState('');
- useEffect(()=>{fetch(API+'/api/dates').then(async r=>{if(!r.ok)throw Error('API response '+r.status);return r.json()}).then(d=>{if(d.latest){setLatest(d.latest);setDate(d.latest);setStart(d.latest);setEnd(d.latest)}}).catch(()=>setError('검색 가능 날짜 확인 실패 — API 배포 및 D1 상태를 확인하세요.'))},[]);
+ useEffect(()=>{fetch(API+'api/dates').then(async r=>{if(!r.ok)throw Error('API response '+r.status);return r.json()}).then(d=>{if(d.latest){setLatest(d.latest);setDate(d.latest);setStart(d.latest);setEnd(d.latest)}}).catch(()=>setError('검색 가능 날짜 확인 실패 — API 배포 및 D1 상태를 확인하세요.'))},[]);
  async function search(p=1){setBusy(true);setError('');setStatus('');try{
   const u=new URL(API+'/api/search');u.searchParams.set('mode',mode);
   if(mode==='single')u.searchParams.set('date',date);else{u.searchParams.set('start',start);u.searchParams.set('end',end)}
