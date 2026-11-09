@@ -1,0 +1,83 @@
+name: BLUE Signal Lab R0.5 - KRX Market Scan RESEARCH_ONLY
+
+on:
+  workflow_dispatch:
+    inputs:
+      asof_date:
+        description: 'YYYY-MM-DD exact day or latest (uses most recent available source date)'
+        required: true
+        default: latest
+        type: string
+      publish_to_d1:
+        description: 'Publish to existing Cloudflare D1 (requires repository secrets)'
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+jobs:
+  research_scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Checkout standalone BLUE Signal Lab
+        uses: actions/checkout@v4
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install Python dependencies
+        run: pip install pandas numpy pyarrow requests
+      - name: Test signal engine and point-in-time behavior
+        run: python -m unittest discover -s research_r05/tests -v
+      - name: Scan KOSPI and KOSDAQ from marcap
+        env:
+          ASOF: ${{ inputs.asof_date }}
+        run: |
+          python research_r05/scripts/market_scan.py --date "$ASOF" --years 2025,2026 --out research_r05/output
+      - name: Validate signal count consistency
+        run: |
+          python - <<'PY'
+          import json,csv
+          from pathlib import Path
+          root=Path('research_r05/output')
+          a=json.loads((root/'AUDIT.json').read_text())
+          with (root/'signals.csv').open() as f: rows=list(csv.DictReader(f))
+          assert len(rows)==a['matched_stocks']
+          assert 0<=a['matched_stocks']<=a['eligible_stocks']<=a['observed_stocks']
+          assert a['source_sha256_by_year'].get('2026')
+          print('AUDIT OK',a['asof'],a['observed_stocks'],a['matched_stocks'])
+          PY
+      - name: Generate D1 import file (not executed unless explicitly approved)
+        run: |
+          python scripts/csv_to_d1.py \
+            --input-dir research_r05/output \
+            --out research_r05/output/import.sql \
+            --run-id "blue_market_$(python -c "import json;print(json.load(open('research_r05/output/AUDIT.json'))['asof'].replace('-',''))")" \
+            --source 'FinanceData-marcap-KOSPI-KOSDAQ-R0.5-RESEARCH_ONLY'
+      - name: Upload audit, signals and D1 import SQL as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: BLUE_R05_MARKET_SCAN_RESEARCH_ONLY
+          path: research_r05/output/
+          retention-days: 14
+      - name: Setup Node for optional publication
+        if: ${{ inputs.publish_to_d1 }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Apply R0.5 results to Cloudflare D1 (explicit opt-in only)
+        if: ${{ inputs.publish_to_d1 }}
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          test -n "$CLOUDFLARE_API_TOKEN" && test -n "$CLOUDFLARE_ACCOUNT_ID" || { echo 'Missing Cloudflare secrets'; exit 1; }
+          cd worker
+          npm install --no-audit --no-fund
+          npx wrangler d1 execute blue-signal-lab-db --remote --file=../research_r05/output/import.sql --yes
