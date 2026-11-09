@@ -34,12 +34,12 @@ jobs:
       - name: Install Python dependencies
         run: pip install pandas numpy pyarrow requests
       - name: Test signal engine and point-in-time behavior
-        run: python -m unittest discover -s research_r05/tests -v
+        run: python -m unittest discover -s tests -v
       - name: Scan KOSPI and KOSDAQ from marcap
         env:
           ASOF: ${{ inputs.asof_date }}
         run: |
-          python research_r05/scripts/market_scan.py --date "$ASOF" --years 2025,2026 --out research_r05/output
+          python scripts/market_scan.py --date "$ASOF" --years 2025,2026 --out output
       - name: Validate signal count consistency
         run: |
           python - <<'PY'
@@ -64,7 +64,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: BLUE_R05_MARKET_SCAN_RESEARCH_ONLY
-          path: research_r05/output/
+          path: output/
           retention-days: 14
       - name: Setup Node for optional publication
         if: ${{ inputs.publish_to_d1 }}
@@ -80,4 +80,4 @@ jobs:
           test -n "$CLOUDFLARE_API_TOKEN" && test -n "$CLOUDFLARE_ACCOUNT_ID" || { echo 'Missing Cloudflare secrets'; exit 1; }
           cd worker
           npm install --no-audit --no-fund
-          npx wrangler d1 execute blue-signal-lab-db --remote --file=../research_r05/output/import.sql --yes
+          npx wrangler d1 execute blue-signal-lab-db --remote --file=../output/import.sql --yes
