@@ -39,7 +39,7 @@ jobs:
         env:
           ASOF: ${{ inputs.asof_date }}
         run: |
-          python scripts/market_scan.py --date "$ASOF" --years 2025,2026 --out output
+          python scripts/market_scan_r06.py --date "$ASOF" --years 2025,2026 --out output
       - name: Validate signal count consistency
         run: |
           python - <<'PY'
