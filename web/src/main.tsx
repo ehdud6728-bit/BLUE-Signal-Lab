@@ -1,5 +1,5 @@
 import React,{useEffect,useState} from 'react';import{createRoot}from'react-dom/client';import{Search,CalendarRange,BarChart3,AlertCircle}from'lucide-react';import './style.css';
-const API=import.meta.env.VITE_API_BASE||'';
+const API='https://blue-signal-lab-api-v2.ehdud6728.workers.dev';
 type Run={run_id:string;created_at:string;source:string;latest_price_date:string|null;is_demo:number};
 type Signal={code:string;day:string;signals:string[];close_price:number|null;supply_distance_pct:number|null;extras:Record<string,unknown>};
 type Day={day:string;observed_stocks:number;signal_events:number;matched_stocks:number};
