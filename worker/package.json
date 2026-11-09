@@ -1,0 +1,1 @@
+{"name":"blue-signal-lab-api","private":true,"type":"module","scripts":{"dev":"wrangler dev","deploy":"wrangler deploy","db:local":"wrangler d1 execute blue-signal-lab --local --file=schema.sql","db:remote":"wrangler d1 execute blue-signal-lab --remote --file=schema.sql"},"devDependencies":{"wrangler":"^4.0.0","typescript":"^5.7.0","@cloudflare/workers-types":"^4.20251101.0"}}
