@@ -73,6 +73,70 @@ class SameDayTests(unittest.TestCase):
         with self.assertRaisesRegex(SourcePending, 'KRX_SAMPLE_PRICE_MISMATCH'):
             pykrx_verified_day(date(2026, 11, 10), FakeStock(mismatch=True))
 
+    def test_alphanumeric_preferred_ticker_is_valid_and_preserved(self):
+        class KRXWithPreferred(FakeStock):
+            def get_market_ohlcv_by_ticker(self, stamp, market='KOSPI', alternative=False):
+                df = super().get_market_ohlcv_by_ticker(stamp, market=market, alternative=alternative)
+                if market == 'KOSPI':
+                    ids = list(df.index)
+                    ids[4] = '00088K'  # valid 6-character preferred-share short code
+                    df.index = ids
+                return df
+        result = pykrx_verified_day(date(2026, 11, 10), KRXWithPreferred())
+        self.assertIn('00088K', result.Code.tolist())
+        self.assertEqual(len(result), 1202)
+
+    def test_no_trade_zero_bar_is_excluded_with_positive_traded_bars_intact(self):
+        class KRXWithSuspended(FakeStock):
+            def get_market_ohlcv_by_ticker(self, stamp, market='KOSPI', alternative=False):
+                df = super().get_market_ohlcv_by_ticker(stamp, market=market, alternative=alternative)
+                row = df.index[10]
+                for c in ('시가','고가','저가','종가','거래량','거래대금'):
+                    df.loc[row,c] = 0
+                return df
+        result = pykrx_verified_day(date(2026, 11, 10), KRXWithSuspended())
+        self.assertEqual(len(result), 1200)
+        self.assertFalse((result.Volume <= 0).any())
+        self.assertFalse((result.Close <= 0).any())
+
+    def test_traded_zero_price_is_rejected_not_silently_discarded(self):
+        class KRXBadPrice(FakeStock):
+            def get_market_ohlcv_by_ticker(self, stamp, market='KOSPI', alternative=False):
+                df=super().get_market_ohlcv_by_ticker(stamp, market=market, alternative=alternative)
+                df.loc[df.index[7],'종가']=0
+                return df
+        with self.assertRaisesRegex(SourcePending,'KRX_TRADED_OHLC_INVALID'):
+            pykrx_verified_day(date(2026,11,10),KRXBadPrice())
+
+    def test_invalid_or_duplicate_code_rejected_with_counts_only(self):
+        class KRXBadSymbol(FakeStock):
+            def get_market_ohlcv_by_ticker(self, stamp, market='KOSPI', alternative=False):
+                df=super().get_market_ohlcv_by_ticker(stamp, market=market, alternative=alternative)
+                df.index = ['INVALID!' if i == 5 else v for i,v in enumerate(df.index)]
+                return df
+        with self.assertRaisesRegex(SourcePending,'KRX_TICKERS_INVALID: KOSPI invalid=1'):
+            pykrx_verified_day(date(2026,11,10),KRXBadSymbol())
+
+    def test_duplicate_normalized_ticker_is_rejected(self):
+        class KRXDup(FakeStock):
+            def get_market_ohlcv_by_ticker(self, stamp, market='KOSPI', alternative=False):
+                df = super().get_market_ohlcv_by_ticker(stamp, market=market, alternative=alternative)
+                codes = list(df.index)
+                codes[2] = codes[1]
+                df.index = codes
+                return df
+        with self.assertRaisesRegex(SourcePending, r'KRX_TICKERS_INVALID: KOSPI invalid=0 duplicate=1'):
+            pykrx_verified_day(date(2026, 11, 10), KRXDup())
+
+    def test_positive_volume_requires_positive_trading_amount(self):
+        class KRXBadAmount(FakeStock):
+            def get_market_ohlcv_by_ticker(self, stamp, market='KOSPI', alternative=False):
+                df = super().get_market_ohlcv_by_ticker(stamp, market=market, alternative=alternative)
+                df.loc[df.index[11], '거래대금'] = 0
+                return df
+        with self.assertRaisesRegex(SourcePending, r'KRX_AMOUNT_VOLUME_MISMATCH: KOSPI'):
+            pykrx_verified_day(date(2026, 11, 10), KRXBadAmount())
+
     def test_incomplete_market_fails(self):
         with self.assertRaisesRegex(SourcePending, 'KRX_DATE_NOT_AVAILABLE'):
             pykrx_verified_day(date(2026, 11, 10), FakeStock(missing_market=True))
