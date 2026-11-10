@@ -1,0 +1,37 @@
+{
+  "schema": "BLUE_TOSS_MARKET_PROBE_R12_V1",
+  "mode": "mock",
+  "source": "SIMULATED",
+  "research_only": true,
+  "orders_placed": 0,
+  "d1_written": false,
+  "market_window": false,
+  "capture_started_kst": "2026-11-11T00:16:07+09:00",
+  "provider_coverage_not_equal_krx": true,
+  "requested_universe": 2768,
+  "quote_count": 2768,
+  "fresh_count": 2768,
+  "missing_count": 0,
+  "status": "SIMULATION_PASS",
+  "by_market": {
+    "KOSPI": 936,
+    "KOSDAQ": 1832
+  },
+  "excluded_non_equities_by_market": {
+    "KOSPI": 0,
+    "KOSDAQ": 0
+  },
+  "stale_count": 0,
+  "future_timestamp_count": 0,
+  "coverage_ratio": 1.0,
+  "fresh_ratio": 1.0,
+  "latency_ms_p50": 11.0,
+  "latency_ms_p95": 11.0,
+  "quote_age_seconds_p95": 0.001,
+  "requests_sent": 16,
+  "http_429_count": 0,
+  "expected_price_batches": 14,
+  "capture_finished_kst": "2026-11-11T00:16:07+09:00",
+  "duration_seconds": 0.031,
+  "universe_sha256": "45170dcd60e1afa1ffd4079e127eba4ec4c1757a1903d5c472220b4986b5455a"
+}
