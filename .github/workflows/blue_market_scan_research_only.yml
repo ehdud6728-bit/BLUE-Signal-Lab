@@ -96,5 +96,8 @@ jobs:
         run: |
           test -n "$CLOUDFLARE_API_TOKEN" && test -n "$CLOUDFLARE_ACCOUNT_ID" || { echo 'Missing Cloudflare secrets'; exit 1; }
           cd worker
-          npm install --no-audit --no-fund
+          # R0.7.2 hotfix: Wrangler 4.159.x asks for optional workers-types v5,
+          # while this existing project declares workers-types v4.
+          # This job only uses the Wrangler CLI to import D1; do not change the app's dependencies here.
+          npm install --no-audit --no-fund --legacy-peer-deps
           npx wrangler d1 execute blue-signal-lab-db --remote --file=../output/import.sql --yes
