@@ -14,6 +14,15 @@ type Signal = {code:string;name:string|null;day:string;signals:string[];close_pr
 type Day = {day:string;observed_stocks:number;signal_events:number;matched_stocks:number};
 type ScanStatus = 'READY'|'NOT_IMPORTED'|'PENDING'|'FAILED'|'';
 type Line = {signal:string;price:number;gap_from_close_pct:number;slope_pct:number|null;status:string};
+type GcKey='rsi'|'slow14'|'slow12'|'slow20'|'macd';
+const GC_OPTIONS:{key:GcKey;label:string}[]=[
+  {key:'rsi',label:'RSI GC'},
+  {key:'slow14',label:'Slow 14·3·3 GC'},
+  {key:'slow12',label:'Slow 12·5·5 GC'},
+  {key:'slow20',label:'Slow 20·12·12 GC'},
+  {key:'macd',label:'MACD GC'},
+];
+const ALL_GC_KEYS=GC_OPTIONS.map(x=>x.key);
 type InstallPrompt = Event & {prompt:()=>Promise<void>;userChoice:Promise<{outcome:string}>};
 const tags=['BB20','BB30','BB40','ENV20','ENV40'];
 const todayKST=()=>new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Seoul',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date());
@@ -36,6 +45,9 @@ function App(){
   const [error,setError]=useState('');
   const [selected,setSelected]=useState<Signal|null>(null);
   const [localQuery,setLocalQuery]=useState('');
+  const [gcFields,setGcFields]=useState<GcKey[]>([]);
+  const [gcLogic,setGcLogic]=useState<'any'|'all'>('any');
+  const [marketAiOpen,setMarketAiOpen]=useState(false);
   const [status,setStatus]=useState('');
   const [dataStatus,setDataStatus]=useState<ScanStatus>('');
   const [requestBusy,setRequestBusy]=useState(false);
@@ -96,7 +108,7 @@ function App(){
     }catch(e){setError(String(e));}
     finally{setRequestBusy(false);}
   }
-  async function search(p=1,scroll=true){
+  async function search(p=1,scroll=true,selectedGc:GcKey[]=gcFields,selectedGcLogic:'any'|'all'=gcLogic){
     const serial=++searchVersion.current;
     setBusy(true);setError('');setStatus('');
     const queryMode=mode,queryDate=date;
@@ -106,6 +118,7 @@ function App(){
       if(queryMode==='single')u.searchParams.set('date',queryDate);
       else {u.searchParams.set('start',start);u.searchParams.set('end',end);}
       u.searchParams.set('signals',signals.join(','));u.searchParams.set('logic',logic);u.searchParams.set('page',String(p));
+      if(selectedGc.length){u.searchParams.set('gc',selectedGc.join(','));u.searchParams.set('gc_logic',selectedGcLogic);}
       const r=await fetch(u.toString(),{credentials:'include',cache:'no-store'});
       const d=await r.json();
       if(!r.ok)throw new Error(d.error||`검색 오류: ${r.status}`);
@@ -155,13 +168,18 @@ function App(){
   const supplyGrade=(r:Signal)=>String(extra(r,'supply_strength_grade')||'미계산');
   const displayName=(r:Signal)=>r.name||String(r.extras?.name||r.extras?.Name||'종목명 미등록');
   const visibleRows=rows.filter(r=>(displayName(r)+' '+r.code).toLocaleLowerCase().includes(localQuery.trim().toLocaleLowerCase()));
+  const changeGc=(next:GcKey[],mode:'any'|'all'=gcLogic)=>{
+    setGcFields(next);setGcLogic(mode);setLocalQuery('');
+    // Search in D1 across all stored result pages, not only the 100 rows currently loaded.
+    if(total!==null)void search(1,false,next,mode);
+  };
   const profile=(r:Signal)=>r.supply_distance_pct==null?'미계산':r.supply_distance_pct.toFixed(2)+'%';
   const flip=(t:string)=>setSignals(a=>a.includes(t)?a.filter(s=>s!==t):[...a,t]);
   const nav=(target:'search'|'results'|'summary'|'ai')=>{
     if(target==='search'){setFilterOpen(true);setTimeout(()=>formRef.current?.scrollIntoView({behavior:'smooth',block:'start'}),20);}
     if(target==='results')resultRef.current?.scrollIntoView({behavior:'smooth',block:'start'});
     if(target==='summary')summaryRef.current?.scrollIntoView({behavior:'smooth',block:'start'});
-    if(target==='ai')aiRef.current?.scrollIntoView({behavior:'smooth',block:'start'});
+    if(target==='ai'){setMarketAiOpen(true);window.setTimeout(()=>aiRef.current?.scrollIntoView({behavior:'smooth',block:'start'}),30);}
   };
   const openDetail=(r:Signal)=>setSelected(r);
   const closeDetail=()=>setSelected(null);
@@ -185,7 +203,10 @@ function App(){
     </header>
     {installGuide&&<div className="install-guide" role="status"><button className="guide-close" onClick={()=>setInstallGuide(false)} aria-label="안내 닫기"><X size={17}/></button>
       <strong>휴대폰에 설치하는 방법</strong><p>안드로이드 Chrome: 오른쪽 위 ⋮ → <b>앱 설치</b> 또는 <b>홈 화면에 추가</b></p>
-      <p>아이폰 Safari: 공유 버튼 → <b>홈 화면에 추가</b></p><small>Cloudflare Access로 로그인한 상태에서 설치하세요. 설치해도 인터넷 연결은 필요합니다.</small>
+      <p>아이폰 Safari: 공유 버튼 → <b>홈 화면에 추가</b></p>
+      <p><strong>설치 상태:</strong> {installPrompt?'Chrome이 앱 설치 요청을 허용했습니다.':'Chrome 설치 이벤트가 아직 감지되지 않았습니다. 앱 파일 응답을 검사해 주세요.'}</p>
+      <p><a href="/pwa-check.html" target="_blank" rel="noopener noreferrer">PWA 설치 진단 열기</a></p>
+      <small>Cloudflare Access 로그인 페이지가 manifest·아이콘을 대신 반환하면 설치할 수 없을 수 있습니다. 접근 제어를 해제하지 말고 진단 결과를 확인하세요.</small>
     </div>}
     <main className="app-main">
       <aside className={'panel search-panel '+(filterOpen?'filter-open':'filter-closed')} ref={formRef} id="search-panel">
@@ -211,10 +232,35 @@ function App(){
         {error&&<div className="notice error" role="alert"><AlertCircle size={17}/>{error}</div>}
         {status&&<div className="notice"><AlertCircle size={17}/>{status}</div>}
         {scanInfo&&<div className="notice" role="status"><RefreshCw size={17}/><div>{scanInfo}{actionsUrl&&<div><a href={actionsUrl} target="_blank" rel="noreferrer">GitHub 실행 결과 확인</a></div>}</div></div>}
-        <div ref={aiRef} id="ai-panel" style={{scrollMarginTop:12}}><AiWidget key={'market-'+(mode==='single'?date:latest||end)} kind="market" date={mode==='single'?date:latest||end} observed={mode==='single'?days.find(d=>d.day===date)?.observed_stocks:null} matched={mode==='single'?days.find(d=>d.day===date)?.matched_stocks:null} events={mode==='single'?days.find(d=>d.day===date)?.signal_events:null} searchMatched={rows}/></div>
+        <section ref={aiRef} id="ai-panel" className="ai-accordion" style={{scrollMarginTop:12}}>
+          <button type="button" className="ai-accordion-toggle" aria-expanded={marketAiOpen} aria-controls="ai-market-body" onClick={()=>setMarketAiOpen(v=>!v)}>
+            <span><Activity size={19}/> <strong>BLUE AI · 시황 브리핑</strong><small>{mode==='single'?date:latest||end} 종가 기준</small></span>
+            <span className="ai-collapse-label">{marketAiOpen?'접기':'펼치기'} <ChevronRight size={19} className={marketAiOpen?'rotated':''}/></span>
+          </button>
+          {marketAiOpen&&<div id="ai-market-body"><AiWidget key={'market-'+(mode==='single'?date:latest||end)} kind="market" date={mode==='single'?date:latest||end} observed={mode==='single'?days.find(d=>d.day===date)?.observed_stocks:null} matched={mode==='single'?days.find(d=>d.day===date)?.matched_stocks:null} events={mode==='single'?days.find(d=>d.day===date)?.signal_events:null} searchMatched={rows}/></div>}
+        </section>
         <section className="panel result" ref={resultRef} id="results-panel">
           <div className="result-heading"><h2><BarChart3 size={18}/> 검색된 종목 <small>{total===null?'검색 전':total+'건'}</small></h2><span className="eod-pill"><Clock3 size={13}/> EOD</span></div>
           <p className="result-hint">종목을 누르면 RSI · Slow · MACD · 돌파선 · 상단 매물대 정보를 볼 수 있습니다.</p>
+          <div className="gc-filter-panel" aria-label="골든크로스 종목 필터">
+            <div className="gc-filter-heading"><strong><ListFilter size={15}/> 골든크로스 필터</strong><span>검색 전체 결과에 적용 · 당일 발생만</span></div>
+            <div className="gc-quick-actions">
+              <button type="button" className={!gcFields.length?'active':''} disabled={busy} onClick={()=>changeGc([])}>전체 종목</button>
+              <button type="button" className={gcFields.length===ALL_GC_KEYS.length&&gcLogic==='any'?'active':''} disabled={busy} onClick={()=>changeGc([...ALL_GC_KEYS],'any')}>GC 하나라도</button>
+            </div>
+            <div className="gc-filter-options">
+              {GC_OPTIONS.map(item=><label key={item.key} className={'gc-filter-chip '+(gcFields.includes(item.key)?'selected':'')}>
+                <input type="checkbox" checked={gcFields.includes(item.key)} disabled={busy} onChange={()=>changeGc(gcFields.includes(item.key)?gcFields.filter(k=>k!==item.key):[...gcFields,item.key])}/>
+                {item.label}
+              </label>)}
+            </div>
+            {gcFields.length>1&&<div className="gc-logic">
+              <span>선택 조건:</span>
+              <button type="button" className={gcLogic==='any'?'active':''} disabled={busy} onClick={()=>changeGc(gcFields,'any')}>하나라도 (OR)</button>
+              <button type="button" className={gcLogic==='all'?'active':''} disabled={busy} onClick={()=>changeGc(gcFields,'all')}>모두 (AND)</button>
+            </div>}
+            <p className="gc-filter-note">선택 즉시 D1 전체 검색 결과를 다시 조회합니다. 필터는 검색 날짜·BLUE 신호 조건에 추가 적용되며, 당일 실제 GC만 찾습니다.</p>
+          </div>
           {rows.length>0&&<label className="result-quick-search"><Search size={16}/><span className="sr-only">현재 페이지 종목명 또는 코드 찾기</span><input type="search" value={localQuery} onChange={e=>setLocalQuery(e.target.value)} placeholder="현재 페이지에서 종목명 · 코드 찾기" aria-label="현재 페이지에서 종목명 또는 코드 찾기"/></label>}
           <div className="desktop-results tablewrap"><table><thead><tr><th>날짜</th><th>종목명 / 코드</th><th>신호</th><th>종가</th><th>RSI / GC</th><th>Slow(14,3,3) / GC</th><th>MACD / GC</th><th>돌파선 후보</th><th>상단 매물대</th></tr></thead><tbody>
             {visibleRows.length?visibleRows.map((r,i)=><tr key={`${r.code}-${r.day}-${i}`} className="clickable" tabIndex={0} onClick={()=>openDetail(r)} onKeyDown={e=>{if(e.key==='Enter')openDetail(r);}}>
@@ -223,13 +269,13 @@ function App(){
               <td>{fmt(r,'rsi')} <small>{crossed(r,'rsi_gc')}</small></td><td>{fmt(r,'slow_14_3_3_k')} / {fmt(r,'slow_14_3_3_d')} <small>{crossed(r,'slow_14_3_3_gc')}</small></td>
               <td>{fmt(r,'macd_12_26_9')} <small>{crossed(r,'macd_gc')}</small></td><td>{present(r,'valid_line_candidates_json')?`${validLines(r).length}개`:'미계산'}</td>
               <td>{profile(r)} · {supplyGrade(r)}</td>
-            </tr>):<tr><td className="empty" colSpan={9}>날짜와 조건을 선택해 검색하세요.</td></tr>}</tbody></table></div>
+            </tr>):<tr><td className="empty" colSpan={9}>{total!==null?'조건에 맞는 종목이 없습니다.':'날짜와 조건을 선택해 검색하세요.'}</td></tr>}</tbody></table></div>
           <div className="mobile-results">
             {visibleRows.length?visibleRows.map((r,i)=><button key={`${r.code}-${r.day}-${i}`} className="stock-card" onClick={()=>openDetail(r)} aria-label={`${displayName(r)} 상세 분석 보기`}>
               <div className="stock-top"><div className="stock-identity"><strong>{displayName(r)}</strong><span>{r.code} <span className="stock-dot">·</span> {r.day}</span></div><div className="stock-price"><b>{money(r.close_price)}<small>원</small></b><span>종가</span></div><ChevronRight size={19} className="stock-chevron"/></div>
               <div className="stock-tags">{r.signals.slice(0,4).map(s=><span className="tag" key={s}>{showSignal(s)}</span>)}{r.signals.length>4&&<span className="tag tag-more">+{r.signals.length-4}</span>}</div>
               <div className="stock-quick"><div><small>RSI</small><strong>{fmt(r,'rsi',1)}</strong></div><div><small>Slow GC</small><strong className={flag(r,'slow_14_3_3_gc')?'positive':''}>{crossed(r,'slow_14_3_3_gc')}</strong></div><div><small>MACD GC</small><strong className={flag(r,'macd_gc')?'positive':''}>{crossed(r,'macd_gc')}</strong></div><div><small>상단 매물</small><strong>{supplyGrade(r)}</strong></div></div>
-            </button>):<div className="mobile-empty"><Search size={30}/><strong>{localQuery?'현재 페이지에서 일치하는 종목이 없습니다.':total===0?'해당 조건의 종목이 없습니다.':'검색 조건을 선택해 주세요.'}</strong><p>과거 거래일을 선택한 다음 검색 버튼을 누르세요.</p><button onClick={()=>nav('search')}>검색 조건 열기</button></div>}
+            </button>):<div className="mobile-empty"><Search size={30}/><strong>{localQuery?'현재 페이지에서 일치하는 종목이 없습니다.':total===0?'해당 조건의 종목이 없습니다.':'검색 조건을 선택해 주세요.'}</strong><p>{gcFields.length?'선택한 골든크로스 조건을 만족하는 종목이 없습니다.':'과거 거래일을 선택한 다음 검색 버튼을 누르세요.'}</p><button onClick={()=>nav('search')}>검색 조건 열기</button></div>}
           </div>
           {total!==null&&total>100&&<div className="pager"><button disabled={busy||page===1} onClick={()=>{void search(page-1,false);}}>이전</button><span>{page} / {Math.ceil(total/100)}</span><button disabled={busy||page>=Math.ceil(total/100)} onClick={()=>{void search(page+1,false);}}>다음</button></div>}
         </section>
