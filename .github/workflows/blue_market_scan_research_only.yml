@@ -1,21 +1,25 @@
-name: BLUE Signal Lab R0.5 - KRX Market Scan RESEARCH_ONLY
+name: BLUE Signal Lab R0.7.2 - KRX On-Demand Market Scan
 
 on:
   workflow_dispatch:
     inputs:
       asof_date:
-        description: 'YYYY-MM-DD exact day or latest (uses most recent available source date)'
+        description: 'YYYY-MM-DD past trading date or latest in marcap'
         required: true
         default: latest
         type: string
       publish_to_d1:
-        description: 'Publish to existing Cloudflare D1 (requires repository secrets)'
+        description: 'Publish verified result to D1 (requires Cloudflare repository secrets)'
         required: true
         default: false
         type: boolean
 
 permissions:
   contents: read
+
+concurrency:
+  group: blue-scan-${{ inputs.asof_date }}
+  cancel-in-progress: false
 
 jobs:
   research_scan:
@@ -25,7 +29,7 @@ jobs:
       run:
         shell: bash
     steps:
-      - name: Checkout standalone BLUE Signal Lab
+      - name: Checkout BLUE Signal Lab
         uses: actions/checkout@v4
       - name: Setup Python
         uses: actions/setup-python@v5
@@ -33,45 +37,58 @@ jobs:
           python-version: '3.11'
       - name: Install Python dependencies
         run: pip install pandas numpy pyarrow requests
-      - name: Test signal engine and point-in-time behavior
+      - name: Unit tests
         run: python -m unittest discover -s tests -v
-      - name: Scan KOSPI and KOSDAQ from marcap
+      - name: On-demand scan with official KRX fallback for unavailable marcap dates
+        env:
+          ASOF: ${{ inputs.asof_date }}
+          KRX_AUTH_KEY: ${{ secrets.KRX_AUTH_KEY }}
+        run: |
+          python scripts/market_scan_r072.py --date "$ASOF" --years 2025,2026 --out output
+      - name: Validate counts and provenance
         env:
           ASOF: ${{ inputs.asof_date }}
         run: |
-          python scripts/market_scan_r06.py --date "$ASOF" --years 2025,2026 --out output
-      - name: Validate signal count consistency
-        run: |
           python - <<'PY'
-          import json,csv
+          import json,csv,os
           from pathlib import Path
           root=Path('output')
-          a=json.loads((root/'AUDIT.json').read_text())
-          with (root/'signals.csv').open() as f: rows=list(csv.DictReader(f))
-          assert len(rows)==a['matched_stocks']
-          assert 0<=a['matched_stocks']<=a['eligible_stocks']<=a['observed_stocks']
-          assert a['source_sha256_by_year'].get('2026')
-          print('AUDIT OK',a['asof'],a['observed_stocks'],a['matched_stocks'])
+          audit=json.loads((root/'AUDIT.json').read_text())
+          with (root/'signals.csv').open(encoding='utf-8') as f: rows=list(csv.DictReader(f))
+          assert len(rows)==audit['matched_stocks']
+          assert 0<=audit['matched_stocks']<=audit['eligible_stocks']<=audit['observed_stocks']
+          assert audit['source_sha256_by_year'].get('2026')
+          assert os.getenv('ASOF')=='latest' or audit['asof']==os.getenv('ASOF')
+          assert audit['observed_stocks']>=1700, 'Incomplete market universe'
+          print('AUDIT OK',audit['asof'],audit['observed_stocks'],audit['matched_stocks'],audit.get('supplemental_dates'))
           PY
-      - name: Generate D1 import file (not executed unless explicitly approved)
+      - name: Generate D1 SQL and remove transaction statements
         run: |
           python scripts/csv_to_d1.py \
             --input-dir output \
             --out output/import.sql \
             --run-id "blue_market_$(python -c "import json;print(json.load(open('output/AUDIT.json'))['asof'].replace('-',''))")" \
-            --source 'FinanceData-marcap-KOSPI-KOSDAQ-R0.5-RESEARCH_ONLY'
-      - name: Upload audit, signals and D1 import SQL as artifact
+            --source 'FinanceData-marcap-plus-KRX-official-R0.7.2-RESEARCH_ONLY'
+          python - <<'PY'
+          from pathlib import Path
+          p=Path('output/import.sql')
+          lines=p.read_text(encoding='utf-8').splitlines()
+          lines=[x for x in lines if x.strip().upper() not in ('BEGIN TRANSACTION;','COMMIT;')]
+          p.write_text('\n'.join(lines)+'\n',encoding='utf-8')
+          print('D1 SQL prepared',p.stat().st_size)
+          PY
+      - name: Upload audit and D1 SQL as artifact
         uses: actions/upload-artifact@v4
         with:
-          name: BLUE_R05_MARKET_SCAN_RESEARCH_ONLY
+          name: BLUE_R072_MARKET_SCAN_RESEARCH_ONLY
           path: output/
           retention-days: 14
-      - name: Setup Node for optional publication
+      - name: Setup Node for D1 publish
         if: ${{ inputs.publish_to_d1 }}
         uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - name: Apply R0.5 results to Cloudflare D1 (explicit opt-in only)
+      - name: Publish verified date to Cloudflare D1
         if: ${{ inputs.publish_to_d1 }}
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
