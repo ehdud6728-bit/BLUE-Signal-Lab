@@ -20,6 +20,7 @@ import requests
 
 from market_scan import load_marcap, normalise, export
 from market_scan_r08_diagnostics import scan_r08
+from chart_research_r10 import generate as generate_chart_research
 
 KRX = 'https://data-dbg.krx.co.kr/svc/apis/sto/'
 COLS = ['Date', 'Code', 'Name', 'Open', 'High', 'Low', 'Close', 'Volume', 'Amount', 'Market']
@@ -169,6 +170,9 @@ def main():
             supplement[COLS].to_csv(index=False).encode('utf-8')).hexdigest()
     audit['source_policy']='MARCAP_BASELINE_PLUS_KRX_BACKFILL; KRX statistical data, no lookahead'
     export(rows,audit,args.out,hashes)
+    count=generate_chart_research(upgraded,rows,target.isoformat(),str(__import__("pathlib").Path(args.out)/"chart_snapshots.jsonl"))
+    print(f"R1.0 chart snapshots: {count} / {len(rows)}")
+    if count != len(rows): raise ValueError("Incomplete chart snapshots, refusing partial publish")
     print(json.dumps(audit,ensure_ascii=False,indent=2))
 
 if __name__=='__main__':
