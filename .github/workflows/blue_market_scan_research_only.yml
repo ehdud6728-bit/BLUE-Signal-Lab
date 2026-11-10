@@ -1,4 +1,4 @@
-name: BLUE Signal Lab R1.1 - Verified Same-Day EOD Research Scan
+name: BLUE Signal Lab R1.1.1 - KRX Alphanumeric Code EOD Hotfix
 
 on:
   workflow_dispatch:
@@ -45,9 +45,9 @@ jobs:
           python-version: '3.11'
       - name: Install Python dependencies
         run: pip install pandas numpy pyarrow requests 'pykrx==1.2.9'
-      - name: Unit tests (including EOD exact-date and no-lookahead tests)
+      - name: Unit tests (including KRX preferred-share and non-traded candles)
         run: python -m unittest discover -s tests -v
-      - name: On-demand verified EOD scan - same day requires exact KRX parity
+      - name: On-demand verified EOD scan - strict KRX ticker/date parity
         env:
           ASOF: ${{ inputs.asof_date }}
           KRX_AUTH_KEY: ${{ secrets.KRX_AUTH_KEY }}
