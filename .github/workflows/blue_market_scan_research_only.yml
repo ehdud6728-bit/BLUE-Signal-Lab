@@ -1,4 +1,4 @@
-name: BLUE Signal Lab R0.7.2 - KRX On-Demand Market Scan
+name: BLUE Signal Lab R0.8 - Technical Diagnostics EOD Scan
 
 on:
   workflow_dispatch:
@@ -44,7 +44,7 @@ jobs:
           ASOF: ${{ inputs.asof_date }}
           KRX_AUTH_KEY: ${{ secrets.KRX_AUTH_KEY }}
         run: |
-          python scripts/market_scan_r072.py --date "$ASOF" --years 2025,2026 --out output
+          python scripts/market_scan_r08.py --date "$ASOF" --years 2025,2026 --out output
       - name: Validate counts and provenance
         env:
           ASOF: ${{ inputs.asof_date }}
@@ -68,7 +68,7 @@ jobs:
             --input-dir output \
             --out output/import.sql \
             --run-id "blue_market_$(python -c "import json;print(json.load(open('output/AUDIT.json'))['asof'].replace('-',''))")" \
-            --source 'FinanceData-marcap-plus-KRX-official-R0.7.2-RESEARCH_ONLY'
+            --source 'FinanceData-marcap-plus-KRX-official-R0.8-EOD-RESEARCH_ONLY'
           python - <<'PY'
           from pathlib import Path
           p=Path('output/import.sql')
