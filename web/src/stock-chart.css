@@ -1,0 +1,12 @@
+.blue-chart-panel{margin:18px 0 12px;background:#fff;border:1px solid #dae5f3;border-radius:13px;padding:14px;min-width:0;overflow:hidden}
+.blue-chart-header{display:flex;justify-content:space-between;gap:8px;align-items:flex-start;margin-bottom:13px;flex-wrap:wrap}.blue-chart-header h3{margin:0;font-size:16px;color:#19385d}.blue-chart-header span{font-size:11px;color:#8490a1}
+.blue-chart-label{margin:12px 0 5px;font-size:11px;font-weight:800;color:#536582}
+.blue-chart-canvas{width:100%;min-width:0;position:relative;overflow:hidden}
+.blue-chart-info,.blue-chart-note,.blue-caution{font-size:11px;line-height:1.6;color:#73809a;margin:8px 0}.blue-chart-note{padding:10px;background:#f4f7fb;border-radius:8px}
+.blue-chart-error{font-size:12px;color:#ad3542;background:#fff2f2;border-radius:8px;padding:12px}
+.blue-evidence{margin-top:22px;padding-top:15px;border-top:1px solid #e2e9f3}.blue-evidence-head{display:flex;gap:8px;flex-wrap:wrap;justify-content:space-between;align-items:center}.blue-evidence h4{margin:0;font-size:15px;color:#244465}
+.blue-horizons{display:flex;gap:5px}.blue-horizons button{border:1px solid #cfdbef;border-radius:7px;padding:7px 10px;background:#fff;color:#34558d;font-size:11px}.blue-horizons button.selected{background:#205ddd;color:#fff;border-color:#205ddd;font-weight:800}
+.blue-evidence-tablewrap{overflow-x:auto}.blue-evidence-table{width:100%;border-collapse:collapse;white-space:normal;min-width:560px}.blue-evidence-table th,.blue-evidence-table td{padding:10px 7px;border-bottom:1px solid #edf0f7;vertical-align:top;white-space:nowrap;font-size:11px}.blue-evidence-table td:first-child{white-space:normal;min-width:165px}.blue-evidence-table td small{display:block;color:#8a98af;font-size:10px;line-height:1.35;margin-top:4px}.blue-evidence-table tr:hover{background:#f7faff}.blue-caution{background:#fff8ed;padding:11px;border-radius:8px;color:#875f2a}.blue-attribution{text-align:right;font-size:10px;margin-top:12px;color:#9aacc4}.blue-attribution a{color:#5e85c2}
+@media(max-width:790px){.blue-chart-panel{padding:11px;margin:14px -4px}.blue-chart-header h3{font-size:14px}}
+
+.blue-active-factors{display:flex;flex-wrap:wrap;gap:6px;margin:12px 0}.blue-active-factors span{border-radius:6px;padding:5px 8px;background:#eef4ff;color:#2858ad;font-size:11px;font-weight:650}.blue-evidence-table td strong{font-weight:700;line-height:1.5;white-space:normal}.blue-evidence-table td small{display:block;font-size:10px;color:#7e8ea5;margin-top:3px;white-space:normal}

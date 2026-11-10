@@ -1,3 +1,4 @@
+import StockChart from './StockChart';
 import AiWidget from './AiWidget';
 import React, {useEffect, useRef, useState} from 'react';
 import {createRoot} from 'react-dom/client';
@@ -178,7 +179,7 @@ function App(){
         <p className="sub">일봉 기준 · 종목 발굴 연구</p>
       </div></div>
       <div className="header-actions">
-        <span className="pill version-pill">R0.9 · BLUE AI</span>
+        <span className="pill version-pill">R1.0 · BLUE AI</span>
         {!standalone&&<button className="install-btn" onClick={()=>{void installApp();}} aria-label="앱 설치 방법"><Download size={17}/><span>앱 설치</span></button>}
       </div>
     </header>
@@ -248,6 +249,11 @@ function App(){
         <div className="detail-handle" aria-hidden="true"/><div className="detail-toolbar"><button onClick={closeDetail} className="detail-back"><ArrowLeft size={19}/> 뒤로</button><span className="detail-eod">일봉 · 연구용</span><button onClick={closeDetail} className="detail-x" aria-label="상세 닫기"><X size={21}/></button></div>
         <div className="detail-head"><div><small>{selected.code} · {selected.day}</small><h2>{displayName(selected)}</h2></div><div className="detail-close"><span>종가</span><strong>{money(selected.close_price)} <small>원</small></strong></div></div>
         <div className="study-tags">{selected.signals.map(s=><span key={s}>{showSignal(s)}</span>)}</div>
+        <StockChart key={'chart-'+selected.code+'-'+selected.day} code={selected.code}
+          day={selected.day} name={displayName(selected)}
+          supplyPrice={num(selected,'supply_reference_price')}
+          supplyGrade={supplyGrade(selected)}
+          lineCandidates={validLines(selected).map(l=>({signal:l.signal,price:l.price}))}/>
         <h3 className="detail-section-title"><Activity size={17}/> 보조지표</h3>
         <div className="info-grid indicator-grid">
           <div><strong>RSI (14) / Signal (9)</strong><p className="indicator-value">{fmt(selected,'rsi')} <small>/ {fmt(selected,'rsi_signal')}</small></p><p className={flag(selected,'rsi_gc')?'positive':''}>{crossed(selected,'rsi_gc')} · 최근 GC {lastCross(selected,'rsi_last_gc')}</p></div>
