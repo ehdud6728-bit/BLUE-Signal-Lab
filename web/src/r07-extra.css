@@ -1,0 +1,6 @@
+/* Optional R0.7 styles. Append to your existing web/src/style.css. */
+.scan-box { margin-top: 18px; border: 1px solid #cbdcf5; border-radius: 12px; background: #f5f8ff; padding: 14px; }
+.scan-box h2 { margin: 0 0 7px; font-size: 13px; }
+.scan-box input[type=password] { width:100%;border:1px solid #d8e0ed;border-radius:8px;padding:10px;background:white; }
+.scan-box .primary { margin-top: 10px; }
+.notice a { color: #1c4cad; font-weight: 700; }
