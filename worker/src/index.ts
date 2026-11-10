@@ -1,52 +1,255 @@
-interface Env { DB: D1Database; CORS_ORIGIN?: string }
-const json=(data:unknown,status=200,headers?:HeadersInit)=>new Response(JSON.stringify(data),{status,headers:{'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store',...headers}});
-const dateRE=/^\d{4}-\d{2}-\d{2}$/;
-function validDate(s:string):boolean {if(!dateRE.test(s))return false;const d=new Date(s+'T00:00:00Z');return !Number.isNaN(d.valueOf())&&d.toISOString().slice(0,10)===s}
-const allowed=new Set(['BB20','BB30','BB40','ENV20','ENV40','BB20_LOWER','BB30_LOWER','BB40_LOWER','BB20_ALT','BB30_ALT','BB40_ALT','BB20_LOWER_ALT','BB30_LOWER_ALT','BB40_LOWER_ALT']);
-const signalsOf=(s:string|null)=>(s||'').split(',').map(x=>x.trim().toUpperCase()).filter(Boolean).map(x=>x.startsWith('BLUE')?x.replace(/^BLUE/,'BB'):x);
-export default {async fetch(request:Request,env:Env):Promise<Response>{
- const cors:HeadersInit={'Access-Control-Allow-Origin':env.CORS_ORIGIN||'http://localhost:5173','Access-Control-Allow-Methods':'GET,OPTIONS','Access-Control-Allow-Headers':'Content-Type'};
- if(request.method==='OPTIONS')return new Response(null,{status:204,headers:cors});
- const respond=(x:unknown,status=200)=>json(x,status,cors);
- try {
-  if(request.method!=='GET')return respond({error:'Read-only API'},405);
-  const u=new URL(request.url),p=u.pathname;
-  if(p==='/api/health')return respond({status:'ok',mode:'RESEARCH_ONLY',storage:'D1',api_version:'R0.6'});
-  if(p==='/api/runs') {const r=await env.DB.prepare('SELECT run_id,created_at,source,latest_price_date,notes,is_demo FROM runs ORDER BY created_at DESC LIMIT 50').all();return respond({items:r.results})}
-  if(p==='/api/dates') {
-   const r=await env.DB.prepare("SELECT latest_price_date AS day,COUNT(*) AS versions FROM runs WHERE latest_price_date IS NOT NULL AND is_demo=0 GROUP BY latest_price_date ORDER BY latest_price_date DESC LIMIT 500").all();
-   return respond({items:r.results,latest:r.results[0]?.day||null});
-  }
-  if(p==='/api/search') {
-   const mode=u.searchParams.get('mode')||'single';if(mode!=='single'&&mode!=='range')return respond({error:'Invalid mode'},400);
-   const start=mode==='single'?(u.searchParams.get('date')||''):(u.searchParams.get('start')||'');
-   const end=mode==='single'?start:(u.searchParams.get('end')||'');
-   if(!validDate(start)||!validDate(end)||start>end)return respond({error:'Valid date interval required'},400);
-   const requested=u.searchParams.get('run_id')||'';
-   // For each trading day, choose one non-demo run automatically. This keeps old run_id requests compatible.
-   // Importing a newer run supersedes older versions for exactly that date only.
-   const runFilter=requested?'run_id=?':'run_id IN (SELECT r.run_id FROM runs r WHERE r.is_demo=0 AND r.latest_price_date=signals.day ORDER BY r.created_at DESC,r.run_id DESC LIMIT 1)';
-   const params:(string|number)[]=requested?[requested,start,end]:[start,end];
-   const filters=[runFilter,'day BETWEEN ? AND ?'];
-   const code=(u.searchParams.get('code')||'').trim();if(code){if(!/^[A-Za-z0-9._-]{1,24}$/.test(code))return respond({error:'Invalid code'},400);filters.push('code=?');params.push(code)}
-   const chosen=signalsOf(u.searchParams.get('signals'));
-   if(chosen.some(x=>!allowed.has(x)))return respond({error:'Unsupported signal'},400);
-   const logic=u.searchParams.get('logic')||'any';if(!['any','all'].includes(logic))return respond({error:'Invalid signal logic'},400);
-   if(chosen.length){filters.push('('+chosen.map(()=>"(','||signal_names||',') LIKE ?").join(logic==='all'?' AND ':' OR ')+')');params.push(...chosen.map(x=>'%,'+x+',%'))}
-   const where=filters.join(' AND ');
-   const limit=Math.min(500,Math.max(1,Number(u.searchParams.get('limit'))||100));const page=Math.max(1,Number(u.searchParams.get('page'))||1);
-   const total=await env.DB.prepare('SELECT COUNT(*) AS n FROM signals WHERE '+where).bind(...params).first<{n:number}>();
-   const rows=await env.DB.prepare('SELECT run_id,code,day,signal_names,close_price,supply_distance_pct,extras_json FROM signals WHERE '+where+' ORDER BY day DESC,code LIMIT ? OFFSET ?').bind(...params,limit,(page-1)*limit).all();
-   const countFilter=requested?'run_id=?':'run_id IN (SELECT r.run_id FROM runs r WHERE r.is_demo=0 AND r.latest_price_date=daily_counts.day ORDER BY r.created_at DESC,r.run_id DESC LIMIT 1)';
-   const days=await env.DB.prepare('SELECT day,observed_stocks,signal_events,matched_stocks FROM daily_counts WHERE '+countFilter+' AND day BETWEEN ? AND ? ORDER BY day DESC LIMIT 370').bind(...(requested?[requested,start,end]:[start,end])).all();
-   const parsed=rows.results.map((x:any)=>{let extras:Record<string,unknown>={};try{extras=JSON.parse(x.extras_json||'{}')}catch{}return {...x,name:extras.name||extras.Name||null,signals:String(x.signal_names||'').split(',').filter(Boolean),extras}});
-   return respond({mode,start,end,total:total?.n||0,page,limit,items:parsed,daily_counts:days.results,data_status:days.results.length?'AVAILABLE':'NOT_IMPORTED',note:'Missing data is not a zero-signal trading day; unverified estimates are labeled.'});
-  }
-  if(p==='/api/symbol') {
-   const code=u.searchParams.get('code')||'';if(!/^[A-Za-z0-9._-]{1,24}$/.test(code))return respond({error:'Invalid code'},400);
-   const run=u.searchParams.get('run_id');const rows=run?await env.DB.prepare('SELECT day,signal_names,close_price,supply_distance_pct,extras_json FROM signals WHERE run_id=? AND code=? ORDER BY day DESC LIMIT 3000').bind(run,code).all():await env.DB.prepare("SELECT day,signal_names,close_price,supply_distance_pct,extras_json FROM signals WHERE code=? AND run_id IN (SELECT r.run_id FROM runs r WHERE r.is_demo=0 AND r.latest_price_date=signals.day ORDER BY r.created_at DESC,r.run_id DESC LIMIT 1) ORDER BY day DESC LIMIT 3000").bind(code).all();
-   return respond({code,signals:rows.results,price_data_available:false});
-  }
-  return respond({error:'Not found'},404);
- }catch(e){return respond({error:'Query failed',detail:e instanceof Error?e.message:'unknown'},500)}
-}} satisfies ExportedHandler<Env>;
+interface Env {
+  DB: D1Database;
+  CORS_ORIGIN?: string;
+  SCAN_ADMIN_KEY?: string;
+  GITHUB_TOKEN?: string;
+}
+
+const OWNER = 'ehdud6728-bit';
+const REPO = 'BLUE-Signal-Lab';
+const WORKFLOW = 'blue_market_scan_research_only.yml';
+const ALLOWED = new Set([
+  'BB20','BB30','BB40','ENV20','ENV40',
+  'BB20_LOWER','BB30_LOWER','BB40_LOWER',
+  'BB20_ALT','BB30_ALT','BB40_ALT',
+  'BB20_LOWER_ALT','BB30_LOWER_ALT','BB40_LOWER_ALT',
+]);
+const isoPattern = /^\d{4}-\d{2}-\d{2}$/;
+const inFlightMs = 45 * 60 * 1000;
+
+function validDate(s: string): boolean {
+  if (!isoPattern.test(s)) return false;
+  const dt = new Date(s + 'T00:00:00Z');
+  return !Number.isNaN(dt.valueOf()) && dt.toISOString().slice(0, 10) === s;
+}
+function todayKST(): string {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Seoul', year: 'numeric', month: '2-digit', day: '2-digit'
+  }).format(new Date());
+}
+function safeEqual(a: string, b: string): boolean {
+  if (!b || b.length < 24 || a.length !== b.length) return false;
+  let diff = 0;
+  for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  return diff === 0;
+}
+function normalizedSignals(s: string | null): string[] {
+  return (s || '').split(',').map(x => x.trim().toUpperCase())
+    .filter(Boolean).map(x => x.startsWith('BLUE') ? x.replace(/^BLUE/, 'BB') : x);
+}
+function githubHeaders(env: Env): HeadersInit {
+  return {
+    'Accept': 'application/vnd.github+json',
+    'Authorization': `Bearer ${env.GITHUB_TOKEN}`,
+    'X-GitHub-Api-Version': '2022-11-28',
+    'User-Agent': 'BLUE-Signal-Lab-R07',
+  };
+}
+function availableSQL(): string {
+  return `SELECT 1 AS found FROM daily_counts d JOIN runs r ON d.run_id=r.run_id
+    WHERE d.day=? AND r.latest_price_date=d.day AND r.is_demo=0 LIMIT 1`;
+}
+function scanDateOK(day: string): boolean {
+  // This workflow currently imports FinanceData marcap 2025 and 2026 only.
+  return validDate(day) && day >= '2025-01-01' && day <= '2026-12-31' && day <= todayKST();
+}
+
+export default {
+  async fetch(request: Request, env: Env): Promise<Response> {
+    const origin = env.CORS_ORIGIN || 'http://localhost:5173';
+    const cors: HeadersInit = {
+      'Access-Control-Allow-Origin': origin,
+      'Access-Control-Allow-Methods': 'GET,POST,OPTIONS',
+      'Access-Control-Allow-Headers': 'Content-Type,X-Scan-Key',
+      'Vary': 'Origin',
+    };
+    const respond = (data: unknown, status = 200) => new Response(JSON.stringify(data), {
+      status, headers: { ...cors, 'Content-Type': 'application/json; charset=utf-8',
+        'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' }
+    });
+    if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: cors });
+
+    const u = new URL(request.url), p = u.pathname;
+    try {
+      if (p === '/api/health' && request.method === 'GET') {
+        return respond({ status:'ok', mode:'RESEARCH_ONLY', storage:'D1', api_version:'R0.7' });
+      }
+      if (p === '/api/runs' && request.method === 'GET') {
+        const r = await env.DB.prepare('SELECT run_id,created_at,source,latest_price_date,notes,is_demo FROM runs ORDER BY created_at DESC LIMIT 50').all();
+        return respond({ items: r.results });
+      }
+      if (p === '/api/dates' && request.method === 'GET') {
+        const r = await env.DB.prepare(`SELECT latest_price_date AS day,COUNT(*) AS versions FROM runs
+          WHERE latest_price_date IS NOT NULL AND is_demo=0
+          GROUP BY latest_price_date ORDER BY latest_price_date DESC LIMIT 500`).all();
+        return respond({ items:r.results, latest:(r.results[0] as { day?: string } | undefined)?.day || null });
+      }
+      if (p === '/api/search' && request.method === 'GET') {
+        const mode = u.searchParams.get('mode') || 'single';
+        if (mode !== 'single' && mode !== 'range') return respond({ error:'Invalid mode' },400);
+        const start = mode === 'single' ? u.searchParams.get('date') || '' : u.searchParams.get('start') || '';
+        const end = mode === 'single' ? start : u.searchParams.get('end') || '';
+        if (!validDate(start) || !validDate(end) || start > end) return respond({ error:'Valid date interval required' },400);
+        const runId = u.searchParams.get('run_id') || '';
+        const runFilter = runId ? 'run_id=?' : `run_id IN (
+          SELECT r.run_id FROM runs r WHERE r.is_demo=0 AND r.latest_price_date=signals.day
+          ORDER BY r.created_at DESC,r.run_id DESC LIMIT 1)`;
+        const args: (string | number)[] = runId ? [runId,start,end] : [start,end];
+        const filters = [runFilter, 'day BETWEEN ? AND ?'];
+        const code = (u.searchParams.get('code') || '').trim();
+        if (code) {
+          if (!/^[A-Za-z0-9._-]{1,24}$/.test(code)) return respond({error:'Invalid code'},400);
+          filters.push('code=?'); args.push(code);
+        }
+        const tags = normalizedSignals(u.searchParams.get('signals'));
+        if (tags.some(tag => !ALLOWED.has(tag))) return respond({error:'Unsupported signal'},400);
+        const logic = u.searchParams.get('logic') || 'any';
+        if (!['any','all'].includes(logic)) return respond({error:'Invalid signal logic'},400);
+        if (tags.length) {
+          filters.push('(' + tags.map(() => "(','||signal_names||',') LIKE ?").join(logic === 'all' ? ' AND ' : ' OR ') + ')');
+          args.push(...tags.map(tag => '%,' + tag + ',%'));
+        }
+        const where = filters.join(' AND ');
+        const limit = Math.min(500, Math.max(1, Math.floor(Number(u.searchParams.get('limit')) || 100)));
+        const page = Math.min(10000, Math.max(1, Math.floor(Number(u.searchParams.get('page')) || 1)));
+        const total = await env.DB.prepare('SELECT COUNT(*) AS n FROM signals WHERE ' + where)
+          .bind(...args).first<{ n:number }>();
+        const rows = await env.DB.prepare(`SELECT run_id,code,day,signal_names,close_price,supply_distance_pct,extras_json
+          FROM signals WHERE ${where} ORDER BY day DESC,code LIMIT ? OFFSET ?`)
+          .bind(...args,limit,(page-1)*limit).all();
+        const countFilter = runId ? 'run_id=?' : `run_id IN (
+          SELECT r.run_id FROM runs r WHERE r.is_demo=0 AND r.latest_price_date=daily_counts.day
+          ORDER BY r.created_at DESC,r.run_id DESC LIMIT 1)`;
+        const counts = await env.DB.prepare(`SELECT day,observed_stocks,signal_events,matched_stocks
+          FROM daily_counts WHERE ${countFilter} AND day BETWEEN ? AND ? ORDER BY day DESC LIMIT 370`)
+          .bind(...(runId ? [runId,start,end] : [start,end])).all();
+        const items = rows.results.map((x:any) => {
+          let extras: Record<string,unknown> = {};
+          try { extras = JSON.parse(x.extras_json || '{}'); } catch { /* legacy record */ }
+          return { ...x, name:extras.name || extras.Name || null,
+            signals:String(x.signal_names || '').split(',').filter(Boolean), extras };
+        });
+        return respond({mode,start,end,total:total?.n || 0,page,limit,items,
+          daily_counts:counts.results,data_status:counts.results.length ? 'AVAILABLE' : 'NOT_IMPORTED',
+          note:'Missing source days are never silently replaced by another trading day.'});
+      }
+      if (p === '/api/symbol' && request.method === 'GET') {
+        const code = u.searchParams.get('code') || '', runId = u.searchParams.get('run_id');
+        if (!/^[A-Za-z0-9._-]{1,24}$/.test(code)) return respond({error:'Invalid code'},400);
+        const rows = runId
+          ? await env.DB.prepare('SELECT day,signal_names,close_price,supply_distance_pct,extras_json FROM signals WHERE run_id=? AND code=? ORDER BY day DESC LIMIT 3000').bind(runId,code).all()
+          : await env.DB.prepare(`SELECT day,signal_names,close_price,supply_distance_pct,extras_json FROM signals
+            WHERE code=? AND run_id IN (SELECT r.run_id FROM runs r WHERE r.is_demo=0
+            AND r.latest_price_date=signals.day ORDER BY r.created_at DESC,r.run_id DESC LIMIT 1)
+            ORDER BY day DESC LIMIT 3000`).bind(code).all();
+        return respond({code,signals:rows.results,price_data_available:false});
+      }
+      if (p === '/api/scan/status' && request.method === 'GET') {
+        // Keep GitHub status polling private to avoid exhausting the API token rate limit.
+        if (!env.SCAN_ADMIN_KEY || !safeEqual(request.headers.get('X-Scan-Key') || '',env.SCAN_ADMIN_KEY))
+          return respond({error:'Admin key required for scan status'},401);
+        const day = u.searchParams.get('date') || '';
+        if (!validDate(day)) return respond({error:'Invalid date'},400);
+        if (await env.DB.prepare(availableSQL()).bind(day).first()) return respond({date:day,status:'READY'});
+        const row = await env.DB.prepare(`SELECT status,requested_at,github_run_id,github_run_url,failure_reason
+          FROM scan_requests WHERE day=?`).bind(day).first<{
+            status:string; requested_at:string; github_run_id:number | null;
+            github_run_url:string | null; failure_reason:string | null;
+          }>();
+        if (!row) return respond({date:day,status:'NOT_IMPORTED'});
+        if (row.status === 'failed') return respond({date:day,status:'FAILED',reason:row.failure_reason || '분석 실패',actions_url:row.github_run_url});
+        const age = Date.now() - Date.parse(row.requested_at);
+        if (age > inFlightMs) {
+          await env.DB.prepare(`UPDATE scan_requests SET status='failed',failure_reason='45분 내 등록 결과 없음',updated_at=? WHERE day=? AND status='pending'`)
+            .bind(new Date().toISOString(),day).run();
+          return respond({date:day,status:'FAILED',reason:'45분 내 D1 등록 결과가 확인되지 않았습니다.',actions_url:row.github_run_url});
+        }
+        // When GitHub returned a run ID, detect an Actions failure before the 45-minute expiry.
+        if (row.github_run_id && env.GITHUB_TOKEN) {
+          try {
+            const gh = await fetch(`https://api.github.com/repos/${OWNER}/${REPO}/actions/runs/${row.github_run_id}`, {
+              headers:githubHeaders(env)
+            });
+            if (gh.ok) {
+              const job = await gh.json() as {status?:string;conclusion?:string;updated_at?:string};
+              if (job.status === 'completed' && job.conclusion !== 'success') {
+                const reason = 'GitHub Actions ' + (job.conclusion || '실패');
+                await env.DB.prepare('UPDATE scan_requests SET status=?,failure_reason=?,updated_at=? WHERE day=?')
+                  .bind('failed',reason,new Date().toISOString(),day).run();
+                return respond({date:day,status:'FAILED',reason,actions_url:row.github_run_url});
+              }
+              if (job.status === 'completed' && job.conclusion === 'success'
+                && job.updated_at && Date.now() - Date.parse(job.updated_at) > 120_000) {
+                await env.DB.prepare('UPDATE scan_requests SET status=?,failure_reason=?,updated_at=? WHERE day=?')
+                  .bind('failed','Actions는 완료됐으나 해당 날짜의 D1 데이터가 없습니다.',new Date().toISOString(),day).run();
+                return respond({date:day,status:'FAILED',reason:'Actions 완료 후 D1 등록 데이터가 없습니다.',actions_url:row.github_run_url});
+              }
+            }
+          } catch { /* GitHub status lookup is best-effort; never fabricate success. */ }
+        }
+        return respond({date:day,status:'PENDING',actions_url:row.github_run_url});
+      }
+      if (p === '/api/scan' && request.method === 'POST') {
+        if (request.headers.get('Origin') !== origin) return respond({error:'Origin not allowed'},403);
+        if (!env.SCAN_ADMIN_KEY || !env.GITHUB_TOKEN)
+          return respond({error:'Server scan secrets are not configured'},503);
+        if (!safeEqual(request.headers.get('X-Scan-Key') || '',env.SCAN_ADMIN_KEY))
+          return respond({error:'Admin key mismatch'},401);
+        let body: {date?:unknown};
+        try { body = await request.json() as {date?:unknown}; }
+        catch { return respond({error:'JSON body expected'},400); }
+        const day = body.date;
+        if (typeof day !== 'string' || !scanDateOK(day)) {
+          return respond({error:'Date invalid, future, or outside 2025–2026 data source'},400);
+        }
+        if (await env.DB.prepare(availableSQL()).bind(day).first()) return respond({date:day,status:'READY'});
+        const cutoff = new Date(Date.now() - inFlightMs).toISOString();
+        const live = await env.DB.prepare(`SELECT COUNT(*) AS n FROM scan_requests
+          WHERE status='pending' AND requested_at>=?`).bind(cutoff).first<{n:number}>();
+        if ((live?.n || 0) >= 3) return respond({error:'동시 진행 분석 3건 제한. 완료 후 다시 요청하세요.'},429);
+        const now = new Date().toISOString();
+        const claim = await env.DB.prepare(`INSERT INTO scan_requests(day,status,requested_at,updated_at)
+          VALUES(?,'pending',?,?)
+          ON CONFLICT(day) DO UPDATE SET status='pending',requested_at=excluded.requested_at,
+            updated_at=excluded.updated_at,github_run_id=NULL,github_run_url=NULL,failure_reason=NULL
+          WHERE scan_requests.status='failed' OR scan_requests.requested_at<?`)
+          .bind(day,now,now,cutoff).run();
+        if (!claim.meta.changes) return respond({date:day,status:'PENDING',deduplicated:true},202);
+        let gh: Response;
+        try {
+          gh = await fetch(`https://api.github.com/repos/${OWNER}/${REPO}/actions/workflows/${WORKFLOW}/dispatches`, {
+            method:'POST',
+            headers:{...githubHeaders(env),'Content-Type':'application/json'},
+            body:JSON.stringify({ref:'main',inputs:{asof_date:day,publish_to_d1:'true'},return_run_details:true}),
+          });
+        } catch {
+          await env.DB.prepare('UPDATE scan_requests SET status=?,failure_reason=?,updated_at=? WHERE day=?')
+            .bind('failed','GitHub 연결 실패',new Date().toISOString(),day).run();
+          return respond({error:'GitHub dispatch network error'},502);
+        }
+        if (!gh.ok) {
+          await env.DB.prepare('UPDATE scan_requests SET status=?,failure_reason=?,updated_at=? WHERE day=?')
+            .bind('failed','GitHub dispatch HTTP '+gh.status,new Date().toISOString(),day).run();
+          return respond({error:'GitHub dispatch failed',github_status:gh.status},502);
+        }
+        let workflowRunId: number | null = null;
+        let workflowRunUrl: string | null = null;
+        if (gh.status === 200) {
+          try {
+            const ghData = await gh.json() as {workflow_run_id?:number;html_url?:string};
+            workflowRunId = ghData.workflow_run_id || null;
+            workflowRunUrl = ghData.html_url || null;
+          } catch { /* 204/empty response is also a valid dispatch */ }
+        }
+        await env.DB.prepare('UPDATE scan_requests SET github_run_id=?,github_run_url=?,updated_at=? WHERE day=?')
+          .bind(workflowRunId,workflowRunUrl,new Date().toISOString(),day).run();
+        return respond({date:day,status:'PENDING',actions_url:workflowRunUrl},202);
+      }
+      return respond({error:'Not found'},404);
+    } catch (err) {
+      // Never print credentials or user-supplied headers to the response.
+      return respond({error:'Request failed; confirm D1 R0.7 migration and Worker deployment',
+        category:err instanceof Error ? err.name : 'Unknown'},500);
+    }
+  },
+} satisfies ExportedHandler<Env>;
