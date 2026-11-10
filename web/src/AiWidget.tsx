@@ -86,8 +86,8 @@ export default function AiWidget(props:Props){
       '복사를 허용하지 않은 브라우저입니다. 주소를 다시 열거나 복사 권한을 허용해 주세요.'));
   }
   return <section className={'ai-panel '+(kind==='stock'?'ai-stock':'ai-market')}>
-    <div className="ai-heading"><div className="ai-title"><Bot size={19}/><div><strong>{kind==='market'?'BLUE AI · 시황 브리핑':'BLUE AI · 종목 분석'}</strong><small>{date} 종가 기준 · Gemini 무료 API (설정 필요)</small></div></div><span className="ai-mode">RESEARCH</span></div>
-    <p className="ai-description">{kind==='market'?'검색기 통계와 출처가 확인된 뉴스를 연결해 시장 상황을 설명합니다.':'현재 저장된 기술지표, BLUE 신호, 매물대 추정값과 확인된 관련 뉴스를 함께 살펴봅니다.'}</p>
+    <div className="ai-heading"><div className="ai-title"><Bot size={19}/><div><strong>{kind==='market'?'BLUE AI · 시황 브리핑':'BLUE AI · 종목 분석'}</strong><small>{date} 종가 기준 · Gemini 3.5 무료 텍스트 분석</small></div></div><span className="ai-mode">RESEARCH</span></div>
+    <p className="ai-description">{kind==='market'?'BLUE가 저장한 종목·기술 신호로 시장의 기술적 분위기를 설명합니다. 실제 지수·뉴스·수급은 미수집입니다.':'저장된 기술지표, BLUE 신호, 돌파선 후보와 매물대 추정값을 해석합니다. 외부 뉴스는 조회하지 않습니다.'}</p>
     <button className="ai-primary" type="button" disabled={busy||!valid||report?.status==='PENDING'} onClick={()=>{void generate();}}>
       {busy?<LoaderCircle size={16} className="ai-spin"/>:<Newspaper size={16}/>}{busy?'Gemini 분석 중…':report?.status==='READY'?'저장된 분석 확인':kind==='market'?'Gemini 시황 분석':'Gemini 종목 분석'}
     </button>
@@ -98,13 +98,13 @@ export default function AiWidget(props:Props){
       <div className="ai-report-body">{report.report}</div>
       {(report.sources||[]).length>0?<div className="ai-sources"><strong>AI가 검색한 참고 출처 (원문·날짜 재확인)</strong>
         {(report.sources||[]).map((s,i)=><a key={i} href={s.url} rel="noopener noreferrer" target="_blank">{s.title} <ExternalLink size={12}/></a>)}
-      </div>:<p className="ai-warning">Google 검색 참고 출처가 확인되지 않았습니다. 뉴스·시황 관련 사실은 독립적으로 검증해 주세요.</p>}
+      </div>:<p className="ai-warning">무료 텍스트 분석은 외부 뉴스·공시 검색을 사용하지 않습니다. 뉴스·수급·지수는 별도로 확인해 주세요.</p>}
     </div>}
     <div className="ai-alternatives"><span>직접 질문하기 (자료 복사 후 새 탭에서 붙여넣기)</span>
       <div><button type="button" onClick={()=>openExternal('gemini')}><ClipboardCopy size={15}/> Gemini에 질문 <ExternalLink size={12}/></button>
         <button type="button" onClick={()=>openExternal('chatgpt')}><ClipboardCopy size={15}/> ChatGPT에 질문 <ExternalLink size={12}/></button></div>
       {manualNotice&&<p className="ai-note" role="status">{manualNotice}</p>}
     </div>
-    <p className="ai-foot">AI 분석은 현재가가 아니며, 원본 뉴스의 내용·공시일·가격 데이터의 시점을 반드시 확인하세요. 무료 API 사용량 및 데이터 처리 조건이 적용됩니다.</p>
+    <p className="ai-foot">AI 분석은 일봉 연구 데이터의 해석이며 현재가나 실시간 시황이 아닙니다. 뉴스·공시·수급은 미연동이며 무료 API 사용량과 데이터 처리 조건이 적용됩니다.</p>
   </section>;
 }
