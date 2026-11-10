@@ -1,7 +1,6 @@
 interface Env {
   DB: D1Database;
   CORS_ORIGIN?: string;
-  SCAN_ADMIN_KEY?: string;
   GITHUB_TOKEN?: string;
 }
 
@@ -27,12 +26,6 @@ function todayKST(): string {
     timeZone: 'Asia/Seoul', year: 'numeric', month: '2-digit', day: '2-digit'
   }).format(new Date());
 }
-function safeEqual(a: string, b: string): boolean {
-  if (!b || b.length < 24 || a.length !== b.length) return false;
-  let diff = 0;
-  for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
-  return diff === 0;
-}
 function normalizedSignals(s: string | null): string[] {
   return (s || '').split(',').map(x => x.trim().toUpperCase())
     .filter(Boolean).map(x => x.startsWith('BLUE') ? x.replace(/^BLUE/, 'BB') : x);
@@ -55,12 +48,13 @@ function scanDateOK(day: string): boolean {
 }
 
 export default {
-  async fetch(request: Request, env: Env): Promise<Response> {
+  async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const origin = env.CORS_ORIGIN || 'http://localhost:5173';
     const cors: HeadersInit = {
       'Access-Control-Allow-Origin': origin,
       'Access-Control-Allow-Methods': 'GET,POST,OPTIONS',
-      'Access-Control-Allow-Headers': 'Content-Type,X-Scan-Key',
+      'Access-Control-Allow-Headers': 'Content-Type',
+      'Access-Control-Allow-Credentials': 'true',
       'Vary': 'Origin',
     };
     const respond = (data: unknown, status = 200) => new Response(JSON.stringify(data), {
@@ -70,6 +64,9 @@ export default {
     if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: cors });
 
     const u = new URL(request.url), p = u.pathname;
+    // ctx.access is provided only when Cloudflare Access has authenticated this Worker request.
+    // An Origin header alone never grants permission to dispatch a GitHub workflow.
+    const access = (ctx as ExecutionContext & { access?: unknown } | undefined)?.access;
     try {
       if (p === '/api/health' && request.method === 'GET') {
         return respond({ status:'ok', mode:'RESEARCH_ONLY', storage:'D1', api_version:'R0.7' });
@@ -146,8 +143,7 @@ export default {
       }
       if (p === '/api/scan/status' && request.method === 'GET') {
         // Keep GitHub status polling private to avoid exhausting the API token rate limit.
-        if (!env.SCAN_ADMIN_KEY || !safeEqual(request.headers.get('X-Scan-Key') || '',env.SCAN_ADMIN_KEY))
-          return respond({error:'Admin key required for scan status'},401);
+        if (!access) return respond({error:'Cloudflare Access login required'},401);
         const day = u.searchParams.get('date') || '';
         if (!validDate(day)) return respond({error:'Invalid date'},400);
         if (await env.DB.prepare(availableSQL()).bind(day).first()) return respond({date:day,status:'READY'});
@@ -191,10 +187,8 @@ export default {
       }
       if (p === '/api/scan' && request.method === 'POST') {
         if (request.headers.get('Origin') !== origin) return respond({error:'Origin not allowed'},403);
-        if (!env.SCAN_ADMIN_KEY || !env.GITHUB_TOKEN)
-          return respond({error:'Server scan secrets are not configured'},503);
-        if (!safeEqual(request.headers.get('X-Scan-Key') || '',env.SCAN_ADMIN_KEY))
-          return respond({error:'Admin key mismatch'},401);
+        if (!access) return respond({error:'Cloudflare Access login required'},401);
+        if (!env.GITHUB_TOKEN) return respond({error:'GitHub token is not configured'},503);
         let body: {date?:unknown};
         try { body = await request.json() as {date?:unknown}; }
         catch { return respond({error:'JSON body expected'},400); }
