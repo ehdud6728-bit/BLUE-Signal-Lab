@@ -1,9 +1,11 @@
+import AiWidget from './AiWidget';
 import React, {useEffect, useRef, useState} from 'react';
 import {createRoot} from 'react-dom/client';
 import {Search, CalendarDays, BarChart3, AlertCircle, RefreshCw, SlidersHorizontal, ListFilter, X, ChevronRight, Download, ArrowLeft, Activity, Clock3, Database, CheckCircle2} from 'lucide-react';
 import './style.css';
 import './r08.css';
 import './mobile-pwa.css';
+import './ai.css';
 
 // Keep the existing production API and Cloudflare Access cookies.
 const API = (import.meta.env.VITE_API_BASE || 'https://blue-signal-lab-api-v2.ehdud6728.workers.dev').replace(/\/+$/, '');
@@ -46,6 +48,7 @@ function App(){
   const resultRef=useRef<HTMLElement>(null);
   const formRef=useRef<HTMLElement>(null);
   const summaryRef=useRef<HTMLDivElement>(null);
+  const aiRef=useRef<HTMLDivElement>(null);
   const searchVersion=useRef(0);
 
   useEffect(()=>{
@@ -153,10 +156,11 @@ function App(){
   const visibleRows=rows.filter(r=>(displayName(r)+' '+r.code).toLocaleLowerCase().includes(localQuery.trim().toLocaleLowerCase()));
   const profile=(r:Signal)=>r.supply_distance_pct==null?'미계산':r.supply_distance_pct.toFixed(2)+'%';
   const flip=(t:string)=>setSignals(a=>a.includes(t)?a.filter(s=>s!==t):[...a,t]);
-  const nav=(target:'search'|'results'|'summary')=>{
+  const nav=(target:'search'|'results'|'summary'|'ai')=>{
     if(target==='search'){setFilterOpen(true);setTimeout(()=>formRef.current?.scrollIntoView({behavior:'smooth',block:'start'}),20);}
     if(target==='results')resultRef.current?.scrollIntoView({behavior:'smooth',block:'start'});
     if(target==='summary')summaryRef.current?.scrollIntoView({behavior:'smooth',block:'start'});
+    if(target==='ai')aiRef.current?.scrollIntoView({behavior:'smooth',block:'start'});
   };
   const openDetail=(r:Signal)=>setSelected(r);
   const closeDetail=()=>setSelected(null);
@@ -168,13 +172,13 @@ function App(){
 
   return <div className="shell app-shell">
     <header className="app-header">
-      <div className="brand-lockup"><div className="brand-symbol" aria-hidden="true">B</div><div>
+      <div className="brand-lockup"><img className="brand-symbol brand-logo-image" src="/icons/icon-192.png" alt="BLUE Signal Lab 앱 아이콘"/><div>
         <p className="eyebrow">KOSPI · KOSDAQ / RESEARCH ONLY</p>
         <h1>BLUE <span>Signal Lab</span></h1>
         <p className="sub">일봉 기준 · 종목 발굴 연구</p>
       </div></div>
       <div className="header-actions">
-        <span className="pill version-pill">R0.8.1 · MOBILE</span>
+        <span className="pill version-pill">R0.9 · BLUE AI</span>
         {!standalone&&<button className="install-btn" onClick={()=>{void installApp();}} aria-label="앱 설치 방법"><Download size={17}/><span>앱 설치</span></button>}
       </div>
     </header>
@@ -206,6 +210,7 @@ function App(){
         {error&&<div className="notice error" role="alert"><AlertCircle size={17}/>{error}</div>}
         {status&&<div className="notice"><AlertCircle size={17}/>{status}</div>}
         {scanInfo&&<div className="notice" role="status"><RefreshCw size={17}/><div>{scanInfo}{actionsUrl&&<div><a href={actionsUrl} target="_blank" rel="noreferrer">GitHub 실행 결과 확인</a></div>}</div></div>}
+        <div ref={aiRef} id="ai-panel" style={{scrollMarginTop:12}}><AiWidget key={'market-'+(mode==='single'?date:latest||end)} kind="market" date={mode==='single'?date:latest||end} observed={mode==='single'?days.find(d=>d.day===date)?.observed_stocks:null} matched={mode==='single'?days.find(d=>d.day===date)?.matched_stocks:null} events={mode==='single'?days.find(d=>d.day===date)?.signal_events:null} searchMatched={rows}/></div>
         <section className="panel result" ref={resultRef} id="results-panel">
           <div className="result-heading"><h2><BarChart3 size={18}/> 검색된 종목 <small>{total===null?'검색 전':total+'건'}</small></h2><span className="eod-pill"><Clock3 size={13}/> EOD</span></div>
           <p className="result-hint">종목을 누르면 RSI · Slow · MACD · 돌파선 · 상단 매물대 정보를 볼 수 있습니다.</p>
@@ -234,7 +239,8 @@ function App(){
     <footer>BLUE Signal Lab · RESEARCH ONLY · 매매 주문 기능 없음</footer>
     <nav className="mobile-dock" aria-label="모바일 메뉴">
       <button onClick={()=>nav('search')}><SlidersHorizontal size={20}/><span>검색</span></button>
-      <button className="dock-primary" onClick={()=>nav('results')}><BarChart3 size={20}/><span>종목 결과</span></button>
+      <button onClick={()=>nav('results')}><BarChart3 size={20}/><span>종목 결과</span></button>
+      <button className="dock-primary" onClick={()=>nav('ai')}><Activity size={20}/><span>AI 시황</span></button>
       <button onClick={()=>nav('summary')}><Activity size={20}/><span>요약</span></button>
     </nav>
     {selected&&<div className="detail-overlay" role="presentation" onMouseDown={e=>{if(e.target===e.currentTarget)closeDetail();}}>
@@ -254,6 +260,7 @@ function App(){
         <h3 className="detail-section-title"><CheckCircle2 size={17}/> 돌파 기준선 후보</h3>
         {present(selected,'valid_line_candidates_json')?(validLines(selected).length?<div className="line-list">{validLines(selected).map((l,i)=><div key={`${l.signal}-${i}`} className="line-card"><strong>{showSignal(l.signal)}</strong><span>선 가격 <b>{money(l.price)}원</b></span><span>종가와 차이 {l.gap_from_close_pct}%</span><span>기울기 {l.slope_pct==null?'미계산':l.slope_pct+'%'}</span></div>)}</div>:<p className="small">해당 날짜의 돌파 기준선 후보가 없습니다.</p>):<p className="small">R0.8로 다시 분석하면 돌파선 후보 정보가 표시됩니다.</p>}
         <div className="detail-disclaimer"><AlertCircle size={16}/>돌파선은 원본 Stock-Hunter 유효선과 동일하다고 검증되지 않았습니다. 상단 매물 강도도 체결가별 실제 매물량이 아니라 과거 일봉 기반 추정치입니다.</div>
+        <AiWidget key={'stock-'+selected.day+'-'+selected.code} kind="stock" date={selected.day} stock={selected}/>
         <button className="detail-done" onClick={closeDetail}>종목 목록으로 돌아가기</button>
       </section>
     </div>}
