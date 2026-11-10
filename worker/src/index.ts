@@ -100,7 +100,7 @@ export default {
           snapshot_time:r.created_at});
       }
       if (p === '/api/health' && request.method === 'GET') {
-        return respond({ status:'ok', mode:'RESEARCH_ONLY', storage:'D1', api_version:'R1.0' });
+        return respond({ status:'ok', mode:'RESEARCH_ONLY', storage:'D1', api_version:'R1.0.2' });
       }
       if (p === '/api/runs' && request.method === 'GET') {
         const r = await env.DB.prepare('SELECT run_id,created_at,source,latest_price_date,notes,is_demo FROM runs ORDER BY created_at DESC LIMIT 50').all();
@@ -136,6 +136,22 @@ export default {
         if (tags.length) {
           filters.push('(' + tags.map(() => "(','||signal_names||',') LIKE ?").join(logic === 'all' ? ' AND ' : ' OR ') + ')');
           args.push(...tags.map(tag => '%,' + tag + ',%'));
+        }
+        // Result-side golden-cross filters. Indexed result paging must be applied
+        // AFTER SQL filtering so later pages are not silently missed.
+        const gcAllowed:Record<string,string>={
+          rsi:'rsi_gc',slow14:'slow_14_3_3_gc',slow12:'slow_12_5_5_gc',
+          slow20:'slow_20_12_12_gc',macd:'macd_gc'
+        };
+        const gcRaw=(u.searchParams.get('gc')||'').trim();
+        const gcNames=gcRaw?gcRaw.split(',').map(x=>x.trim()).filter(Boolean):[];
+        if(gcNames.length>5||new Set(gcNames).size!==gcNames.length||gcNames.some(k=>!gcAllowed[k]))
+          return respond({error:'Unsupported GC filter'},400);
+        const gcLogic=u.searchParams.get('gc_logic')||'any';
+        if(!['any','all'].includes(gcLogic))return respond({error:'Invalid GC logic'},400);
+        if(gcNames.length){
+          const gcWhere=gcNames.map(k=>`LOWER(CAST(json_extract(extras_json,'$.${gcAllowed[k]}') AS TEXT)) IN ('true','1')`);
+          filters.push('('+gcWhere.join(gcLogic==='all'?' AND ':' OR ')+')');
         }
         const where = filters.join(' AND ');
         const limit = Math.min(500, Math.max(1, Math.floor(Number(u.searchParams.get('limit')) || 100)));
