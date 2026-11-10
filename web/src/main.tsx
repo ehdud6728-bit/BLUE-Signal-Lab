@@ -1,6 +1,6 @@
 import React, {useEffect, useState} from 'react';
 import {createRoot} from 'react-dom/client';
-import {Search, CalendarRange, BarChart3, AlertCircle, RefreshCw, Play} from 'lucide-react';
+import {Search, CalendarRange, BarChart3, AlertCircle, RefreshCw} from 'lucide-react';
 import './style.css';
 
 // Important: normalize exactly once. All paths below begin with ONE slash.
@@ -32,14 +32,13 @@ function App() {
   const [selected,setSelected] = useState<Signal|null>(null);
   const [status,setStatus] = useState('');
   const [dataStatus,setDataStatus] = useState<ScanStatus>('');
-  const [adminKey,setAdminKey] = useState(''); // Memory only; never bundled, persisted or logged.
   const [requestBusy,setRequestBusy] = useState(false);
   const [watchDate,setWatchDate] = useState('');
   const [scanInfo,setScanInfo] = useState('');
   const [actionsUrl,setActionsUrl] = useState('');
 
   async function loadDates() {
-    const r = await fetch(API+'/api/dates');
+    const r = await fetch(API+'/api/dates', {credentials:'include'});
     if (!r.ok) throw new Error(`날짜 API 오류: ${r.status}`);
     const d = await r.json();
     if (d.latest) {
@@ -65,28 +64,36 @@ function App() {
       u.searchParams.set('signals',signals.join(','));
       u.searchParams.set('logic',logic);
       u.searchParams.set('page',String(p));
-      const r=await fetch(u);
+      const r=await fetch(u, {credentials:'include'});
       const d=await r.json();
       if(!r.ok) throw new Error(d.error||`검색 오류: ${r.status}`);
       setRows(d.items||[]);setDays(d.daily_counts||[]);
       setTotal(d.total);setPage(p);setSelected(null);
       setDataStatus(d.data_status||'');
       if(d.data_status==='NOT_IMPORTED') {
-        setStatus('해당 날짜의 분석 결과가 저장되지 않았습니다. 0종목이 아니라 미분석 상태입니다.');
+        if(mode === 'single') {
+          setStatus('저장된 결과가 없어 GitHub Actions 분석을 자동 요청합니다.');
+          await requestScan(date);
+        } else {
+          setStatus('기간 중 저장된 결과만 조회했습니다. 미분석 날짜의 일괄 실행은 지원하지 않습니다.');
+        }
       }
     } catch(e) {
       setError(String(e));setRows([]);setDays([]);setTotal(null);setDataStatus('');
     } finally {setBusy(false);}
   }
 
-  async function requestScan() {
-    if (mode !== 'single' || !date || !adminKey) return;
+  async function requestScan(day: string) {
+    if (mode !== 'single' || !day) return;
     setRequestBusy(true);setError('');setScanInfo('');
     try {
       const r = await fetch(API+'/api/scan', {
         method:'POST',
-        headers:{'Content-Type':'application/json','X-Scan-Key':adminKey},
-        body:JSON.stringify({date}),
+        // text/plain is a CORS-safelisted POST. Access does not permit anonymous OPTIONS preflight.
+        // The API still parses and validates the JSON body.
+        headers:{'Content-Type':'text/plain;charset=UTF-8'},
+        credentials:'include',
+        body:JSON.stringify({date:day}),
       });
       const d = await r.json();
       if (!r.ok) throw new Error(d.error || `분석 요청 실패: ${r.status}`);
@@ -96,7 +103,7 @@ function App() {
         await search(1);
       } else {
         setScanInfo(d.deduplicated?'이미 진행 중인 분석입니다.':'GitHub Actions 분석 요청을 접수했습니다.');
-        setWatchDate(date);
+        setWatchDate(day);
       }
     } catch(e) {setError(String(e));}
     finally {setRequestBusy(false);}
@@ -108,7 +115,7 @@ function App() {
     async function poll() {
       try {
         const r=await fetch(API+'/api/scan/status?date='+encodeURIComponent(watchDate), {
-          headers:{'X-Scan-Key':adminKey},
+          credentials:'include',
         });
         const d=await r.json();
         if(!r.ok) throw new Error(d.error||`상태 조회 오류 ${r.status}`);
@@ -137,8 +144,8 @@ function App() {
   return <div className="shell">
     <header><div><p className="eyebrow">INDEPENDENT RESEARCH · KOSPI + KOSDAQ</p>
       <h1>BLUE <span>Signal Lab</span></h1>
-      <p className="sub">날짜 기반 검색 · 종목명 · 일봉 추정 매물대 · 관리자 분석 요청</p></div>
-      <div className="pill">RESEARCH ONLY · R0.7</div></header>
+      <p className="sub">1인 전용 · 날짜 기반 검색 · 미분석 날짜 자동 실행</p></div>
+      <div className="pill">RESEARCH ONLY · R0.7.1</div></header>
     <main><aside className="panel">
       <h2><Search size={18}/> 검색 조건</h2>
       <p className="small">저장된 최신 거래일: <strong>{latest||'확인 중'}</strong></p>
@@ -157,19 +164,7 @@ function App() {
         <option value="any">하나라도 충족 (OR)</option><option value="all">모두 충족 (AND)</option>
       </select>
       <button className="primary" disabled={busy} onClick={()=>{void search(1);}}>{busy?'조회 중…':'날짜로 검색'}</button>
-      <p className="small">저장된 결과는 바로 조회됩니다. 새 분석은 관리자 키가 있어야 실행됩니다.</p>
-      {mode==='single' && dataStatus==='NOT_IMPORTED' && <div className="scan-box">
-        <h2><Play size={16}/> 미분석 날짜 실행</h2>
-        <p className="small">{date} 검색을 GitHub Actions에서 계산하고 D1에 저장합니다.</p>
-        <label htmlFor="scan-admin-key">관리자 실행 키</label>
-        <input id="scan-admin-key" type="password" value={adminKey}
-          onChange={e=>setAdminKey(e.target.value)} autoComplete="off" placeholder="Cloudflare에 등록한 관리자 키"/>
-        <button className="primary" disabled={requestBusy||!adminKey||!!watchDate} onClick={()=>{void requestScan();}}>
-          <RefreshCw size={14} style={{verticalAlign:'middle',marginRight:5}}/>
-          {requestBusy?'요청 중…':watchDate?'분석 진행 중':'이 날짜 분석 요청'}
-        </button>
-        <p className="small">키는 브라우저 메모리에만 보관하며 새로고침하면 사라집니다.</p>
-      </div>}
+      <p className="small">저장된 날짜는 즉시 조회하고 미분석 날짜는 자동 분석합니다. Cloudflare Access 로그인 필요.</p>
     </aside>
     <section className="content">
       <div className="stats"><div className="metric"><span>검색 결과</span><strong>{total==null?'—':total.toLocaleString()}</strong><small>종목·날짜</small></div>
