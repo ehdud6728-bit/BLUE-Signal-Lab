@@ -1,7 +1,10 @@
+import { handleAi, getCachedAi } from './ai';
 interface Env {
   DB: D1Database;
   CORS_ORIGIN?: string;
   GITHUB_TOKEN?: string;
+  GEMINI_API_KEY?: string;
+  GEMINI_MODEL?: string;
 }
 
 const OWNER = 'ehdud6728-bit';
@@ -68,8 +71,20 @@ export default {
     // An Origin header alone never grants permission to dispatch a GitHub workflow.
     const access = (ctx as ExecutionContext & { access?: unknown } | undefined)?.access;
     try {
+      // AI requires Cloudflare Access at the API Worker edge. Origin alone is not authentication.
+      if (p === '/api/ai/report' && request.method === 'GET') {
+        if (!access) return respond({error:'ACCESS_REQUIRED',message:'Cloudflare Access 로그인 필요'},401);
+        const upstream=await getCachedAi(request,env);
+        return new Response(upstream.body,{status:upstream.status,headers:{...cors,'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store'}});
+      }
+      if ((p === '/api/ai/market' || p === '/api/ai/stock') && request.method === 'POST') {
+        if (request.headers.get('Origin') !== origin) return respond({error:'ORIGIN_DENIED'},403);
+        if (!access) return respond({error:'ACCESS_REQUIRED',message:'Cloudflare Access 로그인 필요'},401);
+        const upstream=await handleAi(request,env,p.endsWith('/market')?'market':'stock');
+        return new Response(upstream.body,{status:upstream.status,headers:{...cors,'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store'}});
+      }
       if (p === '/api/health' && request.method === 'GET') {
-        return respond({ status:'ok', mode:'RESEARCH_ONLY', storage:'D1', api_version:'R0.7' });
+        return respond({ status:'ok', mode:'RESEARCH_ONLY', storage:'D1', api_version:'R0.9' });
       }
       if (p === '/api/runs' && request.method === 'GET') {
         const r = await env.DB.prepare('SELECT run_id,created_at,source,latest_price_date,notes,is_demo FROM runs ORDER BY created_at DESC LIMIT 50').all();
@@ -241,6 +256,7 @@ export default {
       }
       return respond({error:'Not found'},404);
     } catch (err) {
+      if (p.startsWith('/api/ai/')) return respond({error:'AI_SETUP_REQUIRED',message:'BLUE AI R0.9 D1 스키마 및 Worker 배포를 확인하세요.'},500);
       // Never print credentials or user-supplied headers to the response.
       return respond({error:'Request failed; confirm D1 R0.7 migration and Worker deployment',
         category:err instanceof Error ? err.name : 'Unknown'},500);
