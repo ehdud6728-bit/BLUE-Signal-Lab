@@ -52,14 +52,15 @@ let externalCalls=0;const original=globalThis.fetch;
 globalThis.fetch=async (u,options)=>{
   assert.equal(options.headers['x-goog-api-key'],'TEST_SECRET');
   const data=JSON.parse(options.body);
-  assert.ok(data.tools?.[0]?.google_search);
+  assert.equal(data.tools,undefined); // free-tier model must not use paid search grounding
+  assert.ok(String(u).includes("gemini-3.5-flash-lite"));
   assert.ok(!JSON.stringify(data).includes('TEST_SECRET'));
   if(data.contents[0].parts[0].text.includes('[요청] 2026-11-09 기준 코스피')){
     assert.match(data.contents[0].parts[0].text,/삼성전자/);
     assert.match(data.contents[0].parts[0].text,/2566/);
   }
   externalCalls++;
-  return new Response(JSON.stringify({candidates:[{content:{parts:[{text:'기술 지표와 확인된 자료를 구분하세요.'}]},groundingMetadata:{groundingChunks:[{web:{title:'증시 뉴스',uri:'https://example.com/news'}}]}}]}),{status:200,headers:{'Content-Type':'application/json'}});
+  return new Response(JSON.stringify({candidates:[{content:{parts:[{text:'기술 지표와 확인된 자료를 구분하세요.'}]},}]}),{status:200,headers:{'Content-Type':'application/json'}});
 };
 let resp=await handleAi(post(url,{date:'2026-11-09'}),env,'market');
 assert.equal(resp.status,200);assert.equal((await resp.json()).status,'READY');
@@ -76,5 +77,5 @@ assert.equal((await resp.json()).status,'READY');
 db.usage.set(new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Seoul',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date()),25);
 resp=await handleAi(post(url,{date:'2026-11-09',code:'005930'}),env,'stock');
 assert.equal(resp.status,200);assert.equal(externalCalls,2); // cached must remain free
-console.log('AI integration tests: PASS (market, stock, source, cache, validation, limit).');
+console.log('AI integration tests: PASS (Gemini 3.5 free text mode, market, stock, cache, validation, limit).');
 globalThis.fetch=original;
