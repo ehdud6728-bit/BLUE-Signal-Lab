@@ -1,0 +1,37 @@
+name: BLUE R1.2 Toss Market Probe (MOCK ONLY / RESEARCH ONLY)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  mock_probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - name: Guard BLUE repository
+        shell: bash
+        run: |
+          test "${GITHUB_REPOSITORY}" = "ehdud6728-bit/BLUE-Signal-Lab" || { echo 'WRONG_REPOSITORY'; exit 1; }
+      - name: Checkout BLUE
+        uses: actions/checkout@v4
+      - name: Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install requests (mock has no external API calls)
+        run: pip install 'requests>=2.31,<3'
+      - name: Run isolated tests only
+        run: python -m unittest discover -s tests -p test_blue_toss_market_probe.py -v
+      - name: Simulate full-market quote sweep (no real quotes)
+        run: python scripts/blue_toss_market_probe.py --mode mock --out output/toss_probe
+      - name: Upload clearly labeled simulation artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: BLUE_TOSS_PROBE_SIMULATION_${{ github.run_id }}
+          path: output/toss_probe/
+          if-no-files-found: warn
+          retention-days: 14
