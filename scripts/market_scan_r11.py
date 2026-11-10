@@ -89,17 +89,39 @@ def pykrx_verified_day(day: date, stock_module=None) -> pd.DataFrame:
                 raise SourcePending(f"KRX_DATE_NOT_AVAILABLE: {day} {market} incomplete")
             if not set(REQUIRED_KRX_COLS).issubset(df.columns):
                 raise SourcePending(f"KRX_SCHEMA_INVALID: {market}")
-            codes = pd.Index([str(v).strip().zfill(6) for v in df.index])
-            if not codes.map(lambda x: bool(re.fullmatch(r"\d{6}", x))).all() or codes.has_duplicates:
-                raise SourcePending(f"KRX_TICKERS_INVALID: {market}")
+            # KRX shares can have a 6-character alphanumeric short code,
+            # e.g. preferred-share codes such as 00088K. Rejecting everything
+            # outside \d{6} misclassifies valid exchange rows as corrupt.
+            # Preserve leading zeroes; never coerce tickers to numbers.
+            codes = pd.Index([str(v).strip().upper().zfill(6) for v in df.index])
+            invalid_count = sum(not re.fullmatch(r"[0-9A-Z]{6}", code) for code in codes)
+            duplicate_count = int(codes.duplicated().sum())
+            if invalid_count or duplicate_count:
+                # Counts only: no raw provider payloads or account details.
+                raise SourcePending(f"KRX_TICKERS_INVALID: {market} invalid={invalid_count} duplicate={duplicate_count}")
             if SAMPLES[market] not in codes:
                 raise SourcePending(f"KRX_SAMPLE_MISSING: {market}")
             values = df[list(REQUIRED_KRX_COLS)].apply(pd.to_numeric, errors="coerce")
             ohlc = values[["시가", "고가", "저가", "종가"]]
             if values.isna().any().any() or (values < 0).any().any():
                 raise SourcePending(f"KRX_NUMERIC_INVALID: {market}")
-            if (ohlc <= 0).any().any() or (values["고가"] < values["저가"]).any():
+            if (values["고가"] < values["저가"]).any():
                 raise SourcePending(f"KRX_OHLC_INVALID: {market}")
+            # The KRX official cross-section includes suspended/no-trade rows.
+            # A zero-volume row is not a usable daily trading candle. Exclude
+            # it explicitly; never allow invalid positive-volume candles.
+            traded = values["거래량"] > 0
+            if (values.loc[traded, "거래대금"] <= 0).any() or (values.loc[~traded, "거래대금"] != 0).any():
+                raise SourcePending(f"KRX_AMOUNT_VOLUME_MISMATCH: {market}")
+            if (ohlc.loc[traded] <= 0).any().any():
+                raise SourcePending(f"KRX_TRADED_OHLC_INVALID: {market}")
+            traded_count = int(traded.sum())
+            if traded_count < MIN_MARKET_ROWS[market]:
+                raise SourcePending(f"KRX_TRADED_MARKET_INCOMPLETE: {market} rows={traded_count}")
+            alphanumeric_count = sum(any(ch.isalpha() for ch in code) for code in codes)
+            no_trade_count = len(codes) - traded_count
+            print(f"KRX_EOD_MARKET_METADATA market={market} total={len(codes)} "
+                  f"traded={traded_count} no_trade={no_trade_count} alphanumeric={alphanumeric_count}")
             # Verify requested exact market date and independently consistent values.
             one = _quiet(stock_module.get_market_ohlcv_by_date, stamp, stamp,
                          SAMPLES[market], adjusted=False)
@@ -113,8 +135,10 @@ def pykrx_verified_day(day: date, stock_module=None) -> pd.DataFrame:
             if (float(source_row["종가"]) != float(one.iloc[0]["종가"]) or
                     float(source_row["거래량"]) != float(one.iloc[0]["거래량"])):
                 raise SourcePending(f"KRX_SAMPLE_PRICE_MISMATCH: {market}")
-            cleaned = values.rename(columns=REQUIRED_KRX_COLS).copy()
-            cleaned.insert(0, "Code", list(codes))
+            # Keep only traded, structurally valid candles; preserve the
+            # original short code (including official alphanumeric symbols).
+            cleaned = values.loc[traded].rename(columns=REQUIRED_KRX_COLS).copy()
+            cleaned.insert(0, "Code", list(codes[traded.to_numpy()]))
             cleaned.insert(0, "Date", pd.Timestamp(day))
             cleaned.insert(2, "Name", "")  # prior marcap names are attached later
             cleaned["Market"] = market
