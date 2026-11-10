@@ -83,8 +83,24 @@ export default {
         const upstream=await handleAi(request,env,p.endsWith('/market')?'market':'stock');
         return new Response(upstream.body,{status:upstream.status,headers:{...cors,'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store'}});
       }
+      // R1.0: verified archived EOD candles for a matched symbol on a selected date.
+      if (p === '/api/chart' && request.method === 'GET') {
+        const day=u.searchParams.get('date')||'';
+        const code=u.searchParams.get('code')||'';
+        if(!validDate(day)||!/^[0-9]{6}$/.test(code))return respond({error:'INVALID_CHART_QUERY'},400);
+        const r=await env.DB.prepare(`SELECT c.chart_json,c.stats_json,c.created_at
+          FROM chart_snapshots c
+          JOIN runs r ON r.run_id=c.run_id
+          JOIN signals s ON s.run_id=c.run_id AND s.day=c.day AND s.code=c.code
+          WHERE c.day=? AND c.code=? AND r.is_demo=0 AND r.latest_price_date=c.day
+          ORDER BY r.created_at DESC,r.run_id DESC LIMIT 1`).bind(day,code)
+          .first<{chart_json:string;stats_json:string;created_at:string}>();
+        if(!r)return respond({status:'NOT_AVAILABLE',message:'R1.0 분석을 해당 날짜에 다시 실행해야 차트가 준비됩니다.'},404);
+        return respond({status:'READY',chart:JSON.parse(r.chart_json),stats:JSON.parse(r.stats_json),
+          snapshot_time:r.created_at});
+      }
       if (p === '/api/health' && request.method === 'GET') {
-        return respond({ status:'ok', mode:'RESEARCH_ONLY', storage:'D1', api_version:'R0.9' });
+        return respond({ status:'ok', mode:'RESEARCH_ONLY', storage:'D1', api_version:'R1.0' });
       }
       if (p === '/api/runs' && request.method === 'GET') {
         const r = await env.DB.prepare('SELECT run_id,created_at,source,latest_price_date,notes,is_demo FROM runs ORDER BY created_at DESC LIMIT 50').all();

@@ -97,9 +97,13 @@ function prompt(kind:ReportKind,day:string,facts:unknown):string {
 확인된 사실, 데이터 기반 해석, 불확실성을 명확히 분리하고 과장·투자 확약을 하지 마세요.
 RSI/Slow/MACD의 GC 신호가 false이면 골든크로스가 있었다고 말하지 마세요. GC는 해당 거래일의 여부이며 마지막 발생 날짜는 별도로 표시하세요.
 '유효선'은 미검증 돌파 기준선 후보이고 '상단 매물대 강도'는 120거래일 일봉 대표가격 히스토그램 추정치입니다. 실제 체결가별 매물대라고 부르지 마세요.
+historical_evidence에는 현재 발생한 돌파/교차 신호와 거래량·거래대금·추세·RSI·Slow·MACD·추정 매물대 등 복합 조건의 실제 과거 5/10/20거래일 성과가 담겨 있습니다. 고정된 BB40+RSI 또는 ENV 예시만 설명하지 말고, active_factors·setups를 비교해 지지·충돌 신호와 상승·하락 양쪽 결과를 해석하세요. 없는 조합이나 숫자를 생성하지 마세요.
+조합은 오늘의 조건을 보고 사후에 검색했으므로 선택 편향과 다중검정 문제가 있습니다. 표본이 8건 미만이면 통계 부족이라고 명시하고, 많아도 승률을 미래 적중률로 소개하지 마세요. holdout이 있을 때도 표본을 명시하며 검증된 전략이라 단정하지 마세요. 기준선은 동종 종목/시장 중립 비교가 아니라 단순 동일 종목 비교입니다.
+ENV20_DOWN은 중심선 하향 이탈에 대한 별도 연구 패턴이지 기존 ENV20 상승 돌파가 아닙니다.
+검증된 업종 구성과 대장주 과거 시계열이 없으므로 대장주 선행/후발주 판정을 단정하지 마세요.
 짧고 읽기 쉽게 제목과 문단을 나누고, 마지막에 확인할 위험과 데이터 한계를 쓰세요.`;
   if(kind==='market')return `${rules}\n\n[요청] ${day} 기준 BLUE 기술 신호 통계에 기반한 시장 분위기만 브리핑하세요. 1) 분석한 종목·신호 통계 2) 두드러진 기술적 신호와 의미 3) 한계·확인 과제를 정리하세요.\n코스피/코스닥 지수, 외국인·기관 수급, 업종 상승률, 실제 뉴스와 공시는 현재 데이터에 없으므로 '미수집/미확인'으로 적고 사실인 양 만들어내지 마세요. BLUE 신호 종목 수를 시장 전체 상승 종목 수로 오해하지 마세요.\n[BLUE D1 기준자료]\n${JSON.stringify(facts)}`;
-  return `${rules}\n\n[요청] ${day} 종가 기준 아래 종목을 분석하세요. 1) BLUE 선별 신호 이유 2) RSI/Slow/MACD 수치 및 GC 3) 돌파선 후보·상단 매물대 추정 4) 신호가 무효화될 조건·위험 5) 별도로 확인해야 할 공시·뉴스 항목을 작성하세요. 현재 외부 검색 데이터가 없으므로 실제 기사·공시를 확인한 것처럼 말하지 말고 '미수집'으로 명시하세요.\n[BLUE D1 저장자료]\n${JSON.stringify(facts)}`;
+  return `${rules}\n\n[요청] ${day} 종가 기준 아래 종목을 분석하세요. 1) BLUE 선별 신호 이유 2) RSI/Slow/MACD 수치 및 GC 3) 돌파선 후보·상단 매물대 추정 4) 현재 활성화된 여러 신호의 상충·보강 관계 5) 단일/복합 조건의 과거 상승·하락 비율과 평균/중앙값 및 작은 표본 경고 6) 불리한 시장 시나리오와 확인할 위험 7) 업종/대장주 후발 관계는 실데이터가 없으면 미확인 8) 별도로 확인해야 할 공시·뉴스 항목을 작성하세요. 현재 외부 검색 데이터가 없으므로 실제 기사·공시를 확인한 것처럼 말하지 말고 '미수집'으로 명시하세요.\n[BLUE D1 저장자료]\n${JSON.stringify(facts)}`;
 }
 async function askGemini(key:string,model:string,contents:string):Promise<{text:string;sources:Source[]}> {
   const controller=new AbortController();
@@ -174,9 +178,17 @@ export async function handleAi(req:Request,env:AiEnv,kind:ReportKind):Promise<Re
       FROM signals WHERE run_id=? AND day=? AND code=? LIMIT 1`)
       .bind(run.run_id,day,code).first<SignalRow>();
     if(!symbol)return json({error:'STOCK_NOT_FOUND',message:'검색 결과에 있는 종목만 분석할 수 있습니다.'},404);
+    let historicEvidence:unknown=null;
+    try {
+      const ev=await env.DB.prepare(`SELECT stats_json FROM chart_snapshots
+        WHERE run_id=? AND day=? AND code=? LIMIT 1`)
+        .bind(run.run_id,day,code).first<{stats_json:string}>();
+      if(ev?.stats_json)historicEvidence=JSON.parse(ev.stats_json);
+    } catch { /* Old R0.9 date: return without invented historical findings */ }
     facts={date:day,code:symbol.code,signals:symbol.signal_names.split(',').filter(Boolean),
       close_price:symbol.close_price,supply_distance_pct:symbol.supply_distance_pct,
       indicators:tinyExtras(symbol.extras_json),
+      historical_evidence:historicEvidence || 'NOT_COMPUTED',
       limitations:['일봉 추정 매물대는 실제 체결가별 거래량 아님','유효선은 기존 연구 검증된 유효선이 아닌 돌파 기준선 후보','투자 판단을 위한 참고 자료']};
   }
   const model=allowedModel(env.GEMINI_MODEL);
