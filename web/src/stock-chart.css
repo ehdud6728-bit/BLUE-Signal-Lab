@@ -10,3 +10,22 @@
 @media(max-width:790px){.blue-chart-panel{padding:11px;margin:14px -4px}.blue-chart-header h3{font-size:14px}}
 
 .blue-active-factors{display:flex;flex-wrap:wrap;gap:6px;margin:12px 0}.blue-active-factors span{border-radius:6px;padding:5px 8px;background:#eef4ff;color:#2858ad;font-size:11px;font-weight:650}.blue-evidence-table td strong{font-weight:700;line-height:1.5;white-space:normal}.blue-evidence-table td small{display:block;font-size:10px;color:#7e8ea5;margin-top:3px;white-space:normal}
+
+/* R1.0.1 — explanatory legend outside the plot: no overlapping price labels. */
+.blue-layer-tools{display:flex;flex-wrap:wrap;gap:6px;margin:7px 0 10px}
+.blue-layer-tools button{display:inline-flex;gap:6px;align-items:center;border:1px solid #d9e2ef;border-radius:7px;padding:7px 9px;background:#f8fafc;color:#6d7a8d;font-size:11px;font-weight:750;cursor:pointer}
+.blue-layer-tools button.on{background:#ebf2ff;color:#244b90;border-color:#9bbbf2}
+.blue-layer-tools button:focus-visible{outline:2px solid #2467d5;outline-offset:2px}
+.blue-layer-tools i,.blue-chart-legend i{display:inline-block;flex:none;width:11px;height:11px;border-radius:3px}
+.blue-layer-tools button:not(.on) i{opacity:.35}
+.blue-chart-legend{border:1px solid #e7edf5;border-radius:10px;padding:9px 11px;margin-top:8px;display:grid;gap:8px;background:#fafcff}
+.blue-chart-legend>div{display:grid;grid-template-columns:13px minmax(0,1fr) auto;align-items:start;column-gap:8px;font-size:11px;line-height:1.5;color:#51637e}
+.blue-chart-legend>div i{margin-top:3px}
+.blue-chart-legend>div span{min-width:0;overflow-wrap:anywhere}
+.blue-chart-legend b{color:#203c60}
+.blue-chart-legend>div strong{font-size:11px;color:#2b4668;font-weight:750;text-align:right;white-space:nowrap}
+.blue-chart-legend>div.blue-chart-candidate-legend strong{white-space:normal;max-width:144px;overflow-wrap:anywhere}
+.blue-chart-hint{font-size:10px;color:#798ca7;line-height:1.65;margin:8px 0 12px}
+.blue-indicator-caption{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:3px}
+.blue-indicator-caption small{font-size:10px;color:#7386a5;font-weight:500}
+@media(max-width:520px){.blue-layer-tools button{padding:7px;font-size:10px}.blue-chart-legend>div{grid-template-columns:12px minmax(0,1fr);row-gap:2px}.blue-chart-legend>div strong{grid-column:2;justify-self:start;text-align:left}.blue-chart-legend>div.blue-chart-candidate-legend strong{max-width:none}}

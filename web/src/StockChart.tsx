@@ -34,44 +34,77 @@ function mk(el:HTMLDivElement,height:number){return createChart(el,{width:Math.m
 
 function PriceChart({bars,day,supplyPrice,lineCandidates}:{bars:Bar[];day:string;supplyPrice?:number|null;lineCandidates?:LineCandidate[]}){
   const ref=useRef<HTMLDivElement>(null);
+  // Keep the important moving averages visible, but hide the far-away BLUE40
+  // band and multiple static price levels until selected. This protects the
+  // candle scale on a narrow phone screen.
+  const [layers,setLayers]=useState({env20:true,env40:true,bb40:false,supply:false,candidates:false});
+  const toggle=(k:keyof typeof layers)=>setLayers(v=>({...v,[k]:!v[k]}));
+  const last=bars[bars.length-1];
+  const fmt=(n:number|null|undefined)=>n==null||!Number.isFinite(n)?'—':Math.round(n).toLocaleString('ko-KR')+'원';
+  const candidates=(lineCandidates||[]).filter(x=>Number.isFinite(x.price)&&x.price>0).slice(0,3);
   useChartResize(ref,el=>{
-    const chart=mk(el,315);
+    const chart=mk(el,300);
     const candles=chart.addSeries(CandlestickSeries,{upColor:'#e34055',downColor:'#2671e8',borderVisible:false,
-      wickUpColor:'#e34055',wickDownColor:'#2671e8'});
+      wickUpColor:'#e34055',wickDownColor:'#2671e8',priceLineVisible:false});
     candles.setData(bars.map(b=>({time:time(b.t),open:b.o,high:b.h,low:b.l,close:b.c})));
-    createSeriesMarkers(candles,[{time:time(day),position:'belowBar',shape:'arrowUp',color:'#245fe2',text:'BLUE 검색일'}]);
-    const addLine=(p:number,color:string,title:string)=>{if(p>0){candles.createPriceLine({price:p,color,title,axisLabelVisible:true,lineWidth:1,lineStyle:2});}};
-    if(supplyPrice!=null)addLine(supplyPrice,'#e5a13c','상단 매물대 중심(추정)');
-    (lineCandidates||[]).slice(0,3).forEach(x=>addLine(x.price,'#2563eb',x.signal+' 기준선 후보'));
-    for(const [field,color] of [['env20','#21a786'],['env40','#845bd6'],['bb40','#f28d2f']] as const){
-      const line=chart.addSeries(LineSeries,{color,lineWidth:1,priceLineVisible:false,lastValueVisible:false});
+    if(bars.some(b=>b.t===day))createSeriesMarkers(candles,[{time:time(day),position:'belowBar',shape:'arrowUp',color:'#245fe2',text:''}]);
+    const addLevel=(p:number,color:string)=>{
+      if(p>0) candles.createPriceLine({price:p,color,title:'',axisLabelVisible:false,
+        lineWidth:1,lineStyle:2});
+    };
+    if(layers.supply&&supplyPrice!=null&&supplyPrice>0)addLevel(supplyPrice,'#e5a13c');
+    if(layers.candidates)candidates.forEach((x,i)=>addLevel(x.price,['#2262df','#5f87e3','#90b1f5'][i]));
+    for(const [field,color,enabled] of [
+      ['env20','#21a786',layers.env20],['env40','#845bd6',layers.env40],['bb40','#f28d2f',layers.bb40]
+    ] as const){
+      if(!enabled)continue;
+      const line=chart.addSeries(LineSeries,{color,lineWidth:2,priceLineVisible:false,lastValueVisible:false});
       line.setData(bars.filter(b=>b[field]!=null).map(b=>({time:time(b.t),value:b[field]!})));
     }
     chart.timeScale().fitContent();return chart;
-  },[bars,day,supplyPrice,lineCandidates]);
-  return <><div className="blue-chart-label">일봉 · 캔들 / ENV20 / ENV40 / BLUE40 기준선</div><div ref={ref} className="blue-chart-canvas"/></>;
+  },[bars,day,supplyPrice,lineCandidates,layers.env20,layers.env40,layers.bb40,layers.supply,layers.candidates]);
+  return <>
+    <div className="blue-chart-label">일봉 캔들 · 표시할 선 선택</div>
+    <div className="blue-layer-tools" role="group" aria-label="캔들 차트 선 표시 설정">
+      <button type="button" aria-pressed={layers.env20} className={layers.env20?'on':''} onClick={()=>toggle('env20')}><i style={{background:'#21a786'}}/>ENV20</button>
+      <button type="button" aria-pressed={layers.env40} className={layers.env40?'on':''} onClick={()=>toggle('env40')}><i style={{background:'#845bd6'}}/>ENV40</button>
+      <button type="button" aria-pressed={layers.bb40} className={layers.bb40?'on':''} onClick={()=>toggle('bb40')}><i style={{background:'#f28d2f'}}/>BLUE40 상단</button>
+      {supplyPrice!=null&&supplyPrice>0&&<button type="button" aria-pressed={layers.supply} className={layers.supply?'on':''} onClick={()=>toggle('supply')}><i style={{background:'#e5a13c'}}/>추정 매물대</button>}
+      {candidates.length>0&&<button type="button" aria-pressed={layers.candidates} className={layers.candidates?'on':''} onClick={()=>toggle('candidates')}><i style={{background:'#2262df'}}/>돌파선 후보</button>}
+    </div>
+    <div ref={ref} className="blue-chart-canvas" aria-label="선택한 가격선이 표시된 실제 과거 캔들 차트"/>
+    <div className="blue-chart-legend" aria-label="가격선 범례 및 설명">
+      <div><i style={{background:'#21a786'}}/><span><b>ENV20</b> · 최근 20거래일 종가 평균</span><strong>{fmt(last?.env20)}</strong></div>
+      <div><i style={{background:'#845bd6'}}/><span><b>ENV40</b> · 최근 40거래일 종가 평균</span><strong>{fmt(last?.env40)}</strong></div>
+      <div><i style={{background:'#f28d2f'}}/><span><b>BLUE40 상단</b> · 40일 평균+2σ, 26거래일 이전 값 기준의 이동 밴드</span><strong>{fmt(last?.bb40)}</strong></div>
+      {supplyPrice!=null&&supplyPrice>0&&<div><i style={{background:'#e5a13c'}}/><span><b>상단 매물대 중심</b> · 120봉 대표가격·거래량 추정 (실제 호가 매물대 아님)</span><strong>{fmt(supplyPrice)}</strong></div>}
+      {candidates.length>0&&<div className="blue-chart-candidate-legend"><i style={{background:'#2262df'}}/><span><b>돌파 기준선 후보</b> · 당일 관측값, 추세선 유효성 미검증</span><strong>{candidates.map(x=>`${x.signal}: ${fmt(x.price)}`).join(' / ')}</strong></div>}
+    </div>
+    <p className="blue-chart-hint">상단의 버튼으로 선을 켜고 끌 수 있습니다. BLUE40 상단처럼 현재가와 먼 선은 캔들이 작게 보이는 문제를 막기 위해 기본적으로 숨깁니다. 가격 라벨은 차트 밖의 범례에 표시합니다.</p>
+  </>;
 }
 function IndicatorChart({bars,type}:{bars:Bar[];type:'volume'|'rsi'|'slow'|'macd'}){
   const ref=useRef<HTMLDivElement>(null);
   useChartResize(ref,el=>{
     const chart=mk(el,type==='volume'?90:125);
     if(type==='volume'){
-      const s=chart.addSeries(HistogramSeries,{priceFormat:{type:'volume'},priceLineVisible:false});
+      const s=chart.addSeries(HistogramSeries,{priceFormat:{type:'volume'},priceLineVisible:false,lastValueVisible:false});
       s.setData(bars.map(b=>({time:time(b.t),value:b.v,color:b.c>=b.o?'#e8959e':'#a2bbee'})));
     } else {
       const fields=type==='rsi'?(['r','rs'] as const):type==='slow'?(['sk','sd'] as const):(['m','ms'] as const);
       fields.forEach((field,i)=>{
-        const line=chart.addSeries(LineSeries,{color:i===0?'#3369dd':'#ee9a2b',lineWidth:2,priceLineVisible:false});
+        const line=chart.addSeries(LineSeries,{color:i===0?'#3369dd':'#ee9a2b',lineWidth:2,priceLineVisible:false,lastValueVisible:false});
         line.setData(bars.filter(b=>b[field]!=null).map(b=>({time:time(b.t),value:b[field]!})));
       });
       if(type==='rsi'||type==='slow'){
         const guide=chart.addSeries(LineSeries,{color:'#cbd4e2',lineWidth:1,lineStyle:2,lastValueVisible:false,priceLineVisible:false});
-        guide.setData(bars.map(b=>({time:time(b.t),value:type==='rsi'?50:50})));
+        guide.setData(bars.map(b=>({time:time(b.t),value:50})));
       }
     }
     chart.timeScale().fitContent();return chart;
   },[bars,type]);
-  return <><div className="blue-chart-label">{({volume:'거래량',rsi:'RSI(14) · RSI 시그널(9)',slow:'Slow Stochastic(14,3,3) · %K/%D',macd:'MACD(12,26,9) · Signal'} as const)[type]}</div><div ref={ref} className="blue-chart-canvas"/></>;
+  const meta=({volume:['거래량',''],rsi:['RSI(14) · 시그널(9)','파랑: RSI / 주황: 시그널'],slow:['Slow Stochastic(14,3,3)','파랑: %K / 주황: %D'],macd:['MACD(12,26,9)','파랑: MACD / 주황: 시그널']} as const)[type];
+  return <><div className="blue-chart-label blue-indicator-caption"><span>{meta[0]}</span><small>{meta[1]}</small></div><div ref={ref} className="blue-chart-canvas"/></>;
 }
 function Evidence({stats}:{stats:Stats}){
   const [days,setDays]=useState<'5'|'10'|'20'>('10');
