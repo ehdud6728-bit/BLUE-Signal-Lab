@@ -1,15 +1,15 @@
-name: BLUE Signal Lab R1.0 - Chart and Historical Evidence EOD Scan
+name: BLUE Signal Lab R1.1 - Verified Same-Day EOD Research Scan
 
 on:
   workflow_dispatch:
     inputs:
       asof_date:
-        description: 'YYYY-MM-DD past trading date or latest in marcap'
+        description: 'YYYY-MM-DD (verified EOD only, today accepted after 15:40 KST if provider ready), or latest'
         required: true
         default: latest
         type: string
       publish_to_d1:
-        description: 'Publish verified result to D1 (requires Cloudflare repository secrets)'
+        description: 'Publish verified EOD result to D1 (Cloudflare repository secrets required)'
         required: true
         default: false
         type: boolean
@@ -24,11 +24,19 @@ concurrency:
 jobs:
   research_scan:
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 30
     defaults:
       run:
         shell: bash
     steps:
+      - name: Guard against running BLUE workflow in the wrong repository
+        env:
+          EXPECTED_REPO: ehdud6728-bit/BLUE-Signal-Lab
+        run: |
+          if [ "${GITHUB_REPOSITORY}" != "${EXPECTED_REPO}" ]; then
+            echo "::error title=WRONG_REPOSITORY::This workflow is for ${EXPECTED_REPO}, but it is running in ${GITHUB_REPOSITORY}. Upload files to the BLUE-Signal-Lab repository instead."
+            exit 1
+          fi
       - name: Checkout BLUE Signal Lab
         uses: actions/checkout@v4
       - name: Setup Python
@@ -36,15 +44,20 @@ jobs:
         with:
           python-version: '3.11'
       - name: Install Python dependencies
-        run: pip install pandas numpy pyarrow requests
-      - name: Unit tests
+        run: pip install pandas numpy pyarrow requests 'pykrx==1.2.9'
+      - name: Unit tests (including EOD exact-date and no-lookahead tests)
         run: python -m unittest discover -s tests -v
-      - name: On-demand scan with official KRX fallback for unavailable marcap dates
+      - name: On-demand verified EOD scan - same day requires exact KRX parity
         env:
           ASOF: ${{ inputs.asof_date }}
           KRX_AUTH_KEY: ${{ secrets.KRX_AUTH_KEY }}
+          # Separate BLUE repository secrets; Stock-Hunter secrets DO NOT auto-transfer.
+          KRX_ID: ${{ secrets.KRX_DATA_ID || secrets.KRX_ID }}
+          KRX_PW: ${{ secrets.KRX_DATA_PW || secrets.KRX_PW }}
+          KRX_DATA_ID: ${{ secrets.KRX_DATA_ID || secrets.KRX_ID }}
+          KRX_DATA_PW: ${{ secrets.KRX_DATA_PW || secrets.KRX_PW }}
         run: |
-          python scripts/market_scan_r08.py --date "$ASOF" --years 2025,2026 --out output
+          python scripts/market_scan_r11.py --date "$ASOF" --years 2025,2026 --daily-provider auto --out output
       - name: Validate counts and provenance
         env:
           ASOF: ${{ inputs.asof_date }}
@@ -60,7 +73,13 @@ jobs:
           assert audit['source_sha256_by_year'].get('2026')
           assert os.getenv('ASOF')=='latest' or audit['asof']==os.getenv('ASOF')
           assert audit['observed_stocks']>=1700, 'Incomplete market universe'
-          print('AUDIT OK',audit['asof'],audit['observed_stocks'],audit['matched_stocks'],audit.get('supplemental_dates'))
+          assert audit.get('intraday_verified') is False
+          if audit.get('same_day_eod'):
+              assert audit.get('data_phase')=='SAME_DAY_EOD_VERIFIED'
+              assert 'KRX' in audit.get('target_day_source','')
+              assert audit['asof'] in audit.get('supplemental_dates',[])
+          print('BLUE_R11_EOD_AUDIT_OK',audit['asof'],audit['observed_stocks'],
+                audit['matched_stocks'],audit.get('data_phase'),audit['target_day_source'])
           PY
       - name: Generate D1 SQL and remove transaction statements
         run: |
@@ -68,7 +87,7 @@ jobs:
             --input-dir output \
             --out output/import.sql \
             --run-id "blue_market_$(python -c "import json;print(json.load(open('output/AUDIT.json'))['asof'].replace('-',''))")" \
-            --source 'FinanceData-marcap-plus-KRX-official-R1.0-HISTORICAL-RESEARCH_ONLY'
+            --source 'BLUE-R11-VERIFIED-EOD-RESEARCH_ONLY-NOT_INTRADAY'
           python - <<'PY'
           from pathlib import Path
           p=Path('output/import.sql')
@@ -83,11 +102,13 @@ jobs:
             --input output/chart_snapshots.jsonl \
             --sql output/import.sql \
             --run-id "blue_market_$(python -c "import json;print(json.load(open('output/AUDIT.json'))['asof'].replace('-',''))")"
-      - name: Upload audit and D1 SQL as artifact
+      - name: Upload EOD audit and D1 SQL as artifact
+        if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: BLUE_R072_MARKET_SCAN_RESEARCH_ONLY
+          name: BLUE_R11_EOD_VERIFIED_${{ github.run_id }}
           path: output/
+          if-no-files-found: warn
           retention-days: 14
       - name: Setup Node for D1 publish
         if: ${{ inputs.publish_to_d1 }}
@@ -102,8 +123,5 @@ jobs:
         run: |
           test -n "$CLOUDFLARE_API_TOKEN" && test -n "$CLOUDFLARE_ACCOUNT_ID" || { echo 'Missing Cloudflare secrets'; exit 1; }
           cd worker
-          # R0.7.2 hotfix: Wrangler 4.159.x asks for optional workers-types v5,
-          # while this existing project declares workers-types v4.
-          # This job only uses the Wrangler CLI to import D1; do not change the app's dependencies here.
           npm install --no-audit --no-fund --legacy-peer-deps
           npx wrangler d1 execute blue-signal-lab-db --remote --file=../output/import.sql --yes
