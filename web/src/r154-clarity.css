@@ -1,0 +1,23 @@
+/* R1.5.4 — provenance-forward, compact basket and tracking improvements. */
+.r154-origin-strip{display:flex;align-items:center;gap:9px;flex-wrap:wrap;margin:7px 0 10px;padding:9px 11px;border:1px solid #d4e3fc;border-radius:10px;background:#f2f7ff}
+.r154-discovery-price{display:flex;align-items:baseline;flex-wrap:wrap;gap:6px 9px;min-width:175px}
+.r154-discovery-price>span{font-size:11px;color:#436aa5;font-weight:800}
+.r154-discovery-price strong{font-size:19px;line-height:1.1;font-weight:900;letter-spacing:-.4px;color:#173f90;font-variant-numeric:tabular-nums}
+.r154-discovery-price small{font-size:10px;color:#677f9c}
+.r154-discovery-signals{display:flex;align-items:center;flex-wrap:wrap;gap:7px;min-width:0;flex:1}
+.r154-discovery-signals>span{font-size:10px;color:#5e7290;font-weight:800;white-space:nowrap}
+.r154-discovery-signals>div{display:flex;align-items:center;flex-wrap:wrap;gap:4px}
+.r154-signal-chip{padding:3px 7px;font-size:10px;line-height:1.3;font-weight:800;border-radius:6px;border:1px solid #c5d8ff;background:#fff;color:#265ac3}
+.r154-no-signal,.r154-more-signals{font-size:10px;color:#788ca7}
+.r154-auto-selection-note{margin:10px 0 2px;padding:9px 11px;font-size:11px;line-height:1.5;color:#4a6b95;background:#f4f8ff;border-left:3px solid #77a5e8;border-radius:6px}
+.blue-live-table td small.r154-track-dates{font-size:10px;color:#41648d;font-weight:650;line-height:1.5}
+.blue-live-table td small.r154-track-perspective{font-size:10px;color:#5b7191;white-space:normal;line-height:1.55;max-width:335px}
+@media(max-width:700px){
+ .r154-origin-strip{padding:9px 10px;gap:6px;margin-top:5px}
+ .r154-discovery-price{min-width:100%;gap:6px}
+ .r154-discovery-price strong{font-size:18px}
+ .r154-discovery-signals{gap:5px}
+ .r154-discovery-signals>span{font-size:10px}
+ .blue-live-table{min-width:550px}
+ .blue-live-table td:first-child{min-width:230px}
+}
