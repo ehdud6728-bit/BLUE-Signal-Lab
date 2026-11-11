@@ -127,6 +127,41 @@ class TestR141(unittest.TestCase):
             self.assertEqual(rc,0)
             self.assertEqual(obtain.call_args.kwargs['allow_new'],False)
             self.assertEqual(json.loads((Path(folder)/'AUDIT.json').read_text())['status'],'PAUSED_TOKEN_EMPTY_OR_EXPIRED')
+    def test_d1_100_parameter_limit_with_full_40_quotes(self):
+        # Two markets * 20 tickers = 40 quotes: formerly 280 history binds.
+        db = FakeDB()
+        now = self.at(17, 30)
+        qs = []
+        for market in ('J', 'NX'):
+            for i in range(20):
+                qs.append({'code': f'{i:06d}', 'market': market,
+                    'phase': 'KRX_AFTER' if market == 'J' else 'NXT_AFTER',
+                    'trade_date_kst': '2026-11-11',
+                    'received_at_utc': now.astimezone(timezone.utc).isoformat(),
+                    'price': 10000+i, 'accumulated_volume': 200000+i})
+        r141.write_quotes(db, qs, now)
+        inserts = [(sql, args) for sql, args in db.calls if 'INSERT INTO' in sql]
+        self.assertEqual(len(inserts), 6)  # 3 chunks * 2 insert types
+        self.assertTrue(all(len(args) <= 100 for _, args in inserts))
+        self.assertEqual(sum(len(args)//7 for sql,args in inserts
+                             if 'blue_kis_live_history_r141' in sql), 40)
+        self.assertEqual(sum(len(args)//5 for sql,args in inserts
+                             if 'blue_kis_live_quotes_r141' in sql), 40)
+        self.assertTrue(all(isinstance(x, str) for sql,args in inserts for x in args))
+
+    def test_d1_15_quotes_old_failure_reproduced_and_fixed(self):
+        db = FakeDB()
+        now = self.at(17, 30)
+        qs = [{'code': f'{i:06d}', 'market': 'J' if i<12 else 'NX',
+            'phase': 'KRX_AFTER' if i<12 else 'NXT_AFTER',
+            'trade_date_kst': '2026-11-11',
+            'received_at_utc': now.astimezone(timezone.utc).isoformat(),
+            'price': 1000+i, 'accumulated_volume': 100+i} for i in range(15)]
+        r141.write_quotes(db, qs, now)
+        inserts = [(sql, args) for sql, args in db.calls if 'INSERT INTO' in sql]
+        self.assertEqual(len(inserts), 4)  # 14+1 quote per market-neutral chunk
+        self.assertEqual([len(p) for _,p in inserts], [70,98,5,7])
+
     def test_workflow_cron_and_no_issue_flag(self):
         text=(ROOT/'.github/workflows/blue_kis_web_live_r14.yml').read_text()
         self.assertIn("'*/5 23 * * 0-4'",text)
