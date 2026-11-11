@@ -121,7 +121,7 @@ def write_quotes(db, quotes: list[dict], observed: datetime):
         bind_latest.extend([day,q['market'],q['code'],q['received_at_utc'],
                             json.dumps(q,ensure_ascii=False,separators=(',',':'))])
         bind_history.extend([day,q['market'],q['code'],q['received_at_utc'],
-                             q['price'],q['accumulated_volume'],q['phase']])
+                     str(q['price']),str(q['accumulated_volume']),q['phase']])
     # Distinct key per market prevents overwriting KRX quote with an NXT quote.
     v=','.join('(?,?,?,?,?)' for _ in quotes)
     db.query(f'''INSERT INTO {LATEST} (trade_date,market,code,received_at_utc,payload_json)
