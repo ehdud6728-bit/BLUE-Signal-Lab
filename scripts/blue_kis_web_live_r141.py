@@ -121,17 +121,28 @@ def write_quotes(db, quotes: list[dict], observed: datetime):
         bind_latest.extend([day,q['market'],q['code'],q['received_at_utc'],
                             json.dumps(q,ensure_ascii=False,separators=(',',':'))])
         bind_history.extend([day,q['market'],q['code'],q['received_at_utc'],
-                     str(q['price']),str(q['accumulated_volume']),q['phase']])
-    # Distinct key per market prevents overwriting KRX quote with an NXT quote.
-    v=','.join('(?,?,?,?,?)' for _ in quotes)
-    db.query(f'''INSERT INTO {LATEST} (trade_date,market,code,received_at_utc,payload_json)
-      VALUES {v} ON CONFLICT(trade_date,market,code) DO UPDATE SET
-      received_at_utc=excluded.received_at_utc,payload_json=excluded.payload_json
-      WHERE excluded.received_at_utc>{LATEST}.received_at_utc''',bind_latest)
-    h=','.join('(?,?,?,?,?,?,?)' for _ in quotes)
-    db.query(f'''INSERT INTO {HISTORY}
-      (trade_date,market,code,received_at_utc,price,volume,phase)
-      VALUES {h} ON CONFLICT(trade_date,market,code,received_at_utc) DO NOTHING''',bind_history)
+                             str(q['price']),str(q['accumulated_volume']),q['phase']])
+    # Cloudflare D1 restricts bind parameters to 100 PER statement.
+    # Latest uses 5 parameters/row; history uses 7. The history limit is
+    # floor(100/7)=14 rows. Split both inserts into identical 14-row chunks.
+    # Validate the full batch before issuing any D1 write (above).
+    D1_BIND_LIMIT = 100
+    HISTORY_BIND_FIELDS = 7
+    LATEST_BIND_FIELDS = 5
+    batch_rows = D1_BIND_LIMIT // HISTORY_BIND_FIELDS
+    for offset in range(0, len(quotes), batch_rows):
+        count = min(batch_rows, len(quotes) - offset)
+        v = ','.join('(?,?,?,?,?)' for _ in range(count))
+        db.query(f'''INSERT INTO {LATEST} (trade_date,market,code,received_at_utc,payload_json)
+          VALUES {v} ON CONFLICT(trade_date,market,code) DO UPDATE SET
+          received_at_utc=excluded.received_at_utc,payload_json=excluded.payload_json
+          WHERE excluded.received_at_utc>{LATEST}.received_at_utc''',
+          bind_latest[offset*LATEST_BIND_FIELDS:(offset+count)*LATEST_BIND_FIELDS])
+        h = ','.join('(?,?,?,?,?,?,?)' for _ in range(count))
+        db.query(f'''INSERT INTO {HISTORY}
+          (trade_date,market,code,received_at_utc,price,volume,phase)
+          VALUES {h} ON CONFLICT(trade_date,market,code,received_at_utc) DO NOTHING''',
+          bind_history[offset*HISTORY_BIND_FIELDS:(offset+count)*HISTORY_BIND_FIELDS])
     cutoff=(observed.astimezone(KST).date()-timedelta(days=20)).isoformat()
     db.query(f'DELETE FROM {LATEST} WHERE trade_date<?',[cutoff])
     db.query(f'DELETE FROM {HISTORY} WHERE trade_date<?',[cutoff])
