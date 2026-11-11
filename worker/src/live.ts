@@ -10,6 +10,7 @@ export type LiveQuote = {
   market:string;market_label:string;phase:string;
   reported_trade_date?:string|null;reported_trade_day_matches_today?:boolean|null;
   exchange_tick_time_verified:boolean;source?:string;research_only:boolean;
+  tracking_started_at_utc?:string|null;tracking_start_source?:string|null;
 };
 function kstParts(now:Date):{date:string;minutes:number;weekday:number} {
   const fmt=new Intl.DateTimeFormat('en-US',{
@@ -58,7 +59,26 @@ export async function liveQuotes(db:D1Database):Promise<Record<string,unknown>> 
         phase:table.endsWith('r141')?(raw.phase||'UNKNOWN_PHASE'):'LEGACY_R14_UNVERIFIED'} as LiveQuote);
     }catch{/* Malformed source records never reach the browser */}
   }
-  const received=latest.reduce((acc,x)=>x.received_at_utc>acc?x.received_at_utc:acc,'');
+  // R154_CLARITY: first observed quote date, never substitute the EOD signal date.
+  try {
+    const check=await db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='blue_kis_first_seen_r154'").first();
+    const codes=[...new Set(latest.map(x=>x.code))];
+    if(codes.length){
+      const seen=check ? await db.prepare(`SELECT market,code,first_observed_at_utc,source
+        FROM blue_kis_first_seen_r154 WHERE code IN (${codes.map(()=>'?').join(',')})`)
+          .bind(...codes).all<{market:string;code:string;first_observed_at_utc:string;source:string}>()
+        : await db.prepare(`SELECT market,code,MIN(received_at_utc) AS first_observed_at_utc,
+          'RETAINED_HISTORY' AS source FROM blue_kis_live_history_r141
+          WHERE code IN (${codes.map(()=>'?').join(',')}) GROUP BY market,code`)
+          .bind(...codes).all<{market:string;code:string;first_observed_at_utc:string;source:string}>();
+      const map=new Map<string,{market:string;code:string;first_observed_at_utc:string;source:string}>(
+        seen.results.map(r=>[r.market+':'+r.code,r] as const));
+      for(const row of latest){const first=map.get(row.market+':'+row.code);
+        if(first){row.tracking_started_at_utc=first.first_observed_at_utc;
+          row.tracking_start_source=first.source;}}
+    }
+  } catch { /* metadata unavailable: preserve verified existing quotes */ }
+  const received=latest.reduce((acc,x)=>x.received_at_utc>acc?x.received_at_utc:'');
   const now=new Date();const state=kstParts(now);
   const age=received?Math.max(0,(now.getTime()-Date.parse(received))/60000):null;
   const current=state.date===latestDay;

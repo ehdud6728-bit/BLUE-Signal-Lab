@@ -12,10 +12,16 @@ type Performance={code:string;day:string;status:string;baseline?:number;
  highest_price?:number|null;highest_day?:string|null;
  recent_close?:number|null;recent_day?:string|null;
  quote_price?:number|null;quote_high?:number|null;quote_day?:string|null;
- quote_at?:string|null;quote_market?:string|null;last_error?:string|null};
+ quote_at?:string|null;quote_market?:string|null;last_error?:string|null;signal_names?:string|null};
 const perfId=(x:{code:string;day:string})=>`${x.code}:${x.day}`;
 const pctChange=(n:number|null|undefined,base:number)=>typeof n==='number'&&Number.isFinite(n)&&n>0&&base>0?(n/base-1)*100:null;
 const pctText=(p:number|null)=>p===null?'—':`${p>0?'+':''}${p.toFixed(2)}%`;
+// R154_CLARITY: distinguish original scan signals from later AI commentary.
+const discoveredSignals=(stored:string[]|undefined,verified:string|null|undefined):string[]=>{
+ const source=stored?.length?stored:(verified||'').split(',');
+ return [...new Set(source.flatMap(s=>String(s).split(',')).map(s=>s.trim())
+   .filter(s=>/^[A-Za-z0-9_\-]{2,48}$/.test(s)).map(s=>s.replace(/^BB/i,'BLUE')))];
+};
 const statusText=(s:string)=>({QUEUED:'등록 완료 · 수집 대기',NOT_REGISTERED:'수집 요청 전',
   HISTORY_PARTIAL:'과거 가격 확인 중',WAITING_TOKEN:'KIS 토큰 확인 필요',
   PROVIDER_RETRY:'시세 조회 재시도 예정',WAITING_NEXT_SESSION:'다음 거래일 대기',
@@ -185,7 +191,7 @@ export default function SmartBasket({quickAddRequest,onItemsChange,active=true}:
    new Set(items.filter(x=>pct(x)!==null).map(x=>x.day)).size===1;
   return <section className="panel blue-basket r152-basket-compact" id="blue-basket" aria-labelledby="blue-basket-h">
    <header className="r152-basket-head">
-     <div><h2 id="blue-basket-h"><ShoppingBasket size={18}/> AI 스마트 장바구니 <small>R1.5.2</small></h2>
+     <div><h2 id="blue-basket-h"><ShoppingBasket size={18}/> AI 스마트 장바구니 <small>R1.5.4</small></h2>
        <p>검색 결과의 장바구니 아이콘으로 직접 담고, 이곳에서 AI 후보와 비교합니다.</p></div>
      <button type="button" className="r152-ai-generate" disabled={aiBusy} onClick={()=>void generateAi()}>
        {aiBusy?<RefreshCw size={17}/>:<Bot size={17}/>}{aiBusy?'AI 분석 중…':'AI 후보 만들기'}
@@ -221,6 +227,7 @@ export default function SmartBasket({quickAddRequest,onItemsChange,active=true}:
   {!visible.length?<div className="basket-empty">아직 담긴 종목이 없습니다. 검색 결과에서 담기 아이콘을 누르거나 AI 후보를 생성하세요.</div>:
    <div className="basket-list">{visible.map(it=>{const q=latestQuote.get(it.code),growth=pct(it);
      const pr=performance[perfId(it)];
+     const signalChips=discoveredSignals(it.signals,pr?.signal_names);
      const quoteIsLater=!!(pr?.quote_day&&pr.quote_day>it.day&&pr.quote_day>=(pr.recent_day||''));
      const recent=quoteIsLater?pr?.quote_price:pr?.recent_day&&pr.recent_day>it.day?pr?.recent_close:null;
      const recentDay=quoteIsLater?pr?.quote_day:pr?.recent_day;
@@ -233,9 +240,17 @@ export default function SmartBasket({quickAddRequest,onItemsChange,active=true}:
      const state=pr?statusText(pr.status):'등록 확인 중';
     return <article className="basket-record" key={it.id}>
      <div className="basket-record-head"><div><span className={`basket-src ${it.source==='AI'?'ai':''}`}>{it.source==='AI'?'AI 선택':'직접 선택'}</span>
-       <strong>{it.name}</strong> <small>{it.code} · 발견가 {cash(it.baseline)}원 ({it.day})</small></div>
+       <strong>{it.name}</strong> <small>{it.code}</small></div>
        <button type="button" className="basket-delete" title="장바구니에서 제거" aria-label={`${it.name} 제거`}
        onClick={()=>setItems(old=>old.filter(x=>x.id!==it.id))}><Trash2 size={16}/></button></div>
+     <div className="r154-origin-strip">
+       <div className="r154-discovery-price"><span>발견가</span><strong>{cash(it.baseline)}원</strong><small>{it.day} · 확정 종가</small></div>
+       <div className="r154-discovery-signals"><span>발견 당시 기술 신호</span>
+         <div>{signalChips.length?signalChips.slice(0,5).map(t=><span className="r154-signal-chip" key={t}>{t}</span>):
+           <small className="r154-no-signal">원본 신호 확인 불가</small>}
+           {signalChips.length>5&&<small className="r154-more-signals">+{signalChips.length-5}</small>}</div>
+       </div>
+     </div>
      <div className="basket-record-stats r153-price-grid">
        <div><span>검색 이후 최고가</span><b>{maxHigh?`${cash(maxHigh)}원`:'—'}</b>
          <small>{maxHigh?`${pctText(pctChange(maxHigh,it.baseline))} · ${maxHighDay||''}${maxHigh===intradayHigh?' (장중 관측)':''}`:pending?'수집 중':'이후 거래 없음 / 미확인'}</small></div>

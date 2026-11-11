@@ -12,6 +12,8 @@ import './ai.css';
 import './r151-navigation.css';
 import './r152-four-tabs.css';
 import './r153-performance.css';
+// R154_CLARITY: technical signal chips and verified tracking metadata.
+import './r154-clarity.css';
 
 // Keep the existing production API and Cloudflare Access cookies.
 const API = (import.meta.env.VITE_API_BASE || 'https://blue-signal-lab-api-v2.ehdud6728.workers.dev').replace(/\/+$/, '');

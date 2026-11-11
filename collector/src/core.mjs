@@ -152,6 +152,15 @@ export async function ensureTables(db){
     db.prepare('CREATE TABLE IF NOT EXISTS blue_kis_collector_runs_r142 (id TEXT PRIMARY KEY,started_at_utc TEXT NOT NULL,status TEXT NOT NULL,source_date TEXT,source_kind TEXT,markets TEXT,attempted INTEGER NOT NULL,saved INTEGER NOT NULL,rejected INTEGER NOT NULL,reason TEXT)')
   ]);
   await db.prepare('INSERT OR IGNORE INTO blue_kis_collector_lock_r142(id,lease_until_ms) VALUES(1,0)').run();
+  // R154_CLARITY: preserve first *observed* KIS collection; old 20d retained history is a lower-bound only.
+  try {
+    await db.prepare(`CREATE TABLE IF NOT EXISTS blue_kis_first_seen_r154 (
+      market TEXT NOT NULL, code TEXT NOT NULL, first_observed_at_utc TEXT NOT NULL,
+      source TEXT NOT NULL, PRIMARY KEY(market,code))`).run();
+    await db.prepare(`INSERT OR IGNORE INTO blue_kis_first_seen_r154(market,code,first_observed_at_utc,source)
+      SELECT market,code,MIN(received_at_utc),'RETAINED_HISTORY'
+      FROM blue_kis_live_history_r141 GROUP BY market,code`).run();
+  } catch { console.warn('BLUE_R154_FIRST_SEEN_INIT_UNAVAILABLE'); }
 }
 export async function takeLease(db,now){
   const x=await db.prepare('UPDATE blue_kis_collector_lock_r142 SET lease_until_ms=? WHERE id=1 AND lease_until_ms<?').bind(now.getTime()+240000,now.getTime()).run();
@@ -220,6 +229,14 @@ export async function collect(env, now=new Date(),deps={}){
     const keys=new Set();
     for(const x of quotes){const k=x.market+':'+x.code;if(keys.has(k))throw Error('DUPLICATE_KEY');keys.add(k);}
     for(const stmt of batchStatements(db,quotes))await stmt.run();
+    // Tracking provenance is optional. Failure cannot interrupt the original quote pipeline.
+    try {
+      for(const q of quotes) {
+        await db.prepare(`INSERT OR IGNORE INTO blue_kis_first_seen_r154
+          (market,code,first_observed_at_utc,source) VALUES(?,?,?,'FIRST_COLLECTED')`)
+          .bind(q.market,q.code,q.received_at_utc).run();
+      }
+    } catch { console.warn('BLUE_R154_FIRST_SEEN_SAVE_UNAVAILABLE'); }
     report.saved=quotes.length;
     report.status=report.rejected?'PARTIAL_QUOTES':'OK';
     const cutoff=kstParts(new Date(now.getTime()-20*86400000)).date;

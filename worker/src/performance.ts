@@ -82,8 +82,14 @@ export async function basketWatch(req:Request,env:PerformanceEnv):Promise<Respon
    .bind(it.code,it.day).first();
   if(!x){out.push({...it,status:'NOT_REGISTERED'});continue;}
   // Daily history is complete only when all requested dates have been covered.
+  // R154_CLARITY: server-verified discovery signals, including old locally saved baskets.
+  const origin=await db.prepare(`SELECT s.signal_names FROM signals s JOIN runs r ON r.run_id=s.run_id
+    WHERE s.code=? AND s.day=? AND r.is_demo=0 AND r.latest_price_date=s.day
+    ORDER BY r.created_at DESC,r.run_id DESC LIMIT 1`).bind(it.code,it.day)
+    .first<{signal_names:string|null}>();
   const complete=x.status==='READY'||x.status==='WAITING_NEXT_SESSION';
   out.push({code:x.code,day:x.base_day,baseline:x.baseline_close,status:x.status,
+   signal_names:typeof origin?.signal_names==='string'?origin.signal_names.slice(0,240):null,
    registered_at:x.created_at_utc,checked_at:x.checked_at_utc,
    last_covered_day:x.progress_to_day,
    highest_price:complete?x.highest_price:null,highest_day:complete?x.highest_day:null,
