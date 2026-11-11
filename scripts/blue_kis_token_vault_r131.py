@@ -134,9 +134,11 @@ class D1Vault:
             return result
         except VaultError:
             raise
-        except (error.HTTPError, error.URLError, TimeoutError, OSError, ValueError, UnicodeError, AttributeError):
-            raise VaultError('D1_UNAVAILABLE') from None
-
+        except error.HTTPError as exc:
+            raise VaultError(f'D1_HTTP_{exc.code}') from None
+        except (error.URLError, TimeoutError, OSError, ValueError, UnicodeError, AttributeError):
+            raise VaultError('D1_NETWORK_UNAVAILABLE') from None
+            
     def ensure_table(self):
         self.query('''CREATE TABLE IF NOT EXISTS blue_kis_token_vault_v1 (
             scope TEXT PRIMARY KEY, ciphertext TEXT NOT NULL,
