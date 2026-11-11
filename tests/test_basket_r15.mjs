@@ -45,6 +45,7 @@ test('POST uses provider selection, filters to verified symbols and caches',asyn
  const db=fakeDb(),old=globalThis.fetch;let called=0;globalThis.fetch=async(_url,req)=>{
   called++;const body=JSON.parse(req.body);assert.ok(body.contents[0].parts[0].text.includes('005930'));
   assert.equal(body.generationConfig.responseMimeType,'application/json');
+  assert.equal(Object.hasOwn(body.generationConfig,'temperature'),false);
   return new Response(JSON.stringify({candidates:[{content:{parts:[{text:JSON.stringify({picks:[
    {code:'999999',reason:'fake'},{code:'005930',reason:'검증 가능한 신호',risk:'추세 약화',watch:'후속 거래량'}
   ]})}]}}]}),{status:200});

@@ -172,7 +172,7 @@ async function askGemini(key:string,model:string,contents:string):Promise<{text:
       headers:{'Content-Type':'application/json','x-goog-api-key':key},
       body:JSON.stringify({contents:[{parts:[{text:contents}]}],
         // Gemini 3.x free tier: text analysis only. Google Search grounding is not available.
-        generationConfig:{temperature:0.2,maxOutputTokens:4096}}),
+        generationConfig:{maxOutputTokens:4096}}),
     });
   } finally {clearTimeout(timeout);}
   if(!res.ok) {

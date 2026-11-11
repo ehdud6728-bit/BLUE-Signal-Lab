@@ -103,10 +103,19 @@ export async function handleBasketAi(req:Request,env:BasketEnv):Promise<Response
    const response=await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`,{
      method:'POST',signal:abort.signal,
      headers:{'Content-Type':'application/json','x-goog-api-key':env.GEMINI_API_KEY},
-     body:JSON.stringify({contents:[{parts:[{text:prompt}]}],generationConfig:{temperature:0.15,maxOutputTokens:3600,responseMimeType:'application/json'}})
+     body:JSON.stringify({contents:[{parts:[{text:prompt}]}],generationConfig:{maxOutputTokens:3600,responseMimeType:'application/json'}})
    });
    // R155_AI_REPAIR: stable, non-sensitive provider status classification.
    if(!response.ok){
+    if(response.status===400){
+     let status='UNKNOWN';
+     try{
+      const upstream=await response.clone().json() as {error?:{status?:unknown}};
+      const code=upstream?.error?.status;
+      if(typeof code==='string' && /^[A-Z_]{3,40}$/.test(code))status=code;
+     }catch{/* No upstream text is logged or returned */}
+     console.warn('BLUE_R156_GEMINI_400',{model,provider_status:status,request_profile:'json_default_sampling'});
+    }
     const code=response.status===429?'AI_QUOTA':
      response.status===401||response.status===403?'AI_AUTH':
      response.status===404?'AI_MODEL_UNAVAILABLE':
@@ -139,7 +148,7 @@ export async function handleBasketAi(req:Request,env:BasketEnv):Promise<Response
     AI_QUOTA:'Gemini 사용량 제한(429)입니다. 사용량을 확인하고 다음에 다시 시도하세요.',
     AI_AUTH:'Gemini API 키 또는 모델 이용 권한이 거부됐습니다. Worker 비밀키와 API 설정을 확인하세요.',
     AI_MODEL_UNAVAILABLE:'해당 API 키에서 Gemini 모델을 찾거나 사용할 수 없습니다. Worker 모델 설정을 확인하세요.',
-    AI_BAD_REQUEST:'Gemini 요청 형식이 거부됐습니다. 모델 입력과 JSON 출력 설정을 점검해야 합니다.',
+    AI_BAD_REQUEST:'Gemini 요청이 거부됐습니다. 기본 샘플링으로도 발생하면 Cloudflare Worker의 BLUE_R156_GEMINI_400 진단 상태와 모델 접근 권한을 확인하세요.',
     AI_INVALID_JSON:'Gemini 응답이 유효한 JSON 형식이 아닙니다. 후보 생성은 저장되지 않았습니다.',
     AI_NO_VALID_PICKS:'Gemini가 검색 후보 밖의 종목을 제시했거나 잘못된 후보 응답을 보냈습니다.',
     AI_TIMEOUT:'Gemini 응답 제한시간(45초)을 넘었습니다. 나중에 다시 시도하세요.',
