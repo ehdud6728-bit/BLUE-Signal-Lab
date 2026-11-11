@@ -1,0 +1,23 @@
+/* R1.5.3: use a single persistent bottom navigation at ALL viewport widths. */
+.r152-main-tabs{display:none!important}
+.app-shell{padding-bottom:calc(86px + env(safe-area-inset-bottom))}
+@media(min-width:791px){
+ .mobile-dock{display:flex!important;position:fixed;left:50%;right:auto;bottom:12px;
+  transform:translateX(-50%);z-index:60;width:min(760px,calc(100vw - 32px));height:65px;
+  border:1px solid #ccdaf0;border-radius:15px;background:rgba(255,255,255,.97);
+  box-shadow:0 8px 30px rgba(17,46,88,.16);padding:6px;gap:4px;}
+ .mobile-dock button{flex:1;display:flex;flex-direction:column;align-items:center;
+  justify-content:center;gap:3px;border:0;border-radius:10px;background:transparent;
+  color:#6680a4;font-size:11px;font-weight:800;cursor:pointer;}
+ .mobile-dock button.dock-primary{color:#1e5add;background:#eff4ff}
+}
+.r153-performance-status{display:flex;align-items:center;gap:5px;flex-wrap:wrap;color:#64809f;font-size:11px;margin:7px 0 10px}
+.r153-row-state{margin-top:4px;font-size:10px;color:#8192aa}
+.r153-price-grid small{display:block;margin-top:2px;font-size:10px;color:#8896ad;line-height:1.3}
+.r153-price-grid b{font-variant-numeric:tabular-nums}
+@media(max-width:700px){
+ .r153-price-grid{grid-template-columns:repeat(3,minmax(0,1fr))!important;gap:6px!important}
+ .r153-price-grid b{font-size:11px!important;overflow-wrap:anywhere}
+ .r153-price-grid small{font-size:9px}
+ .r152-basket-compact .basket-record-head small{white-space:normal;font-size:10px}
+}
