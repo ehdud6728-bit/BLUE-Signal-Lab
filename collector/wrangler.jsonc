@@ -9,7 +9,7 @@
   }],
   "triggers": {"crons": ["*/5 * * * *"]},
   "vars": {
-    "COLLECTOR_ENABLED": "false",
+    "COLLECTOR_ENABLED": "true",
     "CANDIDATE_LIMIT": "12",
     "CLOSED_DATES": ""
   }
