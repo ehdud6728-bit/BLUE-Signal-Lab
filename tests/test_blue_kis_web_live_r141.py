@@ -128,7 +128,7 @@ class TestR141(unittest.TestCase):
             self.assertEqual(obtain.call_args.kwargs['allow_new'],False)
             self.assertEqual(json.loads((Path(folder)/'AUDIT.json').read_text())['status'],'PAUSED_TOKEN_EMPTY_OR_EXPIRED')
     def test_workflow_cron_and_no_issue_flag(self):
-        text=(ROOT/'blue_kis_web_live_r14.yml').read_text()
+        text=(ROOT/'.github/workflows/blue_kis_web_live_r14.yml').read_text()
         self.assertIn("'*/5 23 * * 0-4'",text)
         self.assertIn("'*/5 0-10 * * 1-5'",text)
         self.assertNotIn('--allow-new-token',text)
