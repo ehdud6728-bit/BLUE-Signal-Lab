@@ -1,0 +1,67 @@
+name: BLUE R1.4 KIS Web Live Monitor (CACHE ONLY, READ ONLY)
+
+on:
+  workflow_dispatch:
+    inputs:
+      candidate_limit:
+        description: '1-40 KRX EOD candidates; start with 12'
+        type: string
+        required: true
+        default: '12'
+      force_probe:
+        description: 'Manual weekday test outside the 13:00-15:25 KST collection window. Does NOT issue tokens.'
+        type: boolean
+        required: true
+        default: false
+  # UTC 04:00-06:55 => KST 13:00-15:55. Python SKIPS after 15:25.
+  # GitHub Actions schedule is best-effort, may be delayed or missed.
+  schedule:
+    - cron: '*/5 4-6 * * 1-5'
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: blue-kis-token-vault-single-session
+  cancel-in-progress: false
+
+jobs:
+  collect_web_quotes:
+    runs-on: ubuntu-latest
+    timeout-minutes: 9
+    steps:
+      - name: Guard BLUE repository
+        shell: bash
+        run: |
+          test "$GITHUB_REPOSITORY" = 'ehdud6728-bit/BLUE-Signal-Lab' || { echo 'WRONG_REPOSITORY'; exit 1; }
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install crypto dependency for token cache read
+        run: python -m pip install 'cryptography>=43,<48'
+      - name: Run R1.4 pure unit tests without making KIS requests
+        run: python -m unittest discover -s tests -p test_blue_kis_web_live_r14.py -v
+      - name: Collect previously verified candidates and publish KIS snapshots to D1
+        env:
+          KIS_APP_KEY: ${{ secrets.KIS_APP_KEY }}
+          KIS_APP_SECRET: ${{ secrets.KIS_APP_SECRET }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          GITHUB_TOKEN: ${{ github.token }}
+          CANDIDATE_LIMIT: ${{ github.event_name == 'schedule' && '12' || inputs.candidate_limit }}
+          FORCE_PROBE: ${{ inputs.force_probe }}
+        shell: bash
+        run: |
+          args=(--limit "$CANDIDATE_LIMIT" --out output/kis_r14_live)
+          if [ "$FORCE_PROBE" = 'true' ]; then args+=(--force-probe); fi
+          python scripts/blue_kis_web_live_r14.py "${args[@]}"
+      - name: Upload audit (never any keys or bearer tokens)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: BLUE_KIS_R14_WEB_LIVE_${{ github.run_id }}
+          path: output/kis_r14_live/AUDIT.json
+          if-no-files-found: warn
+          retention-days: 7

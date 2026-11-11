@@ -1,0 +1,71 @@
+name: BLUE R1.4 Install Read-only Live UI Hooks (MANUAL)
+
+on:
+  workflow_dispatch:
+    inputs:
+      apply_changes:
+        description: 'Set TRUE to commit 2 minimal hook changes to main.tsx / index.ts after validation.'
+        type: boolean
+        required: true
+        default: false
+
+permissions:
+  contents: write
+
+concurrency:
+  group: blue-r14-install
+  cancel-in-progress: false
+
+jobs:
+  apply_hooks:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - name: Guard BLUE repo
+        shell: bash
+        run: |
+          test "$GITHUB_REPOSITORY" = 'ehdud6728-bit/BLUE-Signal-Lab'
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Test hook patcher without changing files
+        run: |
+          python -m unittest discover -s tests -p test_blue_kis_r14_apply.py -v
+          python scripts/blue_kis_r14_apply.py
+      - name: Apply minimal hooks to working tree
+        if: inputs.apply_changes
+        run: |
+          python scripts/blue_kis_r14_apply.py --write
+          git diff --check
+      - uses: actions/setup-node@v4
+        if: inputs.apply_changes
+        with:
+          node-version: '22'
+      - name: Verify web build (NO deployment)
+        if: inputs.apply_changes
+        working-directory: web
+        run: |
+          npm install --no-package-lock --no-audit --no-fund
+          npm run build
+      - name: Verify Worker compilation (NO deployment)
+        if: inputs.apply_changes
+        working-directory: worker
+        run: |
+          npm install --no-package-lock --no-audit --no-fund
+          npx wrangler deploy --dry-run --outdir /tmp/blue-r14-worker-build
+      - name: Commit 2 isolated hooks only (NO automatic deployment)
+        if: inputs.apply_changes
+        shell: bash
+        run: |
+          if git diff --quiet -- web/src/main.tsx worker/src/index.ts; then
+            echo 'BLUE_R14_HOOKS_ALREADY_PRESENT'
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add web/src/main.tsx worker/src/index.ts
+          git commit -m 'feat(blue): add isolated R1.4 read-only intraday panels'
+          git push origin HEAD:main
