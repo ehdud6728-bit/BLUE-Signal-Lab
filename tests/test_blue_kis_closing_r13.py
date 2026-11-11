@@ -71,16 +71,17 @@ class R13Tests(unittest.TestCase):
         self.assertEqual(len(bars),1)
         self.assertEqual(bars[0]['bar_time'],'093100')
 
-    def test_one_token_per_client_reused_for_multiple_calls(self):
-        responses=[{'access_token':'SECRET_VALUE'},
-                   {'rt_cd':'0','output':{}},{'rt_cd':'0','output':{}}]
+    def test_one_supplied_token_reused_and_never_issued_implicitly(self):
+        responses=[{'rt_cd':'0','output':{}},{'rt_cd':'0','output':{}}]
         with patch.object(r13,'http_json',side_effect=responses) as api, patch.object(r13.time,'sleep'):
-            client=r13.KISClient('a_fake_key','a_fake_secret')
+            client=r13.KISClient('a_fake_key','a_fake_secret','a_cached_token')
             client.quote('005930');client.quote('000660')
-            self.assertEqual(api.call_count,3)
+            self.assertEqual(api.call_count,2)
             self.assertEqual(client.requests,2)
-            self.assertEqual(api.call_args_list[0].args[2],'/oauth2/tokenP')
-            self.assertNotIn('SECRET_VALUE',str(client.requests))
+            self.assertTrue(all(x.args[2]!='/oauth2/tokenP' for x in api.call_args_list))
+            self.assertNotIn('a_cached_token',str(client.requests))
+        with self.assertRaisesRegex(r13.Failure, 'TOKEN_NOT_PROVIDED'):
+            r13.KISClient('a_fake_key','a_fake_secret','')
 
     def test_session_slots(self):
         now=datetime(2026,11,11,14,14,tzinfo=r13.KST)
