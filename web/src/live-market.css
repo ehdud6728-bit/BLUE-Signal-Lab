@@ -1,0 +1,22 @@
+/* BLUE R1.4: separate intraday UI, does not change EOD search styles. */
+.blue-live{padding:19px;border:1px solid #dbe6f8;background:#fff;border-radius:15px;scroll-margin-top:10px}
+.blue-live-head{display:flex;justify-content:space-between;align-items:flex-start;gap:14px;flex-wrap:wrap}
+.blue-live h2{display:flex;align-items:center;gap:8px;color:#15376d;font-size:18px;margin:0 0 6px}
+.blue-live h2 svg{color:#245fe2}.blue-live h2 small{font-size:11px;color:#62799c}
+.blue-live-head p,.blue-live-summary,.blue-live-disclaimer,.blue-live-note{font-size:12px;color:#687c98;line-height:1.55;margin:0}
+.blue-live-indicator{border:1px solid #d4dfee;border-radius:100px;color:#62738f;background:#f4f7fc;font-size:11px;font-weight:800;padding:6px 10px}
+.blue-live-indicator.blue-live-fresh{color:#1f6c4f;background:#e9f7ed;border-color:#c1e6cd}
+.blue-live-summary{display:flex;gap:10px 22px;flex-wrap:wrap;padding:13px 0;margin:10px 0;border-bottom:1px solid #e8eef8}
+.blue-live-summary span{display:flex;align-items:center;gap:5px}.blue-live-summary strong{color:#244a80}
+.blue-live-tablewrap{overflow:auto;width:100%;max-height:380px}
+.blue-live-table{border-collapse:collapse;width:100%;min-width:550px;font-size:12px;color:#263f63}
+.blue-live-table th{white-space:nowrap;text-align:left;padding:9px 10px;border-bottom:1px solid #e0e8f3;background:#f5f8fe;font-size:11px;color:#617897}
+.blue-live-table td{padding:11px 10px;border-bottom:1px solid #edf1f8}
+.blue-live-table td small{display:block;font-size:10px;margin-top:3px;color:#7c8eaa}
+.blue-live-number{text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums}
+.blue-live-table th:not(:first-child){text-align:right}
+.blue-live-up{color:#cc3939;font-weight:800}.blue-live-down{color:#2566c8;font-weight:800}
+.blue-live-disclaimer{display:flex;gap:7px;align-items:flex-start;padding-top:11px}.blue-live-disclaimer svg{flex-shrink:0;margin-top:2px}
+.blue-live-note{padding:14px;background:#f4f7fc;border-radius:9px;margin:12px 0}
+.blue-live-warning{color:#a74b13;background:#fff4e9;display:flex;gap:8px}
+@media(max-width:790px){.blue-live{padding:13px}.blue-live h2{font-size:16px}.blue-live-summary{gap:6px 12px}.blue-live-table{min-width:510px}.blue-live-table td,.blue-live-table th{padding:9px 7px}}
