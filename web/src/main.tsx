@@ -4,12 +4,13 @@ import SmartBasket from './SmartBasket';
 import AiWidget from './AiWidget';
 import React, {useEffect, useRef, useState} from 'react';
 import {createRoot} from 'react-dom/client';
-import {Search, CalendarDays, BarChart3, AlertCircle, RefreshCw, SlidersHorizontal, ListFilter, X, ChevronRight, Download, ArrowLeft, Activity, Clock3, Database, CheckCircle2, ShoppingBasket} from 'lucide-react';
+import {Search, CalendarDays, BarChart3, AlertCircle, RefreshCw, SlidersHorizontal, ListFilter, X, ChevronRight, Download, ArrowLeft, Activity, Clock3, Database, CheckCircle2, ShoppingBasket, Radar} from 'lucide-react';
 import './style.css';
 import './r08.css';
 import './mobile-pwa.css';
 import './ai.css';
 import './r151-navigation.css';
+import './r152-four-tabs.css';
 
 // Keep the existing production API and Cloudflare Access cookies.
 const API = (import.meta.env.VITE_API_BASE || 'https://blue-signal-lab-api-v2.ehdud6728.workers.dev').replace(/\/+$/, '');
@@ -51,7 +52,8 @@ function App(){
   const [gcFields,setGcFields]=useState<GcKey[]>([]);
   const [gcLogic,setGcLogic]=useState<'any'|'all'>('any');
   // R151_BASKET_TAB: keep both workspaces mounted, toggle only visibility.
-  const [activeView,setActiveView]=useState<'research'|'basket'>('research');
+  // R152_FOUR_TABS: separate search, live tracking, AI briefing and basket.
+  const [activeView,setActiveView]=useState<'research'|'tracking'|'ai'|'basket'>('research');
   const [basketIds,setBasketIds]=useState<string[]>(()=>{
     try{const x=JSON.parse(localStorage.getItem('blue_r15_basket_v1')||'[]');
       return Array.isArray(x)?x.filter((i:unknown)=>Boolean(i&&typeof i==='object'&&'id' in i)).map((i:any)=>String(i.id)):[];
@@ -59,7 +61,6 @@ function App(){
   });
   const basketSequence=useRef(0);
   const [basketRequest,setBasketRequest]=useState<{serial:number;item:Signal}|null>(null);
-  const [marketAiOpen,setMarketAiOpen]=useState(false);
   const [status,setStatus]=useState('');
   const [dataStatus,setDataStatus]=useState<ScanStatus>('');
   const [requestBusy,setRequestBusy]=useState(false);
@@ -193,13 +194,21 @@ function App(){
     if(!canBasket(r)||inBasket(r)||basketIds.length>=100)return;
     setBasketRequest({serial:++basketSequence.current,item:{...r,name:displayName(r)}});
   };
-  const nav=(target:'search'|'results'|'summary'|'ai'|'basket')=>{
-    if(target==='basket'){setActiveView('basket');window.setTimeout(()=>window.scrollTo({top:0,behavior:'smooth'}),15);return;}
+  const nav=(target:'search'|'results'|'summary'|'ai'|'basket'|'tracking')=>{
+    if(target==='basket'||target==='tracking'||target==='ai'){
+      setActiveView(target);
+      window.setTimeout(()=>window.scrollTo({top:0,behavior:'smooth'}),20);
+      return;
+    }
     setActiveView('research');
-    if(target==='search'){setFilterOpen(true);setTimeout(()=>formRef.current?.scrollIntoView({behavior:'smooth',block:'start'}),20);}
-    if(target==='results')resultRef.current?.scrollIntoView({behavior:'smooth',block:'start'});
-    if(target==='summary')summaryRef.current?.scrollIntoView({behavior:'smooth',block:'start'});
-    if(target==='ai'){setMarketAiOpen(true);window.setTimeout(()=>aiRef.current?.scrollIntoView({behavior:'smooth',block:'start'}),30);}
+    if(target==='search'){
+      setFilterOpen(true);
+      window.setTimeout(()=>formRef.current?.scrollIntoView({behavior:'smooth',block:'start'}),35);
+    }else if(target==='results'){
+      window.setTimeout(()=>resultRef.current?.scrollIntoView({behavior:'smooth',block:'start'}),35);
+    }else if(target==='summary'){
+      window.setTimeout(()=>summaryRef.current?.scrollIntoView({behavior:'smooth',block:'start'}),35);
+    }
   };
   const openDetail=(r:Signal)=>setSelected(r);
   const closeDetail=()=>setSelected(null);
@@ -221,14 +230,22 @@ function App(){
         {!standalone&&<button className="install-btn" onClick={()=>{void installApp();}} aria-label="앱 설치 방법"><Download size={17}/><span>앱 설치</span></button>}
       </div>
     </header>
-    <nav className="r151-main-tabs" role="tablist" aria-label="BLUE 기능 화면">
+    <nav className="r152-main-tabs" role="tablist" aria-label="BLUE 주요 기능">
       <button type="button" role="tab" aria-selected={activeView==='research'}
-        className={activeView==='research'?'active':''} onClick={()=>{setActiveView('research');window.scrollTo({top:0,behavior:'smooth'});}}>
-        <BarChart3 size={18}/> 종목 검색 · AI 시황
+        className={activeView==='research'?'active':''} onClick={()=>nav('search')}>
+        <BarChart3 size={18}/><span>종목 검색</span>
+      </button>
+      <button type="button" role="tab" aria-selected={activeView==='tracking'}
+        className={activeView==='tracking'?'active':''} onClick={()=>nav('tracking')}>
+        <Radar size={18}/><span>종목 추적</span>
+      </button>
+      <button type="button" role="tab" aria-selected={activeView==='ai'}
+        className={activeView==='ai'?'active':''} onClick={()=>nav('ai')}>
+        <Activity size={18}/><span>AI 시황</span>
       </button>
       <button type="button" role="tab" aria-selected={activeView==='basket'}
         className={activeView==='basket'?'active':''} onClick={()=>nav('basket')}>
-        <ShoppingBasket size={18}/> AI 스마트 장바구니 <span className="r151-basket-count">{basketIds.length}</span>
+        <ShoppingBasket size={18}/><span>장바구니</span><span className="r151-basket-count">{basketIds.length}</span>
       </button>
     </nav>
     {installGuide&&<div className="install-guide" role="status"><button className="guide-close" onClick={()=>setInstallGuide(false)} aria-label="안내 닫기"><X size={17}/></button>
@@ -238,7 +255,7 @@ function App(){
       <p><a href="/pwa-check.html" target="_blank" rel="noopener noreferrer">PWA 설치 진단 열기</a></p>
       <small>Cloudflare Access 로그인 페이지가 manifest·아이콘을 대신 반환하면 설치할 수 없을 수 있습니다. 접근 제어를 해제하지 말고 진단 결과를 확인하세요.</small>
     </div>}
-    <main className={"app-main "+(activeView==='basket'?'r151-basket-mode':'')}>
+    <main className={"app-main "+(activeView!=='research'?'r152-full-mode':'')}>
       <aside className={'panel search-panel '+(filterOpen?'filter-open':'filter-closed')} ref={formRef} id="search-panel">
         <div className="search-heading"><h2><SlidersHorizontal size={18}/> 검색 조건</h2><button type="button" className="filter-toggle" onClick={()=>setFilterOpen(v=>!v)} aria-expanded={filterOpen} aria-controls="filter-body">{filterOpen?'조건 접기':'조건 변경'} <ListFilter size={16}/></button></div>
         <div className="filter-body" id="filter-body">
@@ -255,10 +272,22 @@ function App(){
       </aside>
       <section className="content">
         <div className={'r151-basket-content '+(activeView==='basket'?'':'r151-hidden')}>
-          <SmartBasket searchRows={rows} quickAddRequest={basketRequest} onItemsChange={setBasketIds}/>
+          <SmartBasket quickAddRequest={basketRequest} onItemsChange={setBasketIds}/>
+        </div>
+        <div className={'r152-tracking-content '+(activeView==='tracking'?'':'r151-hidden')}>
+          <LiveMarket active={activeView==='tracking'}/>
+        </div>
+        <div className={'r152-ai-content '+(activeView==='ai'?'':'r151-hidden')}>
+          <section ref={aiRef} id="ai-panel" className="r152-ai-section">
+            <AiWidget key={'market-'+(mode==='single'?date:latest||end)} kind="market"
+              date={mode==='single'?date:latest||end}
+              observed={mode==='single'?days.find(d=>d.day===date)?.observed_stocks:null}
+              matched={mode==='single'?days.find(d=>d.day===date)?.matched_stocks:null}
+              events={mode==='single'?days.find(d=>d.day===date)?.signal_events:null}
+              searchMatched={rows}/>
+          </section>
         </div>
         <div className={'r151-research-content '+(activeView==='research'?'':'r151-hidden')}>
-        <LiveMarket />
         <div className="stats" ref={summaryRef} id="summary-panel">
           <div className="metric"><span>검색 결과</span><strong>{total==null?'—':total.toLocaleString()}</strong><small>종목</small></div>
           <div className="metric"><span>검색 거래일</span><strong>{total==null?'—':days.length}</strong><small>저장된 날짜</small></div>
@@ -267,13 +296,6 @@ function App(){
         {error&&<div className="notice error" role="alert"><AlertCircle size={17}/>{error}</div>}
         {status&&<div className="notice"><AlertCircle size={17}/>{status}</div>}
         {scanInfo&&<div className="notice" role="status"><RefreshCw size={17}/><div>{scanInfo}{actionsUrl&&<div><a href={actionsUrl} target="_blank" rel="noreferrer">GitHub 실행 결과 확인</a></div>}</div></div>}
-        <section ref={aiRef} id="ai-panel" className="ai-accordion" style={{scrollMarginTop:12}}>
-          <button type="button" className="ai-accordion-toggle" aria-expanded={marketAiOpen} aria-controls="ai-market-body" onClick={()=>setMarketAiOpen(v=>!v)}>
-            <span><Activity size={19}/> <strong>BLUE AI · 시황 브리핑</strong><small>{mode==='single'?date:latest||end} 종가 기준</small></span>
-            <span className="ai-collapse-label">{marketAiOpen?'접기':'펼치기'} <ChevronRight size={19} className={marketAiOpen?'rotated':''}/></span>
-          </button>
-          {marketAiOpen&&<div id="ai-market-body"><AiWidget key={'market-'+(mode==='single'?date:latest||end)} kind="market" date={mode==='single'?date:latest||end} observed={mode==='single'?days.find(d=>d.day===date)?.observed_stocks:null} matched={mode==='single'?days.find(d=>d.day===date)?.matched_stocks:null} events={mode==='single'?days.find(d=>d.day===date)?.signal_events:null} searchMatched={rows}/></div>}
-        </section>
         <section className="panel result" ref={resultRef} id="results-panel">
           <div className="result-heading"><h2><BarChart3 size={18}/> 검색된 종목 <small>{total===null?'검색 전':total+'건'}</small></h2><span className="eod-pill"><Clock3 size={13}/> EOD</span></div>
           <p className="result-hint">종목을 누르면 RSI · Slow · MACD · 돌파선 · 상단 매물대 정보를 볼 수 있습니다.</p>
@@ -340,9 +362,9 @@ function App(){
     </main>
     <footer>BLUE Signal Lab · RESEARCH ONLY · 매매 주문 기능 없음</footer>
     <nav className="mobile-dock" aria-label="모바일 메뉴">
-      <button onClick={()=>nav('search')}><SlidersHorizontal size={20}/><span>검색</span></button>
-      <button onClick={()=>nav('results')}><BarChart3 size={20}/><span>종목 결과</span></button>
-      <button className={activeView==='research'?'dock-primary':''} onClick={()=>nav('ai')}><Activity size={20}/><span>AI 시황</span></button>
+      <button className={activeView==='research'?'dock-primary':''} onClick={()=>nav('search')}><BarChart3 size={20}/><span>검색</span></button>
+      <button className={activeView==='tracking'?'dock-primary':''} onClick={()=>nav('tracking')}><Radar size={20}/><span>추적</span></button>
+      <button className={activeView==='ai'?'dock-primary':''} onClick={()=>nav('ai')}><Activity size={20}/><span>AI 시황</span></button>
       <button className={activeView==='basket'?'dock-primary':''} onClick={()=>nav('basket')}><ShoppingBasket size={20}/><span>장바구니</span></button>
     </nav>
     {selected&&<div className="detail-overlay" role="presentation" onMouseDown={e=>{if(e.target===e.currentTarget)closeDetail();}}>
