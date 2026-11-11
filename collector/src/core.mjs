@@ -128,7 +128,7 @@ export function parseQuote(candidate, market, phase, json, received, day){
     exchange_tick_time_verified:false,market_phase_verified:false,
     source:'KIS_REST_INQUIRE_PRICE',research_only:true};
 }
-async function getKisQuote(env, token, market, code){
+export async function getKisQuote(env, token, market, code){
   const url=new URL('/uapi/domestic-stock/v1/quotations/inquire-price',KIS_BASE);
   url.searchParams.set('FID_COND_MRKT_DIV_CODE',market);
   url.searchParams.set('FID_INPUT_ISCD',code);

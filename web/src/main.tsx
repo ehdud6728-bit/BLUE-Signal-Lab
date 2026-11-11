@@ -11,6 +11,7 @@ import './mobile-pwa.css';
 import './ai.css';
 import './r151-navigation.css';
 import './r152-four-tabs.css';
+import './r153-performance.css';
 
 // Keep the existing production API and Cloudflare Access cookies.
 const API = (import.meta.env.VITE_API_BASE || 'https://blue-signal-lab-api-v2.ehdud6728.workers.dev').replace(/\/+$/, '');
@@ -230,24 +231,7 @@ function App(){
         {!standalone&&<button className="install-btn" onClick={()=>{void installApp();}} aria-label="앱 설치 방법"><Download size={17}/><span>앱 설치</span></button>}
       </div>
     </header>
-    <nav className="r152-main-tabs" role="tablist" aria-label="BLUE 주요 기능">
-      <button type="button" role="tab" aria-selected={activeView==='research'}
-        className={activeView==='research'?'active':''} onClick={()=>nav('search')}>
-        <BarChart3 size={18}/><span>종목 검색</span>
-      </button>
-      <button type="button" role="tab" aria-selected={activeView==='tracking'}
-        className={activeView==='tracking'?'active':''} onClick={()=>nav('tracking')}>
-        <Radar size={18}/><span>종목 추적</span>
-      </button>
-      <button type="button" role="tab" aria-selected={activeView==='ai'}
-        className={activeView==='ai'?'active':''} onClick={()=>nav('ai')}>
-        <Activity size={18}/><span>AI 시황</span>
-      </button>
-      <button type="button" role="tab" aria-selected={activeView==='basket'}
-        className={activeView==='basket'?'active':''} onClick={()=>nav('basket')}>
-        <ShoppingBasket size={18}/><span>장바구니</span><span className="r151-basket-count">{basketIds.length}</span>
-      </button>
-    </nav>
+    {/* R153_BOTTOM_NAV_ONLY: navigation is in the bottom dock on every viewport. */}
     {installGuide&&<div className="install-guide" role="status"><button className="guide-close" onClick={()=>setInstallGuide(false)} aria-label="안내 닫기"><X size={17}/></button>
       <strong>휴대폰에 설치하는 방법</strong><p>안드로이드 Chrome: 오른쪽 위 ⋮ → <b>앱 설치</b> 또는 <b>홈 화면에 추가</b></p>
       <p>아이폰 Safari: 공유 버튼 → <b>홈 화면에 추가</b></p>
@@ -272,7 +256,7 @@ function App(){
       </aside>
       <section className="content">
         <div className={'r151-basket-content '+(activeView==='basket'?'':'r151-hidden')}>
-          <SmartBasket quickAddRequest={basketRequest} onItemsChange={setBasketIds}/>
+          <SmartBasket quickAddRequest={basketRequest} onItemsChange={setBasketIds} active={activeView==='basket'}/>
         </div>
         <div className={'r152-tracking-content '+(activeView==='tracking'?'':'r151-hidden')}>
           <LiveMarket active={activeView==='tracking'}/>

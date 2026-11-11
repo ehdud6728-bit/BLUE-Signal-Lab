@@ -1,6 +1,7 @@
 import { handleAi, getCachedAi } from './ai';
 import { liveQuotes } from './live';
 import { handleBasketAi } from './basket';
+import {basketWatch} from './performance';
 interface Env {
   DB: D1Database;
   CORS_ORIGIN?: string;
@@ -107,6 +108,16 @@ export default {
         if (request.method === 'POST' && request.headers.get('Origin') !== origin)
           return respond({error:'ORIGIN_DENIED'},403);
         const upstream = await handleBasketAi(request,env);
+        return new Response(upstream.body,{status:upstream.status,headers:{...cors,
+          'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store'}});
+      }
+      // R1.5.3: never accept arbitrary price data or arbitrary KIS requests.
+      // Only Access-authenticated requests on verified scan symbols may enroll.
+      if (p === '/api/basket/watch' && (request.method === 'GET'||request.method === 'POST')) {
+        if (!access) return respond({error:'ACCESS_REQUIRED'},401);
+        if (request.method==='POST' && request.headers.get('Origin')!==origin)
+          return respond({error:'ORIGIN_DENIED'},403);
+        const upstream=await basketWatch(request,env);
         return new Response(upstream.body,{status:upstream.status,headers:{...cors,
           'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store'}});
       }
