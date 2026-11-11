@@ -1,0 +1,79 @@
+name: BLUE R1.3 KIS Closing Research (REST / READ ONLY)
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: 'probe = one snapshot now; session = 14:00-15:23 KST monitor (manual start 13:40-15:23 KST)'
+        required: true
+        default: probe
+        type: choice
+        options:
+          - probe
+          - session
+      source:
+        description: 'verified-eod = prior KRX R1.1.1 artifact; sample = 3 test tickers (probe only)'
+        required: true
+        default: verified-eod
+        type: choice
+        options:
+          - verified-eod
+          - sample
+      candidate_limit:
+        description: 'EOD candidates to read (1-100); start with 12'
+        required: true
+        default: '12'
+        type: string
+      enrich:
+        description: 'Supplementary minute/program/ranking/auction API research (experimental)'
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: blue-kis-r13-single-session
+  cancel-in-progress: false
+
+jobs:
+  read_only_closing_research:
+    runs-on: ubuntu-latest
+    timeout-minutes: 115
+    steps:
+      - name: Guard target repository
+        shell: bash
+        run: |
+          test "$GITHUB_REPOSITORY" = 'ehdud6728-bit/BLUE-Signal-Lab' || exit 1
+      - name: Checkout BLUE Signal Lab
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Local-only read-only unit tests
+        run: python -m unittest discover -s tests -p test_blue_kis_closing_r13.py -v
+      - name: Verify KRX prior-EOD provenance and collect KIS read-only snapshots
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          KIS_APP_KEY: ${{ secrets.KIS_APP_KEY }}
+          KIS_APP_SECRET: ${{ secrets.KIS_APP_SECRET }}
+          MODE: ${{ inputs.mode }}
+          SOURCE: ${{ inputs.source }}
+          CANDIDATE_LIMIT: ${{ inputs.candidate_limit }}
+          ENRICH: ${{ inputs.enrich }}
+        run: |
+          args=(--mode "$MODE" --source "$SOURCE" --limit "$CANDIDATE_LIMIT" --out output/kis_r13)
+          if [ "$ENRICH" = 'true' ]; then args+=(--enrich); fi
+          python scripts/blue_kis_closing_r13.py "${args[@]}"
+      - name: Upload research-only audit and quote snapshots (no secrets)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: BLUE_KIS_R13_RESEARCH_${{ github.run_id }}
+          path: output/kis_r13/
+          if-no-files-found: warn
+          retention-days: 7
