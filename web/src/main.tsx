@@ -4,11 +4,12 @@ import SmartBasket from './SmartBasket';
 import AiWidget from './AiWidget';
 import React, {useEffect, useRef, useState} from 'react';
 import {createRoot} from 'react-dom/client';
-import {Search, CalendarDays, BarChart3, AlertCircle, RefreshCw, SlidersHorizontal, ListFilter, X, ChevronRight, Download, ArrowLeft, Activity, Clock3, Database, CheckCircle2} from 'lucide-react';
+import {Search, CalendarDays, BarChart3, AlertCircle, RefreshCw, SlidersHorizontal, ListFilter, X, ChevronRight, Download, ArrowLeft, Activity, Clock3, Database, CheckCircle2, ShoppingBasket} from 'lucide-react';
 import './style.css';
 import './r08.css';
 import './mobile-pwa.css';
 import './ai.css';
+import './r151-navigation.css';
 
 // Keep the existing production API and Cloudflare Access cookies.
 const API = (import.meta.env.VITE_API_BASE || 'https://blue-signal-lab-api-v2.ehdud6728.workers.dev').replace(/\/+$/, '');
@@ -49,6 +50,15 @@ function App(){
   const [localQuery,setLocalQuery]=useState('');
   const [gcFields,setGcFields]=useState<GcKey[]>([]);
   const [gcLogic,setGcLogic]=useState<'any'|'all'>('any');
+  // R151_BASKET_TAB: keep both workspaces mounted, toggle only visibility.
+  const [activeView,setActiveView]=useState<'research'|'basket'>('research');
+  const [basketIds,setBasketIds]=useState<string[]>(()=>{
+    try{const x=JSON.parse(localStorage.getItem('blue_r15_basket_v1')||'[]');
+      return Array.isArray(x)?x.filter((i:unknown)=>Boolean(i&&typeof i==='object'&&'id' in i)).map((i:any)=>String(i.id)):[];
+    }catch{return [];}
+  });
+  const basketSequence=useRef(0);
+  const [basketRequest,setBasketRequest]=useState<{serial:number;item:Signal}|null>(null);
   const [marketAiOpen,setMarketAiOpen]=useState(false);
   const [status,setStatus]=useState('');
   const [dataStatus,setDataStatus]=useState<ScanStatus>('');
@@ -177,7 +187,15 @@ function App(){
   };
   const profile=(r:Signal)=>r.supply_distance_pct==null?'미계산':r.supply_distance_pct.toFixed(2)+'%';
   const flip=(t:string)=>setSignals(a=>a.includes(t)?a.filter(s=>s!==t):[...a,t]);
-  const nav=(target:'search'|'results'|'summary'|'ai')=>{
+  const inBasket=(r:Signal)=>basketIds.includes(`MANUAL:${r.code}:${r.day}`);
+  const canBasket=(r:Signal)=>/^\d{6}$/.test(r.code)&&typeof r.close_price==='number'&&r.close_price>0;
+  const quickBasket=(r:Signal)=>{
+    if(!canBasket(r)||inBasket(r)||basketIds.length>=100)return;
+    setBasketRequest({serial:++basketSequence.current,item:{...r,name:displayName(r)}});
+  };
+  const nav=(target:'search'|'results'|'summary'|'ai'|'basket')=>{
+    if(target==='basket'){setActiveView('basket');window.setTimeout(()=>window.scrollTo({top:0,behavior:'smooth'}),15);return;}
+    setActiveView('research');
     if(target==='search'){setFilterOpen(true);setTimeout(()=>formRef.current?.scrollIntoView({behavior:'smooth',block:'start'}),20);}
     if(target==='results')resultRef.current?.scrollIntoView({behavior:'smooth',block:'start'});
     if(target==='summary')summaryRef.current?.scrollIntoView({behavior:'smooth',block:'start'});
@@ -203,6 +221,16 @@ function App(){
         {!standalone&&<button className="install-btn" onClick={()=>{void installApp();}} aria-label="앱 설치 방법"><Download size={17}/><span>앱 설치</span></button>}
       </div>
     </header>
+    <nav className="r151-main-tabs" role="tablist" aria-label="BLUE 기능 화면">
+      <button type="button" role="tab" aria-selected={activeView==='research'}
+        className={activeView==='research'?'active':''} onClick={()=>{setActiveView('research');window.scrollTo({top:0,behavior:'smooth'});}}>
+        <BarChart3 size={18}/> 종목 검색 · AI 시황
+      </button>
+      <button type="button" role="tab" aria-selected={activeView==='basket'}
+        className={activeView==='basket'?'active':''} onClick={()=>nav('basket')}>
+        <ShoppingBasket size={18}/> AI 스마트 장바구니 <span className="r151-basket-count">{basketIds.length}</span>
+      </button>
+    </nav>
     {installGuide&&<div className="install-guide" role="status"><button className="guide-close" onClick={()=>setInstallGuide(false)} aria-label="안내 닫기"><X size={17}/></button>
       <strong>휴대폰에 설치하는 방법</strong><p>안드로이드 Chrome: 오른쪽 위 ⋮ → <b>앱 설치</b> 또는 <b>홈 화면에 추가</b></p>
       <p>아이폰 Safari: 공유 버튼 → <b>홈 화면에 추가</b></p>
@@ -210,7 +238,7 @@ function App(){
       <p><a href="/pwa-check.html" target="_blank" rel="noopener noreferrer">PWA 설치 진단 열기</a></p>
       <small>Cloudflare Access 로그인 페이지가 manifest·아이콘을 대신 반환하면 설치할 수 없을 수 있습니다. 접근 제어를 해제하지 말고 진단 결과를 확인하세요.</small>
     </div>}
-    <main className="app-main">
+    <main className={"app-main "+(activeView==='basket'?'r151-basket-mode':'')}>
       <aside className={'panel search-panel '+(filterOpen?'filter-open':'filter-closed')} ref={formRef} id="search-panel">
         <div className="search-heading"><h2><SlidersHorizontal size={18}/> 검색 조건</h2><button type="button" className="filter-toggle" onClick={()=>setFilterOpen(v=>!v)} aria-expanded={filterOpen} aria-controls="filter-body">{filterOpen?'조건 접기':'조건 변경'} <ListFilter size={16}/></button></div>
         <div className="filter-body" id="filter-body">
@@ -226,8 +254,11 @@ function App(){
         <div className="search-compact"><div><small>기준일</small><strong>{mode==='single'?date:`${start} ~ ${end}`}</strong></div><button onClick={()=>setFilterOpen(true)}><SlidersHorizontal size={16}/> 수정</button><button className="compact-run" disabled={busy||requestBusy} onClick={()=>{void search(1);}}><Search size={16}/> 검색</button></div>
       </aside>
       <section className="content">
+        <div className={'r151-basket-content '+(activeView==='basket'?'':'r151-hidden')}>
+          <SmartBasket searchRows={rows} quickAddRequest={basketRequest} onItemsChange={setBasketIds}/>
+        </div>
+        <div className={'r151-research-content '+(activeView==='research'?'':'r151-hidden')}>
         <LiveMarket />
-        <SmartBasket searchRows={rows} />
         <div className="stats" ref={summaryRef} id="summary-panel">
           <div className="metric"><span>검색 결과</span><strong>{total==null?'—':total.toLocaleString()}</strong><small>종목</small></div>
           <div className="metric"><span>검색 거래일</span><strong>{total==null?'—':days.length}</strong><small>저장된 날짜</small></div>
@@ -268,31 +299,51 @@ function App(){
           {rows.length>0&&<label className="result-quick-search"><Search size={16}/><span className="sr-only">현재 페이지 종목명 또는 코드 찾기</span><input type="search" value={localQuery} onChange={e=>setLocalQuery(e.target.value)} placeholder="현재 페이지에서 종목명 · 코드 찾기" aria-label="현재 페이지에서 종목명 또는 코드 찾기"/></label>}
           <div className="desktop-results tablewrap"><table><thead><tr><th>날짜</th><th>종목명 / 코드</th><th>신호</th><th>종가</th><th>RSI / GC</th><th>Slow(14,3,3) / GC</th><th>MACD / GC</th><th>돌파선 후보</th><th>상단 매물대</th></tr></thead><tbody>
             {visibleRows.length?visibleRows.map((r,i)=><tr key={`${r.code}-${r.day}-${i}`} className="clickable" tabIndex={0} onClick={()=>openDetail(r)} onKeyDown={e=>{if(e.key==='Enter')openDetail(r);}}>
-              <td>{r.day}</td><td><b>{displayName(r)}</b><div className="small">{r.code}</div></td>
+              <td>{r.day}</td><td><div className="r151-desktop-stock">
+                 <div><b>{displayName(r)}</b><div className="small">{r.code}</div></div>
+                 <button type="button" className={'r151-quick-add '+(inBasket(r)?'saved':'')}
+                   title={inBasket(r)?'이미 담긴 종목':'장바구니에 담기'}
+                   aria-label={`${displayName(r)} ${inBasket(r)?'장바구니에 담김':'장바구니에 담기'}`}
+                   disabled={inBasket(r)||!canBasket(r)||basketIds.length>=100}
+                   onClick={e=>{e.stopPropagation();quickBasket(r);}}
+                   onKeyDown={e=>e.stopPropagation()}>
+                   {inBasket(r)?<CheckCircle2 size={16}/>:<ShoppingBasket size={16}/>}
+                 </button>
+               </div></td>
               <td>{r.signals.map(s=><span className="tag" key={s}>{showSignal(s)}</span>)}</td><td>{money(r.close_price)}</td>
               <td>{fmt(r,'rsi')} <small>{crossed(r,'rsi_gc')}</small></td><td>{fmt(r,'slow_14_3_3_k')} / {fmt(r,'slow_14_3_3_d')} <small>{crossed(r,'slow_14_3_3_gc')}</small></td>
               <td>{fmt(r,'macd_12_26_9')} <small>{crossed(r,'macd_gc')}</small></td><td>{present(r,'valid_line_candidates_json')?`${validLines(r).length}개`:'미계산'}</td>
               <td>{profile(r)} · {supplyGrade(r)}</td>
             </tr>):<tr><td className="empty" colSpan={9}>{total!==null?'조건에 맞는 종목이 없습니다.':'날짜와 조건을 선택해 검색하세요.'}</td></tr>}</tbody></table></div>
           <div className="mobile-results">
-            {visibleRows.length?visibleRows.map((r,i)=><button key={`${r.code}-${r.day}-${i}`} className="stock-card" onClick={()=>openDetail(r)} aria-label={`${displayName(r)} 상세 분석 보기`}>
+            {visibleRows.length?visibleRows.map((r,i)=><div className="r151-mobile-row" key={`${r.code}-${r.day}-${i}`}>
+              <button className="stock-card" onClick={()=>openDetail(r)} aria-label={`${displayName(r)} 상세 분석 보기`}>
               <div className="stock-top"><div className="stock-identity"><strong>{displayName(r)}</strong><span>{r.code} <span className="stock-dot">·</span> {r.day}</span></div><div className="stock-price"><b>{money(r.close_price)}<small>원</small></b><span>종가</span></div><ChevronRight size={19} className="stock-chevron"/></div>
               <div className="stock-tags">{r.signals.slice(0,4).map(s=><span className="tag" key={s}>{showSignal(s)}</span>)}{r.signals.length>4&&<span className="tag tag-more">+{r.signals.length-4}</span>}</div>
               <div className="stock-quick"><div><small>RSI</small><strong>{fmt(r,'rsi',1)}</strong></div><div><small>Slow GC</small><strong className={flag(r,'slow_14_3_3_gc')?'positive':''}>{crossed(r,'slow_14_3_3_gc')}</strong></div><div><small>MACD GC</small><strong className={flag(r,'macd_gc')?'positive':''}>{crossed(r,'macd_gc')}</strong></div><div><small>상단 매물</small><strong>{supplyGrade(r)}</strong></div></div>
-            </button>):<div className="mobile-empty"><Search size={30}/><strong>{localQuery?'현재 페이지에서 일치하는 종목이 없습니다.':total===0?'해당 조건의 종목이 없습니다.':'검색 조건을 선택해 주세요.'}</strong><p>{gcFields.length?'선택한 골든크로스 조건을 만족하는 종목이 없습니다.':'과거 거래일을 선택한 다음 검색 버튼을 누르세요.'}</p><button onClick={()=>nav('search')}>검색 조건 열기</button></div>}
+            </button>
+              <button type="button" className={'r151-mobile-add '+(inBasket(r)?'saved':'')}
+                title={inBasket(r)?'장바구니에 담김':'장바구니에 담기'}
+                aria-label={`${displayName(r)} ${inBasket(r)?'장바구니에 담김':'장바구니에 담기'}`}
+                disabled={inBasket(r)||!canBasket(r)||basketIds.length>=100}
+                onClick={()=>quickBasket(r)}>
+                {inBasket(r)?<CheckCircle2 size={19}/>:<ShoppingBasket size={19}/>}
+                <span>{inBasket(r)?'담김':'담기'}</span>
+              </button></div>):<div className="mobile-empty"><Search size={30}/><strong>{localQuery?'현재 페이지에서 일치하는 종목이 없습니다.':total===0?'해당 조건의 종목이 없습니다.':'검색 조건을 선택해 주세요.'}</strong><p>{gcFields.length?'선택한 골든크로스 조건을 만족하는 종목이 없습니다.':'과거 거래일을 선택한 다음 검색 버튼을 누르세요.'}</p><button onClick={()=>nav('search')}>검색 조건 열기</button></div>}
           </div>
           {total!==null&&total>100&&<div className="pager"><button disabled={busy||page===1} onClick={()=>{void search(page-1,false);}}>이전</button><span>{page} / {Math.ceil(total/100)}</span><button disabled={busy||page>=Math.ceil(total/100)} onClick={()=>{void search(page+1,false);}}>다음</button></div>}
         </section>
         {days.length>0&&<section className="panel daily-panel"><h2><CalendarDays size={18}/> 날짜별 요약</h2><div className="tablewrap"><table><thead><tr><th>날짜</th><th>관측 종목</th><th>신호 건수</th><th>신호 종목</th></tr></thead><tbody>{days.map(d=><tr key={d.day}><td>{d.day}</td><td>{d.observed_stocks}</td><td>{d.signal_events}</td><td>{d.matched_stocks}</td></tr>)}</tbody></table></div></section>}
         <p className="disclaimer"><AlertCircle size={14}/> RSI·MACD·유효선 후보·상단 매물대 강도는 연구용 계산값이며 현재가·실제 호가 매물대가 아닙니다. R0.8 이전 분석 기록은 재분석해야 신규 정보가 표시됩니다.</p>
+        </div>
       </section>
     </main>
     <footer>BLUE Signal Lab · RESEARCH ONLY · 매매 주문 기능 없음</footer>
     <nav className="mobile-dock" aria-label="모바일 메뉴">
       <button onClick={()=>nav('search')}><SlidersHorizontal size={20}/><span>검색</span></button>
       <button onClick={()=>nav('results')}><BarChart3 size={20}/><span>종목 결과</span></button>
-      <button className="dock-primary" onClick={()=>nav('ai')}><Activity size={20}/><span>AI 시황</span></button>
-      <button onClick={()=>nav('summary')}><Activity size={20}/><span>요약</span></button>
+      <button className={activeView==='research'?'dock-primary':''} onClick={()=>nav('ai')}><Activity size={20}/><span>AI 시황</span></button>
+      <button className={activeView==='basket'?'dock-primary':''} onClick={()=>nav('basket')}><ShoppingBasket size={20}/><span>장바구니</span></button>
     </nav>
     {selected&&<div className="detail-overlay" role="presentation" onMouseDown={e=>{if(e.target===e.currentTarget)closeDetail();}}>
       <section className="detail-sheet" role="dialog" aria-modal="true" aria-label={`${displayName(selected)} 상세 분석`}>

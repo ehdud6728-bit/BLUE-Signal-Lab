@@ -32,7 +32,12 @@ function baselineReturn(item:BasketItem,quote:Quote|undefined):number|null{
  if(!quote||!Number.isFinite(quote.price)||quote.price<=0||quote.trade_date_kst<=item.day)return null;
  return (quote.price/item.baseline-1)*100;
 }
-export default function SmartBasket({searchRows}: {searchRows:SearchRow[]}){
+// R151_QUICK_ADD: controlled one-tap requests from the search results list.
+export default function SmartBasket({searchRows,quickAddRequest,onItemsChange}: {
+ searchRows:SearchRow[];
+ quickAddRequest?:{serial:number;item:SearchRow}|null;
+ onItemsChange?:(ids:string[])=>void;
+}){
  const [items,setItems]=useState<BasketItem[]>(readItems);
  const [filter,setFilter]=useState<'ALL'|'MANUAL'|'AI'>('ALL');
  const [lookup,setLookup]=useState('');
@@ -41,6 +46,11 @@ export default function SmartBasket({searchRows}: {searchRows:SearchRow[]}){
  const [error,setError]=useState('');
  const [message,setMessage]=useState('');
  const [quotes,setQuotes]=useState<Quotes|null>(null);
+ useEffect(()=>{onItemsChange?.(items.map(x=>x.id));},[items,onItemsChange]);
+ useEffect(()=>{
+  if(quickAddRequest)add(quickAddRequest.item,'MANUAL');
+  // Only react to new requests, not unrelated changes to basket items.
+ },[quickAddRequest]);
  useEffect(()=>{try{localStorage.setItem(STORE,JSON.stringify(items));}catch{setError('이 기기 저장 공간이 부족합니다. JSON 백업을 내려받아 주세요.');}},[items]);
  useEffect(()=>{
   let mounted=true;
