@@ -1,0 +1,12 @@
+{
+  "name": "blue-market-collector-r142",
+  "version": "1.4.2",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test",
+    "build:check": "wrangler deploy --dry-run --outdir ../.r142-build",
+    "deploy": "wrangler deploy"
+  },
+  "devDependencies": {"wrangler":"4.160.0"}
+}
