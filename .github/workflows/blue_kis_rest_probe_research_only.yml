@@ -1,4 +1,4 @@
-name: BLUE R1.2 KIS REST Quote Probe (READ ONLY)
+name: "BLUE R1.2 KIS REST Probe (DISABLED - token-safety guard)"
 
 on:
   workflow_dispatch:
@@ -6,37 +6,11 @@ on:
 permissions:
   contents: read
 
-concurrency:
-  group: blue-kis-rest-manual-probe
-  cancel-in-progress: false
-
 jobs:
-  kis_quote_probe:
+  legacy_probe_disabled:
     runs-on: ubuntu-latest
-    timeout-minutes: 8
     steps:
-      - name: Guard BLUE repository
-        shell: bash
+      - name: Prevent accidental repeated KIS access-token issuance
         run: |
-          test "$GITHUB_REPOSITORY" = "ehdud6728-bit/BLUE-Signal-Lab" || { echo 'WRONG_REPOSITORY'; exit 1; }
-      - name: Checkout BLUE
-        uses: actions/checkout@v4
-      - name: Setup Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-      - name: Safe unit tests (no credentials, no external API)
-        run: python -m unittest discover -s tests -p test_blue_kis_rest_probe.py -v
-      - name: Read-only real KIS REST authentication and three quote requests
-        env:
-          KIS_APP_KEY: ${{ secrets.KIS_APP_KEY }}
-          KIS_APP_SECRET: ${{ secrets.KIS_APP_SECRET }}
-        run: python scripts/blue_kis_rest_probe.py --out output/kis_probe
-      - name: Upload quote-only audit (NEVER credentials)
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: BLUE_KIS_REST_QUOTE_PROBE_${{ github.run_id }}
-          path: output/kis_probe/AUDIT.json
-          if-no-files-found: warn
-          retention-days: 7
+          echo 'R1.2 legacy probe is disabled to prevent fresh token issuance.'
+          echo 'Use BLUE R1.3.1 safe-token vault workflow (allow_new_token=false by default).'

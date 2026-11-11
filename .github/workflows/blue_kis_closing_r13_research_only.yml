@@ -1,4 +1,4 @@
-name: BLUE R1.3 KIS Closing Research (REST / READ ONLY)
+name: BLUE R1.3.1 KIS Safe Token Vault (REST / READ ONLY)
 
 on:
   workflow_dispatch:
@@ -24,6 +24,11 @@ on:
         required: true
         default: '12'
         type: string
+      allow_new_token:
+        description: 'DANGER: issue ONE NEW access token ONLY when encrypted cache absent/expired. Keep FALSE today.'
+        required: true
+        default: false
+        type: boolean
       enrich:
         description: 'Supplementary minute/program/ranking/auction API research (experimental)'
         required: true
@@ -35,7 +40,7 @@ permissions:
   actions: read
 
 concurrency:
-  group: blue-kis-r13-single-session
+  group: blue-kis-token-vault-single-session
   cancel-in-progress: false
 
 jobs:
@@ -53,14 +58,21 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
+      - name: Install cryptography for encrypted token vault
+        run: python -m pip install 'cryptography>=43,<48'
       - name: Local-only read-only unit tests
-        run: python -m unittest discover -s tests -p test_blue_kis_closing_r13.py -v
+        run: |
+          python -m unittest discover -s tests -p test_blue_kis_closing_r13.py -v
+          python -m unittest discover -s tests -p test_blue_kis_token_vault_r131.py -v
       - name: Verify KRX prior-EOD provenance and collect KIS read-only snapshots
         shell: bash
         env:
           GITHUB_TOKEN: ${{ github.token }}
           KIS_APP_KEY: ${{ secrets.KIS_APP_KEY }}
           KIS_APP_SECRET: ${{ secrets.KIS_APP_SECRET }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          ALLOW_NEW_TOKEN: ${{ inputs.allow_new_token }}
           MODE: ${{ inputs.mode }}
           SOURCE: ${{ inputs.source }}
           CANDIDATE_LIMIT: ${{ inputs.candidate_limit }}
@@ -68,6 +80,7 @@ jobs:
         run: |
           args=(--mode "$MODE" --source "$SOURCE" --limit "$CANDIDATE_LIMIT" --out output/kis_r13)
           if [ "$ENRICH" = 'true' ]; then args+=(--enrich); fi
+          if [ "$ALLOW_NEW_TOKEN" = 'true' ]; then args+=(--allow-new-token); fi
           python scripts/blue_kis_closing_r13.py "${args[@]}"
       - name: Upload research-only audit and quote snapshots (no secrets)
         if: always()
