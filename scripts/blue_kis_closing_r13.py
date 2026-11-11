@@ -211,14 +211,12 @@ def choose_candidates(rows: list[dict], limit: int) -> list[dict]:
 
 
 class KISClient:
-    def __init__(self, appkey: str, secret: str):
+    def __init__(self, appkey: str, secret: str, token: str):
+        # FAIL CLOSED: a client can never request a new token implicitly.
+        if not isinstance(token, str) or not token:
+            raise Failure('TOKEN_NOT_PROVIDED')
         self.appkey, self.secret = appkey, secret
-        body = http_json('POST', KIS, '/oauth2/tokenP',
-                         {'Content-Type':'application/json','Accept':'application/json'},
-                         body={'grant_type':'client_credentials','appkey':appkey,'appsecret':secret})
-        if not isinstance(body.get('access_token'), str) or not body['access_token']:
-            raise Failure('KIS_ACCESS_TOKEN_MISSING_' + safe_code(body.get('msg_cd')))
-        self.token = body['access_token']  # in memory for this one job only
+        self.token = token
         self.last = 0.0
         self.requests = 0
 
@@ -430,8 +428,8 @@ def run(args):
     audit = {'phase':'BLUE_R13_KIS_RESEARCH_ONLY','mode':args.mode,
              'started_at_kst':now.isoformat(timespec='seconds'),
              'data_trading_day_kst':now.date().isoformat(),
-             'KIS_TOKEN_REUSE':'ONCE_PER_PROCESS','orders_enabled':False,
-             'd1_writes_enabled':False,'intraday_verified':False,'snapshots':[],'status':'STARTED'}
+             'KIS_TOKEN_REUSE':'PERSISTENT_ENCRYPTED_D1','orders_enabled':False,
+             'd1_market_writes_enabled':False,'d1_token_vault_writes_enabled':True,'intraday_verified':False,'snapshots':[],'status':'STARTED'}
     try:
         if args.mode == 'session':
             if now.weekday() >= 5 or not dtime(13,40) <= now.time() < dtime(15,24):
@@ -456,7 +454,18 @@ def run(args):
         appsecret=os.environ.get('KIS_APP_SECRET','').strip()
         if not appkey or not appsecret:
             raise Failure('KIS_SECRETS_MISSING')
-        client=KISClient(appkey,appsecret)
+        # Token vault reads encrypted ciphertext from the existing Cloudflare D1.
+        # An API issuance happens ONLY with an explicit allow-new-token input.
+        import blue_kis_token_vault_r131 as token_vault
+        try:
+            token, token_origin = token_vault.obtain_token(
+                appkey, appsecret, allow_new=args.allow_new_token
+            )
+        except token_vault.VaultError as exc:
+            raise Failure('KIS_VAULT_' + str(exc)) from None
+        audit['token_source'] = token_origin  # non-secret metadata only
+        audit['token_issued_this_run'] = (token_origin == 'NEW_EXPLICIT')
+        client=KISClient(appkey,appsecret,token)
         if args.mode == 'probe':
             audit['snapshots'].append(take_snapshot(client,candidates,out,'probe',args.enrich))
         else:
@@ -505,6 +514,8 @@ def main():
     p.add_argument('--source',choices=('verified-eod','sample'),default='verified-eod')
     p.add_argument('--limit',type=int,default=12)
     p.add_argument('--enrich',action='store_true',help='additional minute/program/auction API schema probes')
+    p.add_argument('--allow-new-token',action='store_true',
+                   help='EXPLICIT ONLY: issue ONE KIS token if no valid cached token exists')
     p.add_argument('--out',default='output/kis_r13')
     args=p.parse_args()
     if not 1<=args.limit<=100:
