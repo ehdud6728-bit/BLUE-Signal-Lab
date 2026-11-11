@@ -103,9 +103,17 @@ export async function handleBasketAi(req:Request,env:BasketEnv):Promise<Response
    const response=await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`,{
      method:'POST',signal:abort.signal,
      headers:{'Content-Type':'application/json','x-goog-api-key':env.GEMINI_API_KEY},
-     body:JSON.stringify({contents:[{parts:[{text:prompt}]}],generationConfig:{temperature:0.15,maxOutputTokens:2800}})
+     body:JSON.stringify({contents:[{parts:[{text:prompt}]}],generationConfig:{temperature:0.15,maxOutputTokens:3600,responseMimeType:'application/json'}})
    });
-   if(!response.ok)throw Error(response.status===429?'AI_QUOTA':'AI_PROVIDER_ERROR');
+   // R155_AI_REPAIR: stable, non-sensitive provider status classification.
+   if(!response.ok){
+    const code=response.status===429?'AI_QUOTA':
+     response.status===401||response.status===403?'AI_AUTH':
+     response.status===404?'AI_MODEL_UNAVAILABLE':
+     response.status===400?'AI_BAD_REQUEST':
+     response.status>=500?'AI_UPSTREAM_UNAVAILABLE':'AI_PROVIDER_ERROR';
+    throw Error(code);
+   }
    const data=await response.json() as any;
    const raw=String(data?.candidates?.[0]?.content?.parts?.map((p:any)=>p.text||'').join('\n')||'').trim();
    const trimmed=raw.replace(/^```(?:json)?\s*/i,'').replace(/\s*```$/,'');
@@ -122,8 +130,23 @@ export async function handleBasketAi(req:Request,env:BasketEnv):Promise<Response
    return send(payload);
   }catch(e){
    await env.DB.prepare(`DELETE FROM blue_basket_ai_cache_r15 WHERE cache_key=? AND status='PENDING'`).bind(cacheKey).run();
-   const reason=e instanceof Error&&['AI_QUOTA','AI_INVALID_JSON','AI_NO_VALID_PICKS'].includes(e.message)?e.message:'AI_PROVIDER_ERROR';
-   return send({error:reason,message:'AI 후보를 생성하지 못했습니다. 데이터는 변경되지 않았습니다.'},503);
+   // Keep the API key and provider body private, but return actionable failures.
+   const failure=e instanceof Error?e.message:'UNKNOWN';
+   const reason=e instanceof Error&&e.name==='AbortError'?'AI_TIMEOUT':
+    ['AI_QUOTA','AI_INVALID_JSON','AI_NO_VALID_PICKS','AI_AUTH','AI_MODEL_UNAVAILABLE',
+     'AI_BAD_REQUEST','AI_UPSTREAM_UNAVAILABLE'].includes(failure)?failure:'AI_PROVIDER_ERROR';
+   const explanations:Record<string,string>={
+    AI_QUOTA:'Gemini 사용량 제한(429)입니다. 사용량을 확인하고 다음에 다시 시도하세요.',
+    AI_AUTH:'Gemini API 키 또는 모델 이용 권한이 거부됐습니다. Worker 비밀키와 API 설정을 확인하세요.',
+    AI_MODEL_UNAVAILABLE:'해당 API 키에서 Gemini 모델을 찾거나 사용할 수 없습니다. Worker 모델 설정을 확인하세요.',
+    AI_BAD_REQUEST:'Gemini 요청 형식이 거부됐습니다. 모델 입력과 JSON 출력 설정을 점검해야 합니다.',
+    AI_INVALID_JSON:'Gemini 응답이 유효한 JSON 형식이 아닙니다. 후보 생성은 저장되지 않았습니다.',
+    AI_NO_VALID_PICKS:'Gemini가 검색 후보 밖의 종목을 제시했거나 잘못된 후보 응답을 보냈습니다.',
+    AI_TIMEOUT:'Gemini 응답 제한시간(45초)을 넘었습니다. 나중에 다시 시도하세요.',
+    AI_UPSTREAM_UNAVAILABLE:'Gemini 서비스에 일시적인 오류가 발생했습니다. 나중에 다시 시도하세요.',
+    AI_PROVIDER_ERROR:'Gemini 요청 처리에 실패했습니다. Cloudflare Worker 로그로 원인을 확인하세요.'
+   };
+   return send({error:reason,message:(explanations[reason]||explanations.AI_PROVIDER_ERROR)+' 기존 장바구니 데이터는 유지됩니다.'},reason==='AI_QUOTA'?429:503);
   }finally{clearTimeout(timer);}
  }catch{return send({error:'AI_CACHE_UNAVAILABLE',message:'AI 캐시 테이블을 확인하세요.'},503);}
 }

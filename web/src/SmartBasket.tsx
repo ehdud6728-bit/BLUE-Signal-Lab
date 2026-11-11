@@ -153,7 +153,7 @@ export default function SmartBasket({quickAddRequest,onItemsChange,active=true}:
   try{const r=await fetch(API+'/api/basket/ai',{method:'POST',credentials:'include',
    headers:{'Content-Type':'text/plain;charset=UTF-8'},body:'{}',cache:'no-store'});
    const d=await r.json() as AiResult;
-   if(!r.ok)throw Error(d.message||d.error||`AI API 오류 ${r.status}`);
+   if(!r.ok)throw Error(`${d.message||'AI 후보 생성 실패'}${d.error?' ('+d.error+')':''} · HTTP ${r.status}`);
    setAi(d);if(d.status==='READY')setShowAi(true);if(d.status==='PENDING')setMessage('다른 요청에서 분석 중입니다. 잠시 뒤 화면을 다시 열어 주세요.');
    else if(d.status!=='READY')setMessage(d.message||'검증된 최근 종가 후보를 찾지 못했습니다.');
   }catch(e){setError(e instanceof Error?e.message:'AI 후보 생성 실패');}
