@@ -1,0 +1,41 @@
+/* BLUE R1.5.5 — Restore missing AiWidget styles when briefing is a standalone tab.
+   Scoped to AiWidget only; search, tracking, basket and bottom navigation untouched. */
+.ai-panel{width:100%;min-width:0;background:#fff;border:1px solid #d8e5f6;border-radius:16px;padding:19px;box-shadow:0 4px 18px rgba(26,56,108,.045);color:#233a5c}
+.ai-panel .ai-heading{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:11px}
+.ai-panel .ai-title{display:flex;align-items:center;gap:11px;min-width:0}
+.ai-panel .ai-title>svg{flex:none;color:#235bcd;width:30px;height:30px;background:#edf4ff;border-radius:8px;padding:6px;box-sizing:content-box}
+.ai-panel .ai-title>div{min-width:0;display:flex;flex-direction:column;gap:4px}
+.ai-panel .ai-title strong{font-size:17px;line-height:1.35;color:#153c79;font-weight:850}
+.ai-panel .ai-title small{font-size:11px;color:#7487a4;line-height:1.45}
+.ai-panel .ai-mode{border-radius:999px;padding:5px 9px;background:#eef4ff;border:1px solid #d6e5fe;color:#3764ae;font-size:10px;font-weight:800;white-space:nowrap}
+.ai-panel .ai-description{margin:11px 0 16px;background:#f5f8fe;border:1px solid #e2eafb;border-radius:10px;padding:11px 12px;color:#516887;font-size:12px;line-height:1.7}
+.ai-panel .ai-primary{display:inline-flex;align-items:center;justify-content:center;gap:7px;background:#245fda;border:1px solid #245fda;border-radius:10px;color:#fff;padding:11px 16px;min-height:43px;font-size:13px;font-weight:800;box-shadow:0 4px 12px rgba(38,91,192,.15)}
+.ai-panel .ai-primary:disabled{opacity:.55}
+.ai-panel .ai-note,.ai-panel .ai-error{display:flex;align-items:flex-start;gap:8px;border-radius:9px;padding:10px 12px;font-size:12px;line-height:1.6;margin:12px 0}
+.ai-panel .ai-note{color:#315e92;background:#edf5ff}.ai-panel .ai-error{color:#a83c31;background:#fff2ed}
+.ai-panel .ai-report{margin:16px 0;border:1px solid #dce7f5;border-radius:12px;overflow:hidden}
+.ai-panel .ai-report-header{display:flex;align-items:center;gap:7px;padding:11px 13px;background:#edf4ff;color:#2c5595;font-size:12px;flex-wrap:wrap}
+.ai-panel .ai-report-header span{margin-left:auto;font-size:10px;color:#7085a4}
+.ai-panel .ai-report-body{padding:15px;white-space:pre-wrap;overflow-wrap:anywhere;font-size:13px;line-height:1.8;color:#2d4467}
+.ai-panel .ai-sources{padding:12px 15px;border-top:1px solid #e8edf6;font-size:11px;display:flex;flex-direction:column;gap:8px}
+.ai-panel .ai-sources a{display:flex;align-items:center;gap:5px;color:#245fda;text-decoration:none;overflow-wrap:anywhere}
+.ai-panel .ai-warning{margin:0;padding:11px 15px;border-top:1px solid #e8edf6;color:#7486a1;background:#fbfcff;font-size:11px}
+.ai-panel .ai-alternatives{margin-top:18px;border-top:1px solid #e7edf7;padding-top:13px}
+.ai-panel .ai-alternatives>span{display:block;color:#617796;font-size:11px;font-weight:700;margin-bottom:9px}
+.ai-panel .ai-alternatives>div{display:flex;flex-wrap:wrap;gap:8px}
+.ai-panel .ai-alternatives button{display:inline-flex;align-items:center;justify-content:center;gap:5px;padding:9px 11px;min-height:40px;border:1px solid #cbdcf3;color:#2258a5;background:#f8fbff;border-radius:9px;font-size:11px;font-weight:700}
+.ai-panel .ai-foot{font-size:11px;color:#8190a7;line-height:1.65;margin:15px 0 0}
+.ai-panel .ai-spin{animation:r155spin 1s linear infinite}@keyframes r155spin{to{transform:rotate(360deg)}}
+@media(max-width:790px){
+ .r152-ai-content{width:100%;min-width:0}
+ .r152-ai-section{width:100%;min-width:0}
+ .ai-panel{padding:15px;border-radius:14px}
+ .ai-panel .ai-heading{gap:6px}
+ .ai-panel .ai-title{gap:8px;flex:1 1 200px}
+ .ai-panel .ai-title>svg{width:21px;height:21px;padding:6px}
+ .ai-panel .ai-title strong{font-size:15px}
+ .ai-panel .ai-title small{font-size:10px;overflow-wrap:anywhere}
+ .ai-panel .ai-mode{font-size:9px}
+ .ai-panel .ai-primary{width:100%}
+ .ai-panel .ai-alternatives button{flex:1 1 128px}
+}
