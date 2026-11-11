@@ -1,4 +1,5 @@
 import { handleAi, getCachedAi } from './ai';
+import { liveQuotes } from './live';
 interface Env {
   DB: D1Database;
   CORS_ORIGIN?: string;
@@ -98,6 +99,12 @@ export default {
         if(!r)return respond({status:'NOT_AVAILABLE',message:'R1.0 분석을 해당 날짜에 다시 실행해야 차트가 준비됩니다.'},404);
         return respond({status:'READY',chart:JSON.parse(r.chart_json),stats:JSON.parse(r.stats_json),
           snapshot_time:r.created_at});
+      }
+      // R1.4: D1-only intraday snapshots; same Cloudflare Access guard as BLUE AI.
+      // Never forward KIS credentials or the encrypted token vault to browsers.
+      if (p === '/api/live/quotes' && request.method === 'GET') {
+        if (!access) return respond({error:'ACCESS_REQUIRED',message:'Cloudflare Access 로그인 필요'},401);
+        return respond(await liveQuotes(env.DB));
       }
       if (p === '/api/health' && request.method === 'GET') {
         return respond({ status:'ok', mode:'RESEARCH_ONLY', storage:'D1', api_version:'R1.0.2' });

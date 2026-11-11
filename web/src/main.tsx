@@ -1,4 +1,5 @@
 import StockChart from './StockChart';
+import LiveMarket from './LiveMarket';
 import AiWidget from './AiWidget';
 import React, {useEffect, useRef, useState} from 'react';
 import {createRoot} from 'react-dom/client';
@@ -224,6 +225,7 @@ function App(){
         <div className="search-compact"><div><small>기준일</small><strong>{mode==='single'?date:`${start} ~ ${end}`}</strong></div><button onClick={()=>setFilterOpen(true)}><SlidersHorizontal size={16}/> 수정</button><button className="compact-run" disabled={busy||requestBusy} onClick={()=>{void search(1);}}><Search size={16}/> 검색</button></div>
       </aside>
       <section className="content">
+        <LiveMarket />
         <div className="stats" ref={summaryRef} id="summary-panel">
           <div className="metric"><span>검색 결과</span><strong>{total==null?'—':total.toLocaleString()}</strong><small>종목</small></div>
           <div className="metric"><span>검색 거래일</span><strong>{total==null?'—':days.length}</strong><small>저장된 날짜</small></div>
