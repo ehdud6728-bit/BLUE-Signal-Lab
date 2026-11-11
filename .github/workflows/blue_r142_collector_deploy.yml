@@ -1,0 +1,55 @@
+name: BLUE R1.4.2 Cloudflare Cron Collector (MANUAL SAFE DEPLOY)
+
+on:
+  workflow_dispatch:
+    inputs:
+      deploy:
+        description: 'FALSE verifies only. TRUE deploys the separate collector (default DISABLED).'
+        type: boolean
+        required: true
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: blue-r142-collector-deploy
+  cancel-in-progress: false
+
+jobs:
+  build_and_optional_deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - name: Guard BLUE repository
+        run: test "$GITHUB_REPOSITORY" = 'ehdud6728-bit/BLUE-Signal-Lab'
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install and run collector tests
+        working-directory: collector
+        run: |
+          npm install --no-package-lock --no-audit --no-fund
+          npm test
+          npm run build:check
+      - name: Deploy collector, isolated from existing API Worker
+        if: inputs.deploy
+        working-directory: collector
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_WORKER_DEPLOY_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          KIS_APP_KEY: ${{ secrets.KIS_APP_KEY }}
+          KIS_APP_SECRET: ${{ secrets.KIS_APP_SECRET }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$CLOUDFLARE_API_TOKEN"
+          test -n "$CLOUDFLARE_ACCOUNT_ID"
+          test -n "$KIS_APP_KEY"
+          test -n "$KIS_APP_SECRET"
+          npx wrangler deploy
+          # Piped values are never printed in job logs. Worker secrets persist across deploys.
+          printf '%s' "$KIS_APP_KEY" | npx wrangler secret put KIS_APP_KEY --name blue-market-collector
+          printf '%s' "$KIS_APP_SECRET" | npx wrangler secret put KIS_APP_SECRET --name blue-market-collector
+          echo 'BLUE_R142_COLLECTOR_DEPLOYED, COLLECTOR_ENABLED configured in wrangler.jsonc'
