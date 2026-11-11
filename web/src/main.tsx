@@ -1,5 +1,6 @@
 import StockChart from './StockChart';
 import LiveMarket from './LiveMarket';
+import SmartBasket from './SmartBasket';
 import AiWidget from './AiWidget';
 import React, {useEffect, useRef, useState} from 'react';
 import {createRoot} from 'react-dom/client';
@@ -226,6 +227,7 @@ function App(){
       </aside>
       <section className="content">
         <LiveMarket />
+        <SmartBasket searchRows={rows} />
         <div className="stats" ref={summaryRef} id="summary-panel">
           <div className="metric"><span>검색 결과</span><strong>{total==null?'—':total.toLocaleString()}</strong><small>종목</small></div>
           <div className="metric"><span>검색 거래일</span><strong>{total==null?'—':days.length}</strong><small>저장된 날짜</small></div>

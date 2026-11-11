@@ -1,5 +1,6 @@
 import { handleAi, getCachedAi } from './ai';
 import { liveQuotes } from './live';
+import { handleBasketAi } from './basket';
 interface Env {
   DB: D1Database;
   CORS_ORIGIN?: string;
@@ -99,6 +100,15 @@ export default {
         if(!r)return respond({status:'NOT_AVAILABLE',message:'R1.0 분석을 해당 날짜에 다시 실행해야 차트가 준비됩니다.'},404);
         return respond({status:'READY',chart:JSON.parse(r.chart_json),stats:JSON.parse(r.stats_json),
           snapshot_time:r.created_at});
+      }
+      // BLUE R1.5: AI picks from server-verified historical EOD; no order entry.
+      if (p === '/api/basket/ai' && (request.method === 'GET' || request.method === 'POST')) {
+        if (!access) return respond({error:'ACCESS_REQUIRED',message:'Cloudflare Access 로그인 필요'},401);
+        if (request.method === 'POST' && request.headers.get('Origin') !== origin)
+          return respond({error:'ORIGIN_DENIED'},403);
+        const upstream = await handleBasketAi(request,env);
+        return new Response(upstream.body,{status:upstream.status,headers:{...cors,
+          'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store'}});
       }
       // R1.4: D1-only intraday snapshots; same Cloudflare Access guard as BLUE AI.
       // Never forward KIS credentials or the encrypted token vault to browsers.
