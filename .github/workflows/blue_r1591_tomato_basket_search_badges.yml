@@ -146,7 +146,7 @@ jobs:
       - name: Build React TypeScript frontend
         working-directory: web
         run: |
-          npm ci
+          npm install --no-package-lock --no-audit --no-fund
           npm run build
       - name: Confirm exact changed-file scope and no backend modifications
         run: |
