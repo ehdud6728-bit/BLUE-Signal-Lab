@@ -1,0 +1,267 @@
+name: BLUE R1.5.10.5 Tomato Minimum 3 Cases (MANUAL SAFE)
+
+on:
+  workflow_dispatch:
+    inputs:
+      apply_changes:
+        description: "FALSE = verify only; TRUE = commit exactly five reviewed source files after all tests and builds pass. Never deploys or writes D1."
+        type: boolean
+        required: true
+        default: false
+
+permissions:
+  contents: write
+
+concurrency:
+  group: blue-r15105-min3-source-only
+  cancel-in-progress: false
+
+jobs:
+  verify_and_optional_commit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Guard BLUE repo and main branch
+        shell: bash
+        run: |
+          test "$GITHUB_REPOSITORY" = "ehdud6728-bit/BLUE-Signal-Lab"
+          test "$GITHUB_REF" = "refs/heads/main"
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Restore SHA256-pinned source patch
+        shell: bash
+        run: |
+          #!/usr/bin/env bash
+          set -euo pipefail
+          cat > "$RUNNER_TEMP/blue_r15105_patch.py" <<'PY_R15105_PATCH'
+          #!/usr/bin/env python3
+          """BLUE R1.5.10.5: source-only selectable 3+ case tomato evidence.
+
+          No KIS access, no D1 mutations, no changes to signal-selection algorithm.
+          Each anchored replacement must exist exactly once. --check previews entire patch.
+          """
+          from pathlib import Path
+          import argparse
+
+          ALLOWED={
+              'web/src/main.tsx',
+              'web/src/StockChart.tsx',
+              'worker/src/index.ts',
+              'scripts/csv_to_d1.py',
+              'tests/test_chart_research_r159.py',
+          }
+
+          REPL=[]
+          def add(path,before,after,label):
+              assert path in ALLOWED and before!=after
+              REPL.append((path,before,after,label))
+
+          # Low-sample patterns already exist in chart snapshot if the R10 candidate was retained.
+          # Default 8 is preserved; 3-7 selection is experimental and explicitly marked.
+          add('web/src/main.tsx',
+              '  // Historical pattern evidence saved in D1 has a hard support floor of 8.\n',
+              '  // R1.5.10.5: existing chart snapshots can contain 3-7 case exploratory patterns.\n',
+              'COMMENT')
+          add('web/src/main.tsx',
+              "return value&&['8','10','15','20','30'].includes(value)?Number(value):8;",
+              "return value&&['3','4','5','6','7','8','10','15','20','30'].includes(value)?Number(value):8;",
+              'PERSISTED_VALUES')
+          add('web/src/main.tsx',
+              '''                <option value={8}>8건 (기본)</option><option value={10}>10건</option>
+                          <option value={15}>15건</option><option value={20}>20건</option><option value={30}>30건</option>''',
+              '''                <option value={3}>3건 (소표본)</option><option value={4}>4건 (소표본)</option>
+                          <option value={5}>5건 (소표본)</option><option value={6}>6건 (소표본)</option>
+                          <option value={7}>7건 (소표본)</option><option value={8}>8건 (기본)</option>
+                          <option value={10}>10건</option><option value={15}>15건</option>
+                          <option value={20}>20건</option><option value={30}>30건</option>''',
+              'DROPDOWN')
+          add('web/src/main.tsx',
+              '''GC는 당일 발생 기준 · 토마토는 10거래일 상승 관측 비율과 선택한 최소 표본 수를 함께 충족해야 합니다. 원본 근거는 8건 이상만 저장되며, 과거 성과는 미래 수익을 보장하지 않습니다.''',
+              '''GC는 당일 발생 기준 · 토마토는 과거 10거래일 상승 관측 비율과 선택한 최소 표본 수를 함께 충족해야 합니다. 표본 3~7건은 소표본으로 통계적 신뢰도가 낮으며 미래 수익을 보장하지 않습니다.''',
+              'LOW_SUPPORT_NOTICE')
+          add('web/src/main.tsx',
+              '  // Only stored EOD pattern evidence is eligible: support n>=8, higher if selected.',
+              '  // Only verified EOD chart evidence is eligible: selected floor 3-30, default 8.',
+              'OUTLINE_COMMENT')
+
+          # Chart displays the user's selected minimum first, rather than always ranking 8+ first.
+          # For 3-7, keep existing "표본 부족" warning on the pattern itself.
+          add('web/src/StockChart.tsx',
+              "const validX=x.n>=8&&x.up_pct!==null,validY=y.n>=8&&y.up_pct!==null;",
+              "const validX=x.n>=highlightSamplesMin&&x.up_pct!==null,validY=y.n>=highlightSamplesMin&&y.up_pct!==null;",
+              'RANK_SELECTED_FLOOR')
+          add('web/src/StockChart.tsx',
+              '표본 8건 미만은 뒤로 · 과거 사례를 눌러 날짜 확인',
+              '선택한 최소 표본 수 우선 · 3~7건은 소표본 주의 · 과거 사례를 눌러 날짜 확인',
+              'RANK_NOTE')
+
+          # Chart-backed SQL in R1.5.10.4 already supports arbitrary valid sampleFloor;
+          # only the external query validation rejects 3-7.
+          add('worker/src/index.ts',
+              "!['8','10','15','20','30'].includes(minPatternN)",
+              "!['3','4','5','6','7','8','10','15','20','30'].includes(minPatternN)",
+              'API_ALLOWLIST')
+          add('worker/src/index.ts',
+              'const sampleFloor=Number(minPatternN); // allowlisted 8/10/15/20/30 above',
+              'const sampleFloor=Number(minPatternN); // allowlisted 3-30 choices; default 8',
+              'API_COMMENT')
+
+          # When new historical snapshots are published, preserve true 3-7-case evidence.
+          # Existing chart rows are read without writes via the current API fallback.
+          add('scripts/csv_to_d1.py',
+              '    n>=8 remains a necessary support floor.  The dates are ONLY those of',
+              '    n>=3 is the analysis minimum; n<8 must be clearly labelled low-support.\n    The dates are ONLY those of',
+              'CSV_DOC')
+          add('scripts/csv_to_d1.py',
+              'if not isinstance(n,int) or n<8 or not isinstance(up,(int,float)) or not 0<=up<=100:',
+              'if not isinstance(n,int) or n<3 or not isinstance(up,(int,float)) or not 0<=up<=100:',
+              'CSV_EVIDENCE_FLOOR')
+
+          # Update the existing unit test to assert the newly allowed boundary and explicitly
+          # reject 1/2-case evidence, without changing the chart research engine's 8+ quality tag.
+          add('tests/test_chart_research_r159.py',
+              '    def test_tomato_only_at_70_and_eight_cases(self):',
+              '    def test_pattern_highlights_from_three_real_cases(self):',
+              'TEST_NAME')
+          add('tests/test_chart_research_r159.py',
+              "            self.assertEqual(val[('005930','2026-11-11')]['r159_pattern_up_10d'],70)",
+              "            self.assertEqual(val[('005930','2026-11-11')]['r159_pattern_up_10d'],100)\n            self.assertEqual(val[('005930','2026-11-11')]['r159_pattern_n_10d'],4)",
+              'TEST_BEST_SMALL')
+          add('tests/test_chart_research_r159.py',
+              "            self.assertEqual(pattern_highlights(folder),{})",
+              """            self.assertEqual(pattern_highlights(folder)[('005930','2026-11-11')]['r159_pattern_n_10d'],4)
+                      # Two cases remain below the verified analysis floor even when the user opts into 3.
+                      setups[:]=[{'label':'too few','horizons':{'10':{'n':2,'up_pct':100}}}]
+                      (folder/'chart_snapshots.jsonl').write_text(json.dumps({'code':'005930','day':'2026-11-11','stats':{'setups':setups}})+'\\n',encoding='utf-8')
+                      self.assertEqual(pattern_highlights(folder),{})""",
+              'TEST_REJECT_TWO')
+
+          def main(check):
+              changed={}
+              for path,before,after,label in REPL:
+                  data=changed.get(path)
+                  if data is None:
+                      p=Path(path)
+                      if not p.is_file():raise RuntimeError(f'MISSING_SOURCE: {path}')
+                      data=p.read_text(encoding='utf-8')
+                  n=data.count(before)
+                  if n!=1:
+                      raise RuntimeError(f'R15105_ANCHOR_{label}_EXPECTED_1_GOT_{n} {path}')
+                  changed[path]=data.replace(before,after,1)
+                  print('R15105_ANCHOR_OK',label,path,flush=True)
+              assert set(changed)==ALLOWED,(set(changed),ALLOWED)
+              combined='\n'.join(changed.values())
+              for needle in ["['3','4','5','6','7','8','10','15','20','30']",'option value={3}','표본 3~7건은 소표본','n<3','highlightSamplesMin&&x.up_pct']:
+                  if needle not in combined:raise RuntimeError('R15105_CHECK_FAILED '+needle)
+              if not check:
+                  for path,content in changed.items():Path(path).write_text(content,encoding='utf-8')
+              print('BLUE_R15105_'+('REAL_SOURCE_PREFLIGHT_PASS' if check else 'PATCH_APPLIED')+f' {len(REPL)} anchors {len(changed)} files',flush=True)
+
+          if __name__=='__main__':
+              ap=argparse.ArgumentParser();ap.add_argument('--check',action='store_true');args=ap.parse_args();main(args.check)
+          PY_R15105_PATCH
+          python - <<'PY_R15105_SHA'
+          from pathlib import Path
+          from hashlib import sha256
+          import os
+          p=Path(os.environ['RUNNER_TEMP'])/'blue_r15105_patch.py'
+          assert sha256(p.read_bytes()).hexdigest()=='83c3260b989153b7c98dd1be22120a2791e9ad5ddaafe0f360c53100c31cc66d', 'R15105_BAD_PATCH_HASH'
+          print('BLUE_R15105_SOURCE_HASH_PASS')
+          PY_R15105_SHA
+          python -m py_compile "$RUNNER_TEMP/blue_r15105_patch.py"
+      - name: Preflight all 14 anchors on REAL repository sources without modifying them
+        shell: bash
+        run: |
+          python "$RUNNER_TEMP/blue_r15105_patch.py" --check
+          git diff --quiet
+      - name: Patch five approved source files
+        shell: bash
+        run: |
+          set -euo pipefail
+          printf '\n__pycache__/\n*.pyc\n*.tsbuildinfo\ndist/\nnode_modules/\n' >> .git/info/exclude
+          python "$RUNNER_TEMP/blue_r15105_patch.py"
+          git diff --check
+      - name: Verify 3 and 8-case historical-pattern boundaries using SQLite and CSV import
+        shell: bash
+        run: |
+          python - <<'PY_R15105_UNIT'
+          import sys,json,tempfile,sqlite3
+          from pathlib import Path
+          sys.path.insert(0,'scripts')
+          from csv_to_d1 import pattern_highlights
+          with tempfile.TemporaryDirectory() as td:
+              p=Path(td)/'chart_snapshots.jsonl'
+              cases=[
+               {'label':'n2','horizons':{'10':{'n':2,'up_pct':100}}},
+               {'label':'n3','horizons':{'10':{'n':3,'up_pct':66.7,'mean_return_pct':4,'median_return_pct':3}}},
+               {'label':'n4','horizons':{'10':{'n':4,'up_pct':75,'mean_return_pct':5,'median_return_pct':4}}}]
+              p.write_text(json.dumps({'code':'000020','day':'2026-11-10','stats':{'setups':cases}})+'\n',encoding='utf-8')
+              meta=pattern_highlights(td)[('000020','2026-11-10')]
+              assert meta['r159_pattern_n_10d']==4 and meta['r159_pattern_up_10d']==75, meta
+              cx=sqlite3.connect(':memory:')
+              cx.execute('CREATE TABLE chart_snapshots(code TEXT,day TEXT,stats_json TEXT)')
+              cx.execute('INSERT INTO chart_snapshots VALUES(?,?,?)',('000020','2026-11-10',json.dumps({'setups':cases})))
+              sql="""SELECT COUNT(*) FROM chart_snapshots cs, json_each(cs.stats_json,'$.setups') setup
+                 WHERE CAST(json_extract(setup.value,'$.horizons."10".n') AS INTEGER)>=?
+                 AND CAST(json_extract(setup.value,'$.horizons."10".up_pct') AS REAL)>=?"""
+              assert cx.execute(sql,(3,70)).fetchone()[0]==1
+              assert cx.execute(sql,(8,70)).fetchone()[0]==0
+              p.write_text(json.dumps({'code':'000020','day':'2026-11-10','stats':{'setups':[cases[0]]}})+'\n',encoding='utf-8')
+              assert pattern_highlights(td)=={}
+          print('BLUE_R15105_THREE_CASES_AND_DEFAULT_EIGHT_PASS')
+          PY_R15105_UNIT
+      - name: Existing historical-pattern Python regression tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install --disable-pip-version-check -q 'numpy>=2,<3' 'pandas>=2.2,<4'
+          python -m unittest discover -s tests -p test_chart_research_r159.py -v
+          echo BLUE_R15105_PY_REGRESSION_PASS
+      - name: Web TypeScript and Vite production build
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd web
+          npm install --no-audit --no-fund --package-lock=false
+          npm run build
+          echo BLUE_R15105_WEB_BUILD_PASS
+      - name: Cloudflare API compile dry-run only - NO deployment
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd worker
+          npm install --no-audit --no-fund --package-lock=false
+          npx wrangler deploy --dry-run --outdir /tmp/blue-r15105-worker-check
+          echo BLUE_R15105_API_DRYRUN_PASS
+      - name: Strict five-file allowlist and final output validation
+        shell: bash
+        run: |
+          python - <<'PY_R15105_SCOPE'
+          import subprocess
+          expected={'web/src/main.tsx','web/src/StockChart.tsx','worker/src/index.ts','scripts/csv_to_d1.py','tests/test_chart_research_r159.py'}
+          actual={s[3:] for s in subprocess.check_output(['git','status','--porcelain','-uall'],text=True).splitlines() if s.strip()}
+          assert actual==expected,('UNAPPROVED_FILES',sorted(actual),sorted(expected))
+          print('BLUE_R15105_FINAL_FIVE_FILE_SCOPE_PASS')
+          PY_R15105_SCOPE
+          git diff --check
+      - name: Commit only after explicit approval and all tests succeed
+        if: ${{ inputs.apply_changes }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add web/src/main.tsx web/src/StockChart.tsx worker/src/index.ts scripts/csv_to_d1.py tests/test_chart_research_r159.py
+          git commit -m 'BLUE R1.5.10.5: permit 3-case exploratory tomato threshold'
+          git push origin HEAD:main
+          echo BLUE_R15105_SOURCE_COMMITTED
+      - name: State deployment boundary
+        shell: bash
+        run: |
+          echo BLUE_R15105_ALL_CHECKS_PASS
+          echo 'This workflow does NOT deploy API or website, issue KIS tokens, rescan stocks or write D1.'
