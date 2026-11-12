@@ -1,0 +1,13 @@
+/* BLUE R1.5.9.3: clear provenance for D1 saved prices, not a real-time order book. */
+.r1593-compare{display:grid;gap:4px;margin-top:5px;white-space:normal;min-width:0}
+.r1593-compare-line{display:flex;flex-wrap:wrap;align-items:baseline;column-gap:5px;row-gap:0;font-size:11px;line-height:1.45}
+.r1593-compare-line>span{color:#63748a;font-size:10px}
+.r1593-compare-line>strong{color:#194a87;font-size:12px;font-variant-numeric:tabular-nums}
+.r1593-compare-line>small{display:block;color:#718297;font-size:9px;flex-basis:100%;overflow-wrap:anywhere}
+.r1593-compare-compact{margin:4px 0 8px;padding:7px 8px;background:#f4f8ff;border-radius:8px;text-align:left}
+.r1593-compare-compact .r1593-compare-line{justify-content:flex-start}
+.r1593-basket-note{font-size:10px;color:#718297;margin:5px 0 0}
+.r1593-comparison-status{font-size:10px;color:#677c99;margin:5px 0 10px}
+.desktop-results .r1593-price-cell{white-space:normal;min-width:150px}
+.desktop-results .r1593-price-cell>strong{font-size:12px;font-variant-numeric:tabular-nums}
+@media(max-width:520px){.r1593-compare-compact{gap:6px}.r1593-compare-compact .r1593-compare-line>small{font-size:10px}}
