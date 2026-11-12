@@ -1,0 +1,237 @@
+name: BLUE R1.5.9.7 FIX1 Idempotent Token Manager Installer (MANUAL SAFE)
+
+on:
+  workflow_dispatch:
+    inputs:
+      apply_changes:
+        description: 'FALSE validate-only. TRUE commit tested token steward files and close legacy issuance bypass.'
+        required: true
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+concurrency:
+  group: blue-r1597-install-single
+  cancel-in-progress: false
+
+jobs:
+  validate_and_optional_commit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - name: Guard repository and target branch
+        run: |
+          test "$GITHUB_REPOSITORY" = 'ehdud6728-bit/BLUE-Signal-Lab'
+          test "$GITHUB_REF" = 'refs/heads/main'
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Inspect exact current read-only vault and legacy issuance path
+        shell: bash
+        run: |
+          python - <<'PYGUARD'
+          from pathlib import Path
+          root=Path('.')
+          src=(root/'scripts/blue_kis_token_vault_r131.py').read_text()
+          legacy=(root/'.github/workflows/blue_kis_closing_r13_research_only.yml').read_text()
+          assert 'def issue_new_token_once(' in src
+          assert 'def obtain_token(' in src
+          assert 'if not allow_new:' in src
+          anchor="if [ \"$ALLOW_NEW_TOKEN\" = 'true' ]; then args+=(--allow-new-token); fi"
+          disabled="if [ \"$ALLOW_NEW_TOKEN\" = 'true' ]; then echo \"R1597: use dedicated token steward for guarded issuance\"; exit 1; fi"
+          assert legacy.count(anchor)+legacy.count(disabled)==1,'R1597_LEGACY_GUARD_MISSING_OR_CONFLICT'
+          print('R1597_SOURCE_ANCHORS_OK')
+          PYGUARD
+      - name: Restore SHA256-pinned approved implementation and regression tests
+        shell: bash
+        run: |
+          python - <<'PYRESTORE'
+          import base64,hashlib,io,zipfile
+          from pathlib import Path
+          encoded="""
+          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
+          +B1EfiiZyNy27hZcgQKZQ8lLJPbKO/DOuJq0zJe/nh0dvv7l6ORhqNj1qmJsTafMLD0BIP3NOPZkFZcLv1x4OHAedQfDCMncuK3Y
+          TePbozpdSlZw4yeC25NKLByI9iPSQErcEPyVuItL8OKS6mJ81EQ1D5thuQyALP47cEZ5sVzBq+bx6dtd5HU7Krq9/9CpDf1vvmcv
+          hUR5huFwFqXk2JVXm/yYWGxP211G+/o6uYw+tuD51694valiRodbCri72+Mxii6GUbzfqdLt+l30B+NOt98eRkn74mIwvoqTXmfX
+          fa/J0yjXveqonwZZW+xifBh0ospnP5usuT2AFy8g8Bzn+aR6j4TuIbIL2O73B38kvdFo/OO4P05OW6EfvBe2s9A5Kwr8MlCdP73z
+          yAFAmJXuCpHkebGl84tKBNLS1ujrLtXHmmq+9b3e+/r/AGbvnLfR8DH26RMauknVfSdWU0CY+vOtdte32vT58zv36RBbOPdIe4dy
+          d1d/MJi9GJuTrt5k+s13bxYI8RtSfRsJWYNnO5isej79L0F2cKa89p0o/ybG9oN1FeEfUEsBAhQDFAAAAAgAZktsXXbYBODBCgAA
+          Kh0AACUAAAAAAAAAAAAAAKSBAAAAAHNjcmlwdHMvYmx1ZV9raXNfZGFpbHlfdG9rZW5fcjE1OTcucHlQSwECFAMUAAAACAAqS2xd
+          8FxTxKoHAADsGwAAKAAAAAAAAAAAAAAApIEECwAAdGVzdHMvdGVzdF9ibHVlX2tpc19kYWlseV90b2tlbl9yMTU5Ny5weVBLAQIU
+          AxQAAAAIAGZLbF2Nzu6k9wQAAO8LAAAwAAAAAAAAAAAAAACkgfQSAAAuZ2l0aHViL3dvcmtmbG93cy9ibHVlX2tpc19kYWlseV90
+          b2tlbl9yMTU5Ny55bWxQSwUGAAAAAAMAAwAHAQAAORgAAAAA
+          """
+          raw=base64.b64decode(''.join(encoded.split()))
+          assert hashlib.sha256(raw).hexdigest()=='a54a9c05a88612343f11cdbdf98daed193351ba1968f9ff2bb1d5e1527ba5687','R1597_PACKAGE_HASH_MISMATCH'
+          expected={'.github/workflows/blue_kis_daily_token_r1597.yml', 'scripts/blue_kis_daily_token_r1597.py', 'tests/test_blue_kis_daily_token_r1597.py'}
+          with zipfile.ZipFile(io.BytesIO(raw)) as package:
+              assert set(package.namelist())==expected, 'R1597_UNEXPECTED_ZIP_FILES'
+              for rel in sorted(expected):
+                  file=Path(rel)
+                  approved=package.read(rel)
+                  if file.exists():
+                      if file.read_bytes()!=approved:
+                          raise AssertionError('R1597_FILE_CONFLICT_DO_NOT_OVERWRITE '+rel)
+                      print('R1597_MATCHING_EXISTING_FILE '+rel)
+                      continue
+                  file.parent.mkdir(parents=True,exist_ok=True)
+                  file.write_bytes(approved)
+                  print('R1597_NEW_FILE '+rel)
+          print('R1597_VERIFIED_PACKAGE_RESTORED')
+          PYRESTORE
+      - name: Disable legacy manual issuance bypass; preserve cache-only probes
+        shell: bash
+        run: |
+          python - <<'PYLEGACY'
+          from pathlib import Path
+          p=Path('.github/workflows/blue_kis_closing_r13_research_only.yml')
+          text=p.read_text()
+          old="if [ \"$ALLOW_NEW_TOKEN\" = 'true' ]; then args+=(--allow-new-token); fi"
+          new="if [ \"$ALLOW_NEW_TOKEN\" = 'true' ]; then echo \"R1597: use dedicated token steward for guarded issuance\"; exit 1; fi"
+          assert text.count(old)+text.count(new)==1,'R1597_LEGACY_ANCHOR_CHANGED'
+          if old in text:
+              p.write_text(text.replace(old,new,1))
+              print('R1597_LEGACY_ISSUANCE_DISABLED')
+          else:
+              print('R1597_LEGACY_ALREADY_DISABLED')
+          PYLEGACY
+      - name: Enforce strict changed-file scope
+        shell: bash
+        run: |
+          python - <<'PYSCOPE'
+          import subprocess
+          from pathlib import Path
+          allowed={'.github/workflows/blue_kis_closing_r13_research_only.yml',
+            '.github/workflows/blue_kis_daily_token_r1597.yml',
+            'scripts/blue_kis_daily_token_r1597.py',
+            'tests/test_blue_kis_daily_token_r1597.py'}
+          out=subprocess.check_output(['git','status','--porcelain','-uall'],text=True)
+          changed={line[3:] for line in out.splitlines() if line.strip()}
+          assert changed<=allowed,('R1597_UNEXPECTED_SCOPE',sorted(changed-allowed))
+          for p in sorted(allowed):
+              assert Path(p).is_file(),('R1597_REQUIRED_FILE_MISSING',p)
+          assert not subprocess.check_output(['git','diff','--name-only','--','scripts/blue_kis_token_vault_r131.py'],text=True).strip()
+          assert 'schedule:' in Path('.github/workflows/blue_kis_daily_token_r1597.yml').read_text()
+          assert "vars.BLUE_KIS_TOKEN_AUTO_ENABLED == 'true'" in Path('.github/workflows/blue_kis_daily_token_r1597.yml').read_text()
+          print('R1597_SCOPE_OK',sorted(changed))
+          PYSCOPE
+      - name: Run old vault tests and new D1 atomic issuance regression tests
+        run: |
+          python -m pip install 'cryptography>=43,<48'
+          python -m py_compile scripts/blue_kis_daily_token_r1597.py
+          python -m unittest discover -s tests -p 'test_blue_kis_token_vault_r131.py' -v
+          python -m unittest discover -s tests -p 'test_blue_kis_daily_token_r1597.py' -v
+          python scripts/blue_kis_daily_token_r1597.py --help
+      - name: Check workflow files syntax without issuance or network
+        run: |
+          python -m pip install 'PyYAML>=6,<7'
+          python - <<'PYYAML'
+          import yaml
+          from pathlib import Path
+          for name in ['.github/workflows/blue_kis_daily_token_r1597.yml',
+                       '.github/workflows/blue_kis_closing_r13_research_only.yml']:
+              content=Path(name).read_text()
+              yaml.safe_load(content)
+              assert 'oauth2/tokenP' not in content
+          print('R1597_WORKFLOW_PARSE_OK')
+          PYYAML
+      - name: Commit only after explicit approval and all regressions pass
+        if: inputs.apply_changes
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add .github/workflows/blue_kis_closing_r13_research_only.yml \
+                  .github/workflows/blue_kis_daily_token_r1597.yml \
+                  scripts/blue_kis_daily_token_r1597.py \
+                  tests/test_blue_kis_daily_token_r1597.py
+          git diff --cached --quiet || {
+            git commit -m 'BLUE R1.5.9.7: guarded daily KIS token stewardship (default off)'
+            git push origin HEAD:main
+          }
+      - name: Explicit activation boundary
+        run: |
+          echo 'R1597_TESTS_PASS'
+          echo 'No KIS tokenP call, no live D1 writes, no quote/algorithm changes.'
+          echo 'After commit, manually run dedicated steward mode=check.'
+          echo 'Scheduled issuance remains OFF unless repo variable BLUE_KIS_TOKEN_AUTO_ENABLED=true.'
