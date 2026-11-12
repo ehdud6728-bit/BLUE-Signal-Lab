@@ -205,14 +205,36 @@ export default {
         if(!['0','1'].includes(onlyPattern)||!['60','70','80','90'].includes(minPattern)||
            !['8','10','15','20','30'].includes(minPatternN))
           return respond({error:'INVALID_PATTERN_FILTER'},400);
+        // R1.5.10.4: real chart snapshots are the authoritative historical evidence.
+        // Legacy signals.extras_json may predate pattern metadata. Search the SAME
+        // chart setup that supplies the detail view, never infer a win percentage.
+        const sampleFloor=Number(minPatternN); // allowlisted 8/10/15/20/30 above
+        const chartSetupTable=`chart_snapshots cs,
+          json_each(CASE WHEN json_valid(cs.stats_json) THEN cs.stats_json
+            ELSE '{"setups":[]}' END,'$.setups') setup`;
+        const chartJoin=`cs.run_id=signals.run_id AND cs.code=signals.code AND cs.day=signals.day`;
+        const setupN=`CAST(json_extract(setup.value,'$.horizons."10".n') AS INTEGER)`;
+        const setupUp=`CAST(json_extract(setup.value,'$.horizons."10".up_pct') AS REAL)`;
+        const setupValid=`json_type(setup.value,'$.horizons."10".up_pct') IN ('integer','real')`;
         if(onlyPattern==='1'){
-          filters.push(`(CASE WHEN json_valid(extras_json) THEN
-            CAST(json_extract(extras_json,'$.r159_pattern_n_10d') AS INTEGER) ELSE 0 END)>=?`);
-          args.push(Number(minPatternN));
-          filters.push(`(CASE WHEN json_valid(extras_json) THEN
-            CAST(json_extract(extras_json,'$.r159_pattern_up_10d') AS REAL) ELSE -1 END)>=?`);
-          args.push(Number(minPattern));
+          // Count and paging apply this *before* LIMIT/OFFSET; GC and amount stay ANDed.
+          filters.push(`(EXISTS (SELECT 1 FROM ${chartSetupTable}
+             WHERE ${chartJoin} AND ${setupValid} AND ${setupN}>=? AND ${setupUp}>=?)
+           OR (NOT EXISTS (SELECT 1 FROM chart_snapshots cs WHERE ${chartJoin})
+             AND CAST(json_extract(CASE WHEN json_valid(extras_json) THEN extras_json ELSE '{}' END,
+               '$.r159_pattern_n_10d') AS INTEGER)>=?
+             AND CAST(json_extract(CASE WHEN json_valid(extras_json) THEN extras_json ELSE '{}' END,
+               '$.r159_pattern_up_10d') AS REAL)>=?))`);
+          args.push(sampleFloor,Number(minPattern),sampleFloor,Number(minPattern));
         }
+        // Select the best supported 10-day pattern *at the currently selected sample
+        // floor*, not the one frozen when the D1 row was first imported.
+        const bestSetupSql=`(SELECT setup.value FROM ${chartSetupTable}
+          WHERE ${chartJoin} AND ${setupValid} AND ${setupN}>=${sampleFloor}
+          ORDER BY ${setupUp} DESC,
+            CAST(json_extract(setup.value,'$.horizons."10".median_return_pct') AS REAL) DESC,
+            CAST(json_extract(setup.value,'$.horizons."10".mean_return_pct') AS REAL) DESC,
+            ${setupN} DESC LIMIT 1)`;
         const gcRaw=(u.searchParams.get('gc')||'').trim();
         const gcNames=gcRaw?gcRaw.split(',').map(x=>x.trim()).filter(Boolean):[];
         if(gcNames.length>5||new Set(gcNames).size!==gcNames.length||gcNames.some(k=>!gcAllowed[k]))
@@ -228,7 +250,8 @@ export default {
         const page = Math.min(10000, Math.max(1, Math.floor(Number(u.searchParams.get('page')) || 1)));
         const total = await env.DB.prepare('SELECT COUNT(*) AS n FROM signals WHERE ' + where)
           .bind(...args).first<{ n:number }>();
-        const rows = await env.DB.prepare(`SELECT run_id,code,day,signal_names,close_price,supply_distance_pct,extras_json
+        const rows = await env.DB.prepare(`SELECT run_id,code,day,signal_names,close_price,supply_distance_pct,extras_json,
+          ${bestSetupSql} AS verified_pattern_setup_json
           FROM signals WHERE ${where} ORDER BY day DESC,code LIMIT ? OFFSET ?`)
           .bind(...args,limit,(page-1)*limit).all();
         const countFilter = runId ? 'run_id=?' : `run_id IN (
@@ -240,7 +263,28 @@ export default {
         const items = rows.results.map((x:any) => {
           let extras: Record<string,unknown> = {};
           try { extras = JSON.parse(x.extras_json || '{}'); } catch { /* legacy record */ }
-          return { ...x, name:extras.name || extras.Name || null,
+          // Reconcile old search rows with the stored chart (same run/code/date).
+          // Only export verified 10-session observations and their real signal dates.
+          if(typeof x.verified_pattern_setup_json==='string'){
+            try{
+              const setup=JSON.parse(x.verified_pattern_setup_json) as any;
+              const h=setup?.horizons?.['10'];
+              const n=Number(h?.n),up=Number(h?.up_pct);
+              if(Number.isInteger(n)&&n>=sampleFloor&&Number.isFinite(up)&&up>=0&&up<=100){
+                const days=Array.isArray(h?.cases)?h.cases
+                  .map((c:any)=>c?.signal_day)
+                  .filter((d:unknown):d is string=>typeof d==='string'&&
+                    /^20\d{2}-\d{2}-\d{2}$/.test(d)&&d<=String(x.day)) : [];
+                extras.r159_pattern_up_10d=up;
+                extras.r159_pattern_n_10d=n;
+                extras.r159_pattern_label_10d=String(setup?.label||'').slice(0,150);
+                extras.r159_pattern_signal_days_10d_json=JSON.stringify([...new Set(days)].sort().slice(-12));
+              }
+            }catch{/* Invalid historical JSON never fabricates evidence. */}
+          }
+          const record={...x};
+          delete record.verified_pattern_setup_json;
+          return { ...record, name:extras.name || extras.Name || null,
             signals:String(x.signal_names || '').split(',').filter(Boolean), extras };
         });
         return respond({mode,start,end,total:total?.n || 0,page,limit,items,

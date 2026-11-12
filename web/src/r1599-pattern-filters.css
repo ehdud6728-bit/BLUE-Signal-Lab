@@ -36,3 +36,7 @@
 /* R1.5.10.3 minimum pattern samples selector */
 .r15102-tomato-inline #r15103-min-samples{min-width:98px;max-width:135px}
 @media(max-width:520px){.r15102-tomato-inline{column-gap:6px;row-gap:7px}.r15102-tomato-inline #r15103-min-samples{min-width:94px;max-width:120px}.r15102-tomato-inline .r1599-hot-only{font-size:10px}}
+
+/* R1.5.10.4: outline stock card, not the separate basket-action rail. */
+.r151-mobile-row.r159-tomato-stock{border:0!important;background:transparent!important}
+.r151-mobile-row.r159-tomato-stock>.stock-card{border:2px solid #e87968!important;background:linear-gradient(180deg,#fff8f6,#fff 90px);box-shadow:0 0 0 1px rgba(232,121,104,.12)}

@@ -179,27 +179,29 @@ export default function SmartBasket({quickAddRequest,onItemsChange,active=true,r
    document.addEventListener('visibilitychange',wake);
    return()=>{disposed=true;window.clearInterval(timer);document.removeEventListener('visibilitychange',wake);};
  },[active,idsKey,refreshKey]);
- // R1591: gently recover evidence for pre-existing baskets and AI picks.
- // Existing API read endpoint; no new Worker or schema and no mass full-market fetch.
+ // R1.5.10.4: sample-floor changes must refresh verified basket evidence.
+ // The API only reads D1 chart evidence, never performs a market/KIS request.
+ useEffect(()=>{evidenceAttempted.current.clear();},[patternSampleMin]);
  useEffect(()=>{
   if(!active)return;let disposed=false;let cursor=0;
-  const pending=[...new Map(items.filter(x=>x.patternN10d===undefined||(x.patternN10d>=8&&x.patternDays10d===undefined))
-   .map((x):[string,BasketItem]=>[perfId(x),x])).values()].filter(x=>!evidenceAttempted.current.has(perfId(x)));
+  const pending=[...new Map(items.map((x):[string,BasketItem]=>[perfId(x),x])).values()]
+    .filter(x=>!evidenceAttempted.current.has(perfId(x)));
   if(!pending.length)return;
   const worker=async()=>{while(!disposed){
    const it=pending[cursor++];if(!it)return;const key=perfId(it);evidenceAttempted.current.add(key);
    try{const u=new URL(API+'/api/search');u.searchParams.set('mode','single');
     u.searchParams.set('date',it.day);u.searchParams.set('code',it.code);u.searchParams.set('limit','1');
+    u.searchParams.set('min_pattern_n',String(patternSampleMin));
     const r=await fetch(u.toString(),{credentials:'include',cache:'no-store'});if(!r.ok)continue;
     const d=await r.json() as {items?:SearchRow[]};
     const found=d.items?.find(x=>x.code===it.code&&x.day===it.day);if(!found||disposed)continue;
     const snapshot=patternEvidence(found);if(!('patternN10d' in snapshot))continue;
-    setItems(old=>old.map(x=>perfId(x)===key&&(x.patternN10d===undefined||x.patternDays10d===undefined)?{...x,...snapshot}:x));
+    setItems(old=>old.map(x=>perfId(x)===key?{...x,...snapshot}:x));
    }catch{/* Historical evidence is optional. Never invent it on network errors. */}
   }};
   void Promise.all([worker(),worker(),worker()]);
   return()=>{disposed=true};
- },[active,idsKey]);
+ },[active,idsKey,patternSampleMin]);
  useEffect(()=>{onItemsChange?.(items.map(x=>x.id));},[items,onItemsChange]);
  useEffect(()=>{
   if(quickAddRequest)add(quickAddRequest.item,'MANUAL');

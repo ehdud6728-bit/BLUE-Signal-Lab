@@ -102,7 +102,7 @@ function App(){
     catch{return 8;}
   });
   const amountEok=amountChoice==='custom'?Number(customAmount):Number(amountChoice);
-  const amountValid=Number.isInteger(amountEok)&&amountEok>=0&&amountEok<=50000;
+  const [appliedAmountEok,setAppliedAmountEok]=useState<number|null>(null);
   const highlightMin=patternThreshold==='off'?null:Number(patternThreshold);
   useEffect(()=>{
     try{localStorage.setItem('blue_r1599_amount_choice',amountChoice);
@@ -240,9 +240,12 @@ function App(){
     }catch(e){setError(String(e));}
     finally{setRequestBusy(false);}
   }
-  async function search(p=1,scroll=true,selectedGc:GcKey[]=gcFields,selectedGcLogic:'any'|'all'=gcLogic,requestedDay?:string,patternOverride?:{enabled?:boolean;threshold?:number|null;minSamples?:number}){
+  async function search(p=1,scroll=true,selectedGc:GcKey[]=gcFields,selectedGcLogic:'any'|'all'=gcLogic,requestedDay?:string,patternOverride?:{enabled?:boolean;threshold?:number|null;minSamples?:number;amountEok?:number}){
     const serial=++searchVersion.current;
-    if(!amountValid){setError('거래대금은 0~50,000억원 사이 정수로 입력하세요.');return;}
+    const queryAmountEok=patternOverride?.amountEok??amountEok;
+    if(!Number.isInteger(queryAmountEok)||queryAmountEok<0||queryAmountEok>50000){
+      setError('거래대금은 0~50,000억원 사이 정수로 입력하세요.');return;
+    }
     setBusy(true);setError('');setStatus('');
     const queryMode=requestedDay?'single':mode,queryDate=requestedDay||date;
     if(requestedDay){setMode('single');setDate(requestedDay);}
@@ -253,20 +256,22 @@ function App(){
       else {u.searchParams.set('start',start);u.searchParams.set('end',end);}
       u.searchParams.set('signals',signals.join(','));u.searchParams.set('logic',logic);u.searchParams.set('page',String(p));
       if(selectedGc.length){u.searchParams.set('gc',selectedGc.join(','));u.searchParams.set('gc_logic',selectedGcLogic);}
-      u.searchParams.set('min_amount_eok',String(amountEok));
+      u.searchParams.set('min_amount_eok',String(queryAmountEok));
+      // Chart-backed pattern extraction needs the actual selected sample floor,
+      // even when highlighting all stocks rather than filtering only hot ones.
+      u.searchParams.set('min_pattern_n',String(patternOverride?.minSamples??patternSampleMin));
       // Results-panel controls apply immediately without waiting for React state updates.
       const effectiveOnlyPattern=patternOverride?.enabled??onlyPattern;
       const effectiveHighlightMin=patternOverride?.threshold!==undefined?patternOverride.threshold:highlightMin;
-      const effectiveMinSamples=patternOverride?.minSamples??patternSampleMin;
       if(effectiveOnlyPattern&&effectiveHighlightMin!==null){
         u.searchParams.set('only_pattern','1');u.searchParams.set('min_pattern_up',String(effectiveHighlightMin));
-        u.searchParams.set('min_pattern_n',String(effectiveMinSamples));
       }
       const r=await fetch(u.toString(),{credentials:'include',cache:'no-store'});
       const d=await r.json();
       if(!r.ok)throw new Error(d.error||`검색 오류: ${r.status}`);
       if(serial!==searchVersion.current)return;
       setRows(d.items||[]);setDays(d.daily_counts||[]);setTotal(d.total);setPage(p);setSelected(null);setLocalQuery('');setDataStatus(d.data_status||'');
+      setAppliedAmountEok(queryAmountEok);
       if(scroll){setFilterOpen(false);requestAnimationFrame(()=>resultRef.current?.scrollIntoView({behavior:'smooth',block:'start'}));}
       if(d.data_status==='NOT_IMPORTED'){
         if(queryMode==='single'){
@@ -476,7 +481,12 @@ function App(){
           <label htmlFor="scan-logic">신호 조합</label><select id="scan-logic" value={logic} onChange={e=>setLogic(e.target.value)}><option value="any">하나라도 충족 (OR)</option><option value="all">모두 충족 (AND)</option></select>
           <div className="r1599-filters" role="group" aria-label="거래대금 검색 조건">
             <label htmlFor="r1599-amount">검색일 거래대금 최소 (억원)</label>
-            <select id="r1599-amount" value={amountChoice} onChange={e=>setAmountChoice(e.target.value)}>
+            <select id="r1599-amount" value={amountChoice} onChange={e=>{
+              const next=e.target.value;setAmountChoice(next);
+              // Preset turnover changes re-query immediately; custom entry still
+              // needs Search to avoid requests for every keystroke.
+              if(next!=='custom'&&total!==null)void search(1,false,gcFields,gcLogic,undefined,{amountEok:Number(next)});
+            }}>
               <option value="0">전체 (제한 없음)</option><option value="100">100억원 이상</option>
               <option value="300">300억원 이상</option><option value="500">500억원 이상 (기본)</option>
               <option value="1000">1,000억원 이상</option><option value="custom">직접 입력</option>
@@ -518,7 +528,7 @@ function App(){
         {scanInfo&&<div className="notice" role="status"><RefreshCw size={17}/><div>{scanInfo}{actionsUrl&&<div><a href={actionsUrl} target="_blank" rel="noreferrer">GitHub 실행 결과 확인</a></div>}</div></div>}
         <section className="panel result" ref={resultRef} id="results-panel">
           <div className="result-heading"><h2><BarChart3 size={18}/> 검색된 종목 <small>{total===null?'검색 전':total+'건'}</small></h2><span className="eod-pill"><Clock3 size={13}/> EOD</span></div>
-          <p className="r1599-active-filters">검색 조건 · 거래대금 {amountEok>0?amountEok.toLocaleString('ko-KR')+'억원 이상':'전체'} · 토마토 {highlightMin===null?'꺼짐':highlightMin+'% 이상 · 표본 '+patternSampleMin+'건 이상'}{onlyPattern&&highlightMin!==null?' · 해당 종목만 보기':''}</p>
+          <p className="r1599-active-filters">검색 결과 기준 · 거래대금 {(appliedAmountEok??amountEok)>0?(appliedAmountEok??amountEok).toLocaleString('ko-KR')+'억원 이상':'전체'} · 토마토 강조 {highlightMin===null?'꺼짐':highlightMin+'% 이상 · 표본 '+patternSampleMin+'건 이상'}{onlyPattern&&highlightMin!==null?' · 해당 종목만 보기':''}{appliedAmountEok!==null&&appliedAmountEok!==amountEok?' · 거래대금 변경 미적용(검색 버튼을 누르세요)':''}</p>
           <p className="result-hint">검색일 확정 종가와 이후 D1 저장 시세·기간 고가를 구분해 표시합니다. 가격이 없으면 미수집으로 표시합니다.</p>
           {r1593Error&&<p className="r1593-comparison-status" role="status">가격 비교: {r1593Error}</p>}
           {r1595RequestNote&&<p className="r1595-request-status" role="status">{r1595RequestNote}</p>}
@@ -617,7 +627,7 @@ function App(){
                 <span>{inBasket(r)?'담김':'담기'}</span>
               </button>
               {/* Quote refresh is now visible directly beside the saved quote above. */}
-              </div>):<div className="mobile-empty"><Search size={30}/><strong>{localQuery?'현재 페이지에서 일치하는 종목이 없습니다.':total===0?'해당 조건의 종목이 없습니다.':'검색 조건을 선택해 주세요.'}</strong><p>{gcFields.length?'선택한 골든크로스 조건을 만족하는 종목이 없습니다.':'과거 거래일을 선택한 다음 검색 버튼을 누르세요.'}</p><button onClick={()=>nav('search')}>검색 조건 열기</button></div>}
+              </div>):<div className="mobile-empty"><Search size={30}/><strong>{localQuery?'현재 페이지에서 일치하는 종목이 없습니다.':total===0?'해당 조건의 종목이 없습니다.':'검색 조건을 선택해 주세요.'}</strong><p>{onlyPattern?'토마토 조건은 10거래일 패턴·최소 표본 수에 더해 선택한 골든크로스와 거래대금 조건도 모두 충족해야 합니다. GC 전체 종목 및 거래대금 전체로 비교해 보세요.':gcFields.length?'선택한 골든크로스 조건을 만족하는 종목이 없습니다.':'과거 거래일을 선택한 다음 검색 버튼을 누르세요.'}</p><button onClick={()=>nav('search')}>검색 조건 열기</button></div>}
           </div>
           {total!==null&&total>100&&<div className="pager"><button disabled={busy||page===1} onClick={()=>{void search(page-1,false);}}>이전</button><span>{page} / {Math.ceil(total/100)}</span><button disabled={busy||page>=Math.ceil(total/100)} onClick={()=>{void search(page+1,false);}}>다음</button></div>}
         </section>
