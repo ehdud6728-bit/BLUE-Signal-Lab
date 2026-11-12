@@ -11,3 +11,9 @@
 .desktop-results .r1593-price-cell{white-space:normal;min-width:150px}
 .desktop-results .r1593-price-cell>strong{font-size:12px;font-variant-numeric:tabular-nums}
 @media(max-width:520px){.r1593-compare-compact{gap:6px}.r1593-compare-compact .r1593-compare-line>small{font-size:10px}}
+
+/* R1593_TOMATO_RETURN_PCT: visual only; no price source changes. */
+.r1593-compare-line>small .r1593-delta{font-size:10px;font-weight:800;white-space:nowrap}
+.r1593-compare-line>small .r1593-delta-up{color:#c44b3c}
+.r1593-compare-line>small .r1593-delta-down{color:#296ab9}
+.r1593-compare-line>small .r1593-delta-flat{color:#718297}
