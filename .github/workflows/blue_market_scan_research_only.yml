@@ -125,3 +125,5 @@ jobs:
           cd worker
           npm install --no-audit --no-fund --legacy-peer-deps
           npx wrangler d1 execute blue-signal-lab-db --remote --file=../output/import.sql --yes
+      - name: Install cryptography for KIS token vault tests
+        run: python -m pip install 'cryptography>=43,<48'
