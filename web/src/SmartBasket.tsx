@@ -2,7 +2,7 @@
  * No brokerage orders, no synthetic entries or invented real-time prices.
  * Stored in this browser only until user exports/imports a backup.
  */
-import {useEffect,useState} from 'react';
+import {useEffect,useRef,useState} from 'react';
 import {Bot,Download,Upload,Trash2,RefreshCw,AlertCircle,ShoppingBasket,Bookmark,BookmarkCheck} from 'lucide-react';
 import './smart-basket.css';
 import './r158-long-watch.css';
@@ -37,7 +37,8 @@ type AiPick={code:string;name:string;day:string;close_price:number;signals:strin
 type AiResult={status:string;asof?:string;items?:AiPick[];generated_at?:string;model?:string;cached?:boolean;message?:string;error?:string};
 type BasketItem={id:string;source:'MANUAL'|'AI';code:string;name:string;day:string;baseline:number;
   added_at:string;signals:string[];memo:string;reason?:string;risk?:string;watch?:string;
-  protected?:boolean;protected_at?:string};
+  protected?:boolean;protected_at?:string;
+  patternUp10d?:number;patternN10d?:number;patternLabel10d?:string};
 type Quote={code:string;market:string;trade_date_kst:string;price:number;received_at_utc:string;exchange_tick_time_verified?:boolean};
 type Quotes={status:string;items:Quote[];age_minutes?:number|null;latest_received_at_utc?:string|null};
 const cash=(v:number|null|undefined)=>typeof v==='number'&&Number.isFinite(v)?v.toLocaleString('ko-KR'):'—';
@@ -62,8 +63,21 @@ function validItem(x:any):x is BasketItem{
   (x.source==='MANUAL'||x.source==='AI')&&Number.isFinite(x.baseline)&&x.baseline>0&&
   typeof x.id==='string'&&x.id===`${x.source}:${x.code}:${x.day}`&&
   (x.protected===undefined||typeof x.protected==='boolean')&&
-  (x.protected_at===undefined||typeof x.protected_at==='string');
+  (x.protected_at===undefined||typeof x.protected_at==='string')&&
+   (x.patternUp10d===undefined||(typeof x.patternUp10d==='number'&&Number.isFinite(x.patternUp10d)&&x.patternUp10d>=0&&x.patternUp10d<=100))&&
+   (x.patternN10d===undefined||(Number.isInteger(x.patternN10d)&&x.patternN10d>=1&&x.patternN10d<=100000))&&
+   (x.patternLabel10d===undefined||(typeof x.patternLabel10d==='string'&&x.patternLabel10d.length<=150));
 }
+// R1591: freeze only provenance-backed research evidence from an actual search/D1 row.
+function patternEvidence(data:SearchRow|AiPick):Pick<BasketItem,'patternUp10d'|'patternN10d'|'patternLabel10d'>|Record<string,never>{
+ const x='extras' in data?data.extras:undefined;
+ const n=Number(x?.r159_pattern_n_10d),p=Number(x?.r159_pattern_up_10d);
+ if(!Number.isInteger(n)||n<1||n>100000||!Number.isFinite(p)||p<0||p>100)return {};
+ const rawLabel=x?.r159_pattern_label_10d;const label=typeof rawLabel==='string'?rawLabel.slice(0,150):'';
+ return {patternUp10d:p,patternN10d:n,patternLabel10d:label};
+}
+const hotPattern=(x:BasketItem)=>typeof x.patternUp10d==='number'&&x.patternUp10d>=70&&
+ typeof x.patternN10d==='number'&&x.patternN10d>=8;
 function baselineReturn(item:BasketItem,quote:Quote|undefined):number|null{
  if(!quote||!Number.isFinite(quote.price)||quote.price<=0||quote.trade_date_kst<=item.day)return null;
  return (quote.price/item.baseline-1)*100;
@@ -75,6 +89,7 @@ export default function SmartBasket({quickAddRequest,onItemsChange,active=true}:
  active?:boolean;
 }){
  const [items,setItems]=useState<BasketItem[]>(readItems);
+ const evidenceAttempted=useRef<Set<string>>(new Set());
  const [filter,setFilter]=useState<'ALL'|'MANUAL'|'AI'|'PROTECTED'>('ALL');
  const [cleanupDays,setCleanupDays]=useState(60);
  const [lastRemoved,setLastRemoved]=useState<BasketItem[]>([]);
@@ -132,6 +147,27 @@ export default function SmartBasket({quickAddRequest,onItemsChange,active=true}:
    document.addEventListener('visibilitychange',wake);
    return()=>{disposed=true;window.clearInterval(timer);document.removeEventListener('visibilitychange',wake);};
  },[active,idsKey]);
+ // R1591: gently recover evidence for pre-existing baskets and AI picks.
+ // Existing API read endpoint; no new Worker or schema and no mass full-market fetch.
+ useEffect(()=>{
+  if(!active)return;let disposed=false;let cursor=0;
+  const pending=[...new Map(items.filter(x=>x.patternN10d===undefined)
+   .map((x):[string,BasketItem]=>[perfId(x),x])).values()].filter(x=>!evidenceAttempted.current.has(perfId(x)));
+  if(!pending.length)return;
+  const worker=async()=>{while(!disposed){
+   const it=pending[cursor++];if(!it)return;const key=perfId(it);evidenceAttempted.current.add(key);
+   try{const u=new URL(API+'/api/search');u.searchParams.set('mode','single');
+    u.searchParams.set('date',it.day);u.searchParams.set('code',it.code);u.searchParams.set('limit','1');
+    const r=await fetch(u.toString(),{credentials:'include',cache:'no-store'});if(!r.ok)continue;
+    const d=await r.json() as {items?:SearchRow[]};
+    const found=d.items?.find(x=>x.code===it.code&&x.day===it.day);if(!found||disposed)continue;
+    const snapshot=patternEvidence(found);if(!('patternN10d' in snapshot))continue;
+    setItems(old=>old.map(x=>perfId(x)===key&&x.patternN10d===undefined?{...x,...snapshot}:x));
+   }catch{/* Historical evidence is optional. Never invent it on network errors. */}
+  }};
+  void Promise.all([worker(),worker(),worker()]);
+  return()=>{disposed=true};
+ },[active,idsKey]);
  useEffect(()=>{onItemsChange?.(items.map(x=>x.id));},[items,onItemsChange]);
  useEffect(()=>{
   if(quickAddRequest)add(quickAddRequest.item,'MANUAL');
@@ -167,7 +203,7 @@ export default function SmartBasket({quickAddRequest,onItemsChange,active=true}:
   const p=source==='AI'?data as AiPick:null;
   setItems(prev=>[{id,source,code:data.code,name:data.name||data.code,day:data.day,
     baseline:data.close_price as number,added_at:new Date().toISOString(),signals:data.signals||[],memo:'',
-    reason:p?.reason,risk:p?.risk,watch:p?.watch},...prev]);
+    reason:p?.reason,risk:p?.risk,watch:p?.watch,...patternEvidence(data)},...prev]);
   setError('');setMessage(`${data.name||data.code} 관찰함에 추가했습니다.`);
  }
  async function generateAi(){if(aiBusy)return;setAiBusy(true);setError('');setMessage('');
@@ -280,7 +316,7 @@ export default function SmartBasket({quickAddRequest,onItemsChange,active=true}:
    new Set(items.filter(x=>pct(x)!==null).map(x=>x.day)).size===1;
   return <section className="panel blue-basket r152-basket-compact" id="blue-basket" aria-labelledby="blue-basket-h">
    <header className="r152-basket-head">
-     <div><h2 id="blue-basket-h"><ShoppingBasket size={18}/> AI 스마트 장바구니 <small>R1.5.8</small></h2>
+     <div><h2 id="blue-basket-h"><ShoppingBasket size={18}/> AI 스마트 장바구니 <small>R1.5.9.1</small></h2>
        <p>검색 결과의 장바구니 아이콘으로 직접 담고, 이곳에서 AI 후보와 비교합니다.</p></div>
      <button type="button" className="r152-ai-generate" disabled={aiBusy} onClick={()=>void generateAi()}>
        {aiBusy?<RefreshCw size={17}/>:<Bot size={17}/>}{aiBusy?'AI 분석 중…':'AI 후보 만들기'}
@@ -351,7 +387,7 @@ export default function SmartBasket({quickAddRequest,onItemsChange,active=true}:
      const maxHighDay=maxHigh===intradayHigh?pr?.quote_day:pr?.highest_day;
      const pending=!pr||['QUEUED','NOT_REGISTERED','HISTORY_PARTIAL'].includes(pr.status);
      const state=pr?statusText(pr.status):'등록 확인 중';
-    return <article className="basket-record" key={it.id}>
+    return <article className={"basket-record"+(hotPattern(it)?" r1591-basket-tomato":"")} key={it.id}>
      <div className="basket-record-head"><div><span className={`basket-src ${it.source==='AI'?'ai':''}`}>{it.source==='AI'?'AI 선택':'직접 선택'}</span>
        <strong>{it.name}</strong> <small>{it.code}</small>{it.protected&&<span className="r158-locked">장기 관찰</span>}</div>
        <div className="r158-record-actions">
@@ -362,6 +398,9 @@ export default function SmartBasket({quickAddRequest,onItemsChange,active=true}:
           disabled={it.protected===true} aria-label={`${it.name} 제거`}
           onClick={()=>setItems(old=>old.filter(x=>x.protected||x.id!==it.id))}><Trash2 size={16}/></button>
        </div></div>
+      {hotPattern(it)&&<div className="r1591-basket-evidence" title={it.patternLabel10d||'실제 과거 일봉 패턴 검증'}>
+       과거 10일 상승 {it.patternUp10d!.toFixed(1)}% · 표본 {it.patternN10d}건 · 탐색적 결과
+      </div>}
      <div className="r154-origin-strip">
        <div className="r154-discovery-price"><span>발견가</span><strong>{cash(it.baseline)}원</strong><small>{it.day} · 확정 종가</small></div>
        <div className="r154-discovery-signals"><span>발견 당시 기술 신호</span>
