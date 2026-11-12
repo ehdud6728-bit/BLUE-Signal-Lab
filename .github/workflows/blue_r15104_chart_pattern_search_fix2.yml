@@ -1,0 +1,278 @@
+name: BLUE R1.5.10.4 FIX2 Chart-Backed Tomato and Applied Filter Fix (MANUAL SAFE)
+
+on:
+  workflow_dispatch:
+    inputs:
+      apply_changes:
+        description: 'FALSE tests only. TRUE commits only 4 approved source files after tests and dry-run builds pass.'
+        type: boolean
+        required: true
+        default: false
+
+permissions:
+  contents: write
+
+concurrency:
+  group: blue-r15104-fix2-chart-evidence-search-fix
+  cancel-in-progress: false
+
+jobs:
+  test_and_optional_commit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Guard repository and main branch
+        shell: bash
+        run: |
+          test "$GITHUB_REPOSITORY" = "ehdud6728-bit/BLUE-Signal-Lab"
+          test "$GITHUB_REF" = "refs/heads/main"
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Restore SHA256-pinned patch and offline SQLite regression scripts
+        shell: bash
+        run: |
+          python - <<'PY_R15104_RESTORE'
+          import base64,hashlib,zlib
+          from pathlib import Path
+          # R15104_SOURCE_PATCH
+          encoded='''
+          c-qxlZFAe!mHy6OacyS>zyTprsauCKq@g7!W=)X_Njb?nUK#=}NmL+!0-#<>amU%XnQY>nrnB)j+l@QUPC7|CovD*J+jJ-
+          W(w`&J|DosH3xME@Y&mH%i4sd7aB=Rr=RD{2UY<L%*bDr{9m`py&K~g&!;b4bmpOa(?B(*dMrwKGf|AcEKO!5YmzN5}r-
+          thomQBeX^{tjgO=5I(KO}U|GO1%wvTubQVp~DD*s|=9`Y^($LC+2YC6j4%tboA(ItfDGGD7>11cvLun85A%@V2LiMn@qPm(*V@6M8_6UTC?FOxE+H+Y
+          5F45XdBScc}w}f}Rd@%9*RB`r?{v+tdhMA31W`6o$dIsfRi+kPQso2^8{@>+iN~cb|kb2w}ud&$3P6$1#cPA#vRXo(#9!wUA*DL#E}sUF54{TRX(+dM
+          >PX3qEEt#d5j&lD4k)GX#EweV|SK#lSZfEytt>N*D-o^oZ`T`(52~;P%1v{dyN<cv%m2X*ln(pTF?@^I6~l<mqI&Tm!`jkp3W(F=-2y=-
+          IkKMPw9~MO&^<WumuWq)cpmhuTts5%pALo{f{(4U~}TDL&QBW=Ic05!C3KmeW>+Uf9ZB6!@@~+jC462P+0#h9aMXKeSr>`58427}2eOk{XP$x>WOh*B
+          4ttEq@`O`%$x4S-VoLHT#UCK~sBqOIvGb>&<-
+          gg=(YOXG8|kjGnUZTOs94v5DhFM$2QXljQmQdcFlr#`A6!8*5jZ)vJQc1jMG7TXrw#s13gdtH_)q#jR3-gdIu(ia-KT=5tw7KLp^}p_K*Tn-
+          )R@o`*dTVH^P3V3_4_BWMPW?gbqekP`q@gXYfy*HM77ru()<eFQNFP(Zpsx1;Y-
+          ;!v<8V(3N(DTP2RbV*>f0f~VEEBEz?4%r5&B761XrUpc#$*1hl2W*3I2nPvBg<+dpAThyueQra{PTgKex>h^7rDSx^Qs=@r6H6XO$Y>QL`mtJ~>)3}|
+          9Ga@C3VA`|_P~E)uzDbB@us*|tZU?@D_Vu%nwopMZJA<fl@e*d!_@nPz$*=rjb`JFFg;!to>9;`nvrodon}5~3KA*SNvYD%UeIb1(aJDsj%by2X+>SV
+          DJ`ey>wY_8uF~u7P+#m?PPCeeG%@nKUP;dzFQujx%h5Wr`KMk;dL0AQ-h>Jl7sp;69lUNwP)g7Yv^nzh9$*G+67T}Z1z!#jv<!G5_WnvHMYT-Zx^XxU
+          %MAS<pjQu>%SR?jmxemCa#E+dZ*<03PtlAxV+I&@bhzw!9@tjEMw>vwvdNxB_vOg2ET;v(b%47=JPIMk3H5f0Pq69$sOVkKrW>~F`sy4UEaTJ=8Qgsg
+          Y+!2_7xTHr{DsA(+~RXNqVKqSbc!Nlw2pi>^c|b3H>W%VF#<WIJ&p=+0`qZYq&*5p7MZv=fis2^p?{W%DL7lWeq$gYXb@uj9-
+          xX{++3c=_D@~Q0fqy`?>SA&RAUYDkEB>x$H~Fz(&Q0-h#!E<Ozy+=%p7dyih6U_9M}^DmfWMrD`M>z=$Ovtb7vK2(yHf^-
+          S(cEF4&o8geg0lPx%@uLcPi8hKC+KCDBrahywU@+NQoB3us<KdWI)DP(a=q##`pcJ-y9bI$-
+          _~5Dy{fJdcIvNx8IHYAjYaHtJeqnY^&Z#_L`7D&XW0wL?wiWQV4`T&g$fM67FNh{+^RHfq&P@=SjU$%6@~AyR8vJPLs`U@&;5KNi}=oyq__SNg`bhj*
+          kj)oP81m1={`=V;cD<}e{ma*6ZJ!s2u;oTMFBWLl9uO-=#{+mnM4to3`r+DvpoB}gZQl$3vzXTyv9_{S5`Ck5*|OS72c-
+          k||^<&YbV^R75DoY(m%qv!kJzp-eDGc-PPnraKVI1ldM<uADoC6L1Z0_uhR4*bG<kcVNOw66zX1U^j7v$C{#aLY%&81(Bux7C|55L1?a3M2VC76O-
+          Jk*0}NYwKE#Tz(~GJ!D<0ugOnHG#=}$y419Er|H8OK*ppq{6|oK3fhSb*fZ|bNFE&~rY!;#g_z1Wv|6RPQ7Xe<$o5alO}Pp|(E(A3zOO@a4JEF!ep!L
+          k!-
+          JegycsE!2R0dlm<+&^dGu;JdKaol!*&DOgmMB3O_psOHciL^u<*q7$SE64ErsDCih>CQ0DwLnjFpHWXEI>nlP`9aa34+}znjU`zWXJm)$>e0Z4U#~V_
+          bbCeub&;+Y^Ssm)F#;mDaV&n)XEXLjl=EVWG^FxDnCSJyAR;=+2=;)D@Brw>AwUuUa5AESJnn*s5^aa?jay+<j*Si1i0)HyQeeq#wNm4}V&(Rus@hK*
+          fWJr1$8Exo5~G2T<>Ykm2^p;(3^nrO7^<jGSL2X?y2(0|OOBIRK{y>ML-
+          X3SJ}4=wl`N==5xR(xxK87wT*sz*HIwj4MG>0?4AFT$bUI=LO<r*R{cPB{^PNYS9B}`2=kKz~zm_P}1UZZ3r;D7GWmGT3f6^z)Nplj9_r2Xm5)M+(oQ
+          uBxRCh6*4?vn6-
+          |QdL4pXK!X4q3hquo{k^C#$Gi<Dv3y>Oab;nbh6ZV}kT_x*>bA&%@)#?`jFJm<GOc7{>`!G0sdQJJ5bI+mkcf^vA1=?O)lu2V)g&gYD%XX4PPj3DxD!
+          `jomB;p2W*T#^ORbeei7ur$0$}%;(4~{NDB+jikga{3k%7h4a)(Liaieo^}H1|hkq`q`CLw#mPgDMxTZiY`o4Y$@3X(ikfDSAq}2|;n0b{Dj(daQUR^
+          O(W5WY-
+          (!Al3;fZD;!oE~6d7BCKr>;c$Hd8uXSeQcyF!wJ@xmRB``%8oD#Ghvt6>NNpCam4Oq$VB#Ig&_$T%XYkiT%r*>{0D`ryI`lVAVO@VAh*sFGTD`2x9k-
+          j+nEuA##a1Ie#H1osQ^O@&S_OrokZ21!=Vo#p~c>9l8&BDYhFA1L=kmfW?aOeA)bxG&9{~IW%B?rVn1G<glDQ-6X;3qOL?s-
+          @$vJi*f4&Tv3`>`Z@~x%wws23<VPo(S&R`q|x)o+3NBMk%hnc{R=NbO<Sv0)=Fh99q=>f$cFENsXJyNs&ILWN@uMgbDZZ#&KpwH9_#D#{RG?@!0Lbv<
+          6Zv%Xm%kT!QMaHJiwkVQh?gJs}Qzrq3^kt$@@%!;Zy2h`6&e8$8*%(<vn&DA}%OD!8<GjX0YY2&TarCX$#(o;wV=$Uy<hSs{CrL;{y87=8Ya;sVl5TK
+          9PScvO!WIx|x25fi+E(_b_JMWilgph2)w!#^lo_^+FDQ(oz3g<o0@`$zn`g1`HRc?%hy(0j-
+          B%M3)>!?Fg~CBI55DKgG4icCp+nZdSJ|jb^=3Y@{>BMD&rRRKaw7u*TIwpE_8^nX82z4%6kZ1IbJWGJ@4YYPMx4bL%Y11o8cW)Q@HKk0iUC2zqKFAzE
+          DZnpUfUjWiptY|UL{6fDoApdewj#dm0g<4+$9fA`+-&aLAw-yGe$MRNaoAt!^%NB{N3=zrcJqksG3=-xvzx_@`{=6k~r-
+          Y28q{c?E!_mA$rH@f}h=(q1GkY{n1vOL*h<{JHZkNSs+>eOk;DC5<wCYQ^ZnB^J7PLh+3jwWwh%1z%{Vem}?{I{{}%(%TSTq~AK>j1Xqi`!c5l?Z<)D
+          TR=p!adcN?(5wEd$ghe5NL8yG{Kn&a^zmewmOr7KLwR3`6W>en~j*%W_NUBmzqfjCMxtXS9K_jydZb0)4dqpfRV=pA>c)=myXr$*zhl8JxtriJlfa|h
+          _3@VAN%=EYTpXmq6Azlc5sr+_oOu@nMSh28HlB9YBhSuKW|!2EKDJ-uV%5b-
+          rOuzn)Tx5R#~fq{?3st9|E@93$SHm(=Ki&FtJz;r0}?}mu7~qq34*eIw95O6_yFLEf@;U3uv;fiynA4gYSpH(jcCLKwPp*smEGalUpx71r35(v6c(&F
+          qSsAs<lS3(kPIg$F@~i^a5X!jNS2}zVAd^!*I9j?xC11V0usYEp$w{L1^oIJ8&7Ox~P|ZE82IY2cYqo4F1CHbt?d04JrwU$WI7#F#`fL=xx9_%US><&
+          t+{377<6kXty8Aq!SDRjGney04rE*bu71qh2-
+          v)7)zkNGpfp*{y2S~2NRTktQtr}@?g17LQ~I6;52vQbUJu?WG19G6GV;)P4CbB;3N@wz~Z%PX}!6=y;Ux)p(8{)s+{Zrd6bwV8TF~`c<d6R^l=lyVzW
+          |xskvR*u4~igd;&AD`WobJqN%WM#?jIB8`3h|T!*3nZkoCU@?(b}#?KmVsN3)`#J}v$mfohK$1dxUi;Qv;xKnnaB6tzKun6ffCm!mU&Gh&bq23JGCsy
+          %HyZY}VhY4rXiQ06uN#*vn^=5GkAOf0sQjFw3mw2=xkj9?nr($??JIh_6+D~Vc1Mr+{ES*>TR9!*VQcp#ygu36RA#YqugO!<<);FDTet*S*XsS+5zC6
+          tvj+v=7A(%q=fuRHw4ws!9;YXeDgcFl8geBI^522J<COqdR5TxKq5L&i9OOeO(c+1`8WlkJ40(O=JOV&dOMTbx;ySr4G?Z6<rXT~}I!U6+X?2Q;j?q9
+          ^b+=60}%57uAqP7{pMcHjzhKy0N1wq1;`$>)ymkCT7gDH6oB83UX?M9WsC<)wKHLb2a0ZW%W0<kU#u&_-
+          u%bZVq!0PPE@n^S2um3w4eemG;(}(15e<tZ{k&O9V$&IsCurFphG;){1uA9AD6QpN_IHkPzaP<0XLO~eazdicwp)f$gkKVXH{OC>iP5PabTUEIPSB2y
+          M|7!HnJ3=A-@LA!XB4Uifuiqbj{v{Efo%V^(3dnpk>!9zZgGgsKcB~4F+TDl4xBo&$|NG0~A3hm=bcYN-
+          e|Y@m1K?U1Tw3(znaWcL^!T#}$De;ifZ*uETeET%r^~-oQ6Pb=AN%~9%K!MmUC{RrKn?wADMW8V)js=RTwe(@@*aME>-
+          e+3lHs4e9Nm9y^xIFwNK3=dZa;eKtI@sNWccRo;qM>vibtBnfH3L5o8{tVtvt{2E_o~c*yt6TI_<EtDvWO5fAspjM|a;R$De;Z{LlN3Ui%{yS);c;jB
+          Jig{?VP$2cJU4HGJ#cND{0h`^_7px4sy@{pRrP4;A1E00paxRyMlF_#TsoL8E(j$YWQg@MXowMut;bS{23^iJ7}a^0{O}^61XTk8VHw+n+~Yygz#5PK
+          *So8%Mu+hYbJYT~H=DalxbizBQ>8KF9D^z~di29{w6|`+uJ>IXoQQg}Ls25-lB%dT=C1!Xd*4znUV&9%J=7{LAg*FWx~$07&tw3qKgO2>-
+          0rs!ee2+vP^Rc||L4@pd3TIg5waS`_zrl06oFP>dCy>FRWRLKypiKZBsf$FRe~7HbAtK>*%EA=RV=((%MvmL6CEt6!rt1^K0HM48XkfgBajH$Rt~xUX
+          b(7?0|SM}8BF;RCsIWoPp)JfAO+Hb3})om!0h$#H9p&l7y{*ZDS5u|zxzDr|_@KuL>-
+          6t_xPmYI+kn4W7n;WEg9VC(xOcJ>p`O$SiKb#+Dso^`>mvuZL6TmyN+<P2nc0o7R2E{YP*cUX&wxqT^WjNld@)QO%OP*Y{mpWQNge&G6QZrt|sfFIoG
+          h#T>nx+k*yHtrc8s4E9b<X9`XL!hcj+HiCvPCQ#tFD@)3cQ7%YdO>1)Fwx$mRJa~(J93qjVA>n%%5{(Wt&$1P<%1iN#FMo^ly0OrIuq-
+          n2s3p(JVg>6R8cy5ASM(h8a9)ME;&-
+          N6WAo(9;=>P*dQDunyWW`;1WnRpgKpTvUUS%Hozk;lLzzT1Chv&>vs{OT$hViOZ7P4o7L#ai!*G<=tOCGAYY%3bvH0o`;MUT_4JoXZ@7I8B?^~|^{ZL
+          ~e9;EDqbtp7rP;WGSJm=*D*B~u`GjH|n>B)Lg=`OQZXJ%>%4`H)%pZcyq%bPwCsMQTX2!48nVW6CMKY~x#oF4HnU2AfECa6OKy+<WU4dT=382bES77W
+          =vn(u#kMS9gbr7p;t4)Sq@oB?B;b6M&dRjgnOKc3Mt#WZqYhKf8r47icPFOye9JeFcGJ~u1aGt%n4r7Z~qpM2FT9_BL!2hA?vfJ{+;2Y@`PERGD#@4_
+          2+|%~8u5D=*+yHz9Bfb#?>M6b)lZn3T0@qT;c*1vFtQHYcF4^sctYyhs)Wp!)_GomZF!I4sL)_ObTVUS-
+          ;a{+s^YxeH+b`vsR$PCDe;WmI=CwL@p^Rr$K@eVb7SEGYG7#WdFKqI1PO>RZa2xqm2RFa-*{-`|L0IwKeYP2%h0<IP-7KTn-
+          *J7D`i0yXe)ds^EC8GSZ6CjaQwV+C3GhIf6OIQAPD6M_VSlp7aXiVAhb>>+4nIdP{^a=|Uz|TFu2=W7ZC^Jnm{`nT%$c+;pKG;R7h6AOf64PX??77Ka
+          SyUVM>pO5LXO~nd6>a(@95&vb4zl5DKCS#WhK8P0nZ@Z%*1zzj5%K!I_c{|fE`)btX{@F=(S>Py?L1(SUcg3`dW2M6Xbv$CKaRahe4w8cac2?zW
+          '''
+          payload=zlib.decompress(base64.b85decode("".join(encoded.split())))
+          assert hashlib.sha256(payload).hexdigest()=='360bad1fe3a669338f81509737785ed548669719ae492641cc293168d327e6d7', 'R15104_SOURCE_PATCH_HASH_MISMATCH'
+          Path('/tmp/blue_r15104_patch.py').write_bytes(payload)
+          print('R15104_SOURCE_PATCH_HASH_OK')
+          # R15104_SQLITE_TEST
+          encoded='''
+          c-p;K`*WK{5dNLNV(T<LXf7CVRXfU%j2|R*$B|lzJUSi?L*OLQpo4H=$JOY6@7{5eB};XZP9}aJxI2CO`fhiR2S4mLqS}9-@qNaxpuDN41wSzM
+          _V)VYah`Do!#^*wnnA@T6%!&Wco&jsT-A?7(Nqabp)O`|T|hm>`Du}-6keXfPY}<FhS!i3GX!U;ZS)G@tiCR)4^UK4Rz=z*HR8e9i4Ea26L1yh
+          SsK?&NTDFuEar8V2#9$KqK<R+n0>0NSga{yOI3|*Ru)wae~W@I@5RR))jlwcq~N}Ou<@R=q&7)+#%4uz(<PRix2xhh8plbEL#wre;#$qIPb_Ir
+          r=-eC{3apB=^!``0|<{#E&>qQgvYrstA<Be3Ssarq)Cyo_AZTY+M8DKNNT9p<b_~SS!D?W#JjMbZsIB*M}o&CI<@{RKDwt~gGV&f)G|^wMnBd~
+          X>!_>G>_l2+$UvR*R0~i>KcGQ6)vba%!!&NUG+i9w5YOw3NA=@PFzP`Iq7mrnldVrnsgD5%vhSmJZcfzVb6Bu_?^)M+o2?h1w**YIcdEXq57mt
+          JjeU>vFkkcT(TG~77L|y#gd{*O=&7^sYGXSlKL;u*^G+ZbNsMsSZlc7D>$P`oJ^Uz)rPfB_vZvZQkF(7PV}L=CS8q5Bxp2AkP&!8iO7)(o)fvA
+          {FCES)Iz~!V^AWx8rW`1$yQShT58D}VN7z~8wP_A&U;~hNfUT;eDOLMn$M~JwFor{#?~b&s#H6}MSl<~!)d3@tQ2M|(V`v4aV%@8jxru_=kTHi
+          X?Sb*y_(!1)*X$$R38kXq!mU}>9DX+DIGF`Dmor6cRLZ@E&r(sm%3cGlyp6M*rDXG^H6F#&MIURv1mJa;Lt;)%%SrTrrBf)qABIRCe~;}kf#LQ
+          FQ-FY942BG=Q)UYR_5#uOy|h~!g$UGPRq3Rs*$`7J?d;}aCncYikNd!xt%AG-gXg>Tqh;nCv<Zd_mvtyauyb*Eg7aTexEZRck<n!C4w3%-9-$^
+          XPzDp19<ye&}+w39yJqT-)031LOH!L2Ehe>jm-DjQ0{dvM+*W$?~IZkZ5>{#O&>DtDII<<GVT+EY4ee<d95GexOXOHNb0PnRJPI+xZzjha`PJs
+          y(djX8$z=+Npc;tw3@Tg81y4*w9H5Lp6l${n7!b5C@CGh3<j1|P_2Jm{tqyn(iEaf#w)lt(v=cXfz>x9`$DAi9+)KKHJh-CV5C``69qfYatwEb
+          WyT-lvl+ZQABID77+eIWA-M2j(0>K<+wd=BU<ZL7lKx*PZ_aP^TOa5xp83z$o?n-8z%u#+Fnj$Fc8c4k*S1hgf*P>x*`4HDt9P1u>lIKFZ@#$Y
+          +m0Qw5nyfAcTzy_#alv1AFA*f4?rfY>#Ux_Gye!wO``~&i8|vGEd^#7wkLej1?-KmI^YT%%+R$WzQUeKxmET+S4`LjwjaX3tS*V%Dr5v>?2jtQ
+          _(l>R6CE?PpH$eEMMcNzmRSqv56*%CocyI$V@^Mk*;HOEYh=ViFch!E`j@MGy~<|Gj5wll30fRt2Cf-jCSh#(z;n9Lei4u}O`gKX1|2`Xfkqmx
+          Y#j!teI%lGDwrITy7Zs(&;oXac-U+<nA__qYb$FC<M;~q6ZV_e=r8GL?t0(FL7u8N>UzJ6Ha&x_?moyi2P0WQT(z056(pW&s$kiX1-e8~S+!$)
+          nBwYo6*4Bto0Lg<*v2(ZFqIfKw3VRS#9w2yWbk&Ev%z0Op_mu_x52>tEZ9~fq_9+Psgqlc^$k7Z5=%E7m}0&VeA#r}gQ+%K8CUU4__yrEO1@rb
+          t#8E)<@PO7wBkR%VKf^O>34sl@zQcn`>%VU`Lnf4HhH9kFNN7-h6w|^2GhE9M(BYFOLt=amn|Ca5!ti`F3w+_%Y@&5@nRU@4cR48yK!l7Ymx7%
+          6IiQ?zseF|s%fgmv1579M6H;s6<n*6-=e5_j<GUmRodVz7@pFvtoGZ7mfL;O0vcb9ct76K3iY&%gd{lfW@m6s@<_V#5!p!@)m}Z9o%)iA)?MD{
+          0IH5XFX9vrki|8|cXg;6UCKk<$oJRU?H%(5o=`a+dr$C?5Dnap>--Yo;ru)dqCbv@!)527UIj$FXx)X?ZuK@mL`RrL=;}Q{^zt-X=1VF$mGM}<
+          1;7F+)17>{Vo}?4(sAC1sXFIb#=nLhS1|
+          '''
+          payload=zlib.decompress(base64.b85decode("".join(encoded.split())))
+          assert hashlib.sha256(payload).hexdigest()=='a8ed64b550f21e7b9c957653082797013326725cf07f2fcedcb23fd1cea89713', 'R15104_SQLITE_TEST_HASH_MISMATCH'
+          Path('/tmp/blue_r15104_sql_offline_test.py').write_bytes(payload)
+          print('R15104_SQLITE_TEST_HASH_OK')
+          # R15104_PATCH_ORDER_TEST
+          encoded='''
+          c-oa#ZExE)5dN-T!K5E3but|{DX=C`fh2Rc0YQ<~$uJ-@1WG!`TqIH>DaS_9|GpzBJ94vRm;=NT@6o+IcaQbvVB8r!E`%I|T#<HTmr5Q-
+          hlhv1gBFVo;dM>EOxSxiIbtW|)31NLBO2P8m(YN;gv)ZNv>~R`E3pF7YFG)?xr4%3VLL07G%Si{8)=tdMM;e6bO~f3YA~c!(sCgQtUzxFta)jPs;g0{
+          Duif$@1xiycmIG0X)I<0I%+y&NyBZqJVT2>PwpB$4ze35U4bS=cW+1m3#9>3buHvQ`B~Usx`LdSeSTPQB$`%fEXmmIB^J?YRe~|Qlg;kZLesh;qJ>rs
+          X}Mk2q9DET8gGN4RG4oFvo%(*;9YGiQQ9bKUEZ0)$9eAj<$1y$g<a;7HxSdJ?jYBb_miWO++$h0p-
+          E&lK!&NZmTLoXuxQ{_ZeeX>kk~;iG^3qejDDm^68VN_gV=E`j7=gJ#$;b9Zv{Q2k4is)9vfYbg{)xBtf47wkRxY=!du)e8rEnjxOo6Ou+18-
+          ?S((}kZ)1V3#d(YH;<44A|12HxGR7as@j}J1V3Vd7E6Tj6w4A~2TWas({-y8;vanmU@MOO@vuvzHVMw$$4!=y9ry!Bd-jBXA)-
+          UEMJG$|?=$wrhus}BQ5|HoA252l7s2tL`BvU}JlFT;?r4sW%)LF#pJ%KV7BsJOz+B=d@MNBx@dcV*1HD6#@8@fvV+8r2+!(-
+          l>t~<Ks=qwQd?1hUV{zxwpEKUJAgeeIsMLc}9}efofdiFWT(Cralp16>G0Dela+1b_gS7vS++goEhuwf%2(C9j35`3V^d?3DS%`JEH}(c<%*5E7CRh@
+          &RbW{wWy9jwDx~M;%Q<#Dq}ZFrxJmOBGJhKn2BgiLgYg!B*1A<f)nLs-C3GBaOm?GjzF>{3lB)-
+          Qm+V};AvY*Wy`XtT!t{+(te|J8WW+$wFohGAVmf8rxy2-IyIdF1Ht?t6?+z<9LGqRyB~=2~BjIoYDJDh=?7l_K+7-
+          ecHC7iEpZ+N+`%4MgljwWW^O>i)>xb_|l0K7&uqnobzU&qnN%-(#gad-ZAV=6P{5A}6^bG&)#U8&UzEiHg?T^MWxtz_&+cD<#LP#gE*^|^V-
+          O2b4g_gk@%FgnlhSXRcG%lH^<zwYjOiSL{PD8Fb+jcfE<q{dNgiG$+qB0`VMTfxvXd!Lv&Bj*fBzeIES|`JO`p#pP9i{ZzC5L1qeMl7Y<OY^3I8IkZ|
+          Nn5}?_kI4EZ!T@<TZicJvtzKu)sUwpJMd=@u1UfZ6Po#Rfi4mrX<TIX}rtadrSWXmh3skZHLqE1jx&+>_a?rNh_$qLe;-
+          h5F8_X_vjaj?h!zpFpL^ipofuGkIc>J$SQmvP$Oei`S6kXuTjZ$MO{!gs{hr!z&gFSx}D}<g7ml-
+          p8V78)m1*5{&qY4d^ydp&u2554#kc3Z$aVIGn)J`NvXfu_kDGKF}=da@h@y??<0x+0a!;mfB
+          '''
+          payload=zlib.decompress(base64.b85decode("".join(encoded.split())))
+          assert hashlib.sha256(payload).hexdigest()=='d291bb9efa5ec46c84ce9afedac65d4826c4ff487c81f5239e090d2ed821bb35', 'R15104_PATCH_ORDER_TEST_HASH_MISMATCH'
+          Path('/tmp/blue_r15104_patch_anchor_selftest.py').write_bytes(payload)
+          print('R15104_PATCH_ORDER_TEST_HASH_OK')
+          PY_R15104_RESTORE
+          python -m py_compile /tmp/blue_r15104_patch.py /tmp/blue_r15104_sql_offline_test.py /tmp/blue_r15104_patch_anchor_selftest.py
+      - name: Validate sequential patch order across all 17 exact replacement anchors
+        shell: bash
+        run: python /tmp/blue_r15104_patch_anchor_selftest.py
+      - name: Test real SQLite JSON historical setup matching without network or D1
+        shell: bash
+        run: python /tmp/blue_r15104_sql_offline_test.py
+      - name: Preflight all patch anchors on REAL checked-out sources (no repository edits)
+        shell: bash
+        run: |
+          python - <<'PY_R15104_REAL_SOURCE'
+          from pathlib import Path
+          import tempfile,shutil,subprocess,sys
+          source_files=['worker/src/index.ts','web/src/main.tsx','web/src/SmartBasket.tsx','web/src/r1599-pattern-filters.css']
+          with tempfile.TemporaryDirectory(prefix='blue_r15104_real_') as temp:
+              root=Path(temp)
+              for name in source_files:
+                  original=Path(name)
+                  if not original.is_file():raise RuntimeError('MISSING_REAL_SOURCE: '+name)
+                  dest=root/name;dest.parent.mkdir(parents=True,exist_ok=True)
+                  shutil.copyfile(original,dest)
+              run=subprocess.run([sys.executable,'/tmp/blue_r15104_patch.py'],cwd=root,capture_output=True,text=True)
+              if run.returncode:
+                  print(run.stdout,flush=True)
+                  print(run.stderr,flush=True)
+                  raise RuntimeError('REAL_CHECKOUT_PATCH_PREFLIGHT_FAILED')
+              assert 'R15104_PATCH_SCOPE' in run.stdout
+              for name in source_files:
+                  assert (root/name).read_bytes()!=Path(name).read_bytes(),('PATCH_MUST_CHANGE_FILE',name)
+              print('BLUE_R15104_FIX2_REAL_CHECKOUT_PREFLIGHT_PASS all 17 source anchors, 4 files',flush=True)
+          PY_R15104_REAL_SOURCE
+      - name: Apply small, anchor-checked source-only changes to temporary checkout
+        shell: bash
+        run: |
+          set -euo pipefail
+          python /tmp/blue_r15104_patch.py
+          printf '\n__pycache__/\n*.pyc\n*.tsbuildinfo\ndist/\nnode_modules/\n' >> .git/info/exclude
+          git diff --check
+      - name: Check exact 4-file change scope and key regression anchors
+        shell: bash
+        run: |
+          python - <<'PY_R15104_CHECK'
+          from pathlib import Path
+          import subprocess
+          changed=set(subprocess.check_output(["git","diff","--name-only"],text=True).splitlines())
+          allowed={"worker/src/index.ts","web/src/main.tsx","web/src/SmartBasket.tsx","web/src/r1599-pattern-filters.css"}
+          assert changed==allowed,('R15104_UNAPPROVED_FILES',sorted(changed))
+          api=Path("worker/src/index.ts").read_text()
+          main=Path("web/src/main.tsx").read_text()
+          basket=Path("web/src/SmartBasket.tsx").read_text()
+          css=Path("web/src/r1599-pattern-filters.css").read_text()
+          assert "verified_pattern_setup_json" in api and "chart_snapshots cs" in api
+          assert "EXISTS (SELECT 1 FROM" in api and "sampleFloor" in api
+          assert "setAppliedAmountEok(queryAmountEok)" in main
+          assert "min_pattern_n" in main and "patternSampleMin" in main
+          assert "patternHighlightMin={highlightMin} patternSampleMin={patternSampleMin}" in main
+          assert "r159-tomato-stock" in main and "patternSampleMin" in basket
+          assert "r151-mobile-row.r159-tomato-stock>.stock-card" in css
+          assert all(not p.startswith(".github/workflows/") for p in changed)
+          print("BLUE_R15104_SOURCE_SCOPE_AND_ANCHORS_PASS")
+          PY_R15104_CHECK
+          git diff --check
+      - name: Existing price/search regression tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --experimental-strip-types --test tests/test_r1593_compare.mjs
+          node --experimental-strip-types --test tests/test_r1595_grouping.mjs
+      - name: React TypeScript production build
+        working-directory: web
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm install --no-package-lock --no-audit --no-fund
+          npm run build
+          echo BLUE_R15104_WEB_BUILD_PASS
+      - name: Cloudflare API Worker compile dry-run (NOT a deployment)
+        working-directory: worker
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm install --no-package-lock --no-audit --no-fund
+          npx wrangler deploy --dry-run --outdir /tmp/blue-r15104-api-dryrun
+          echo BLUE_R15104_API_DRYRUN_PASS
+      - name: Final check of changed files after builds
+        shell: bash
+        run: |
+          python - <<'PY_R15104_FINAL'
+          import subprocess
+          expected={"worker/src/index.ts","web/src/main.tsx","web/src/SmartBasket.tsx","web/src/r1599-pattern-filters.css"}
+          actual={line[3:] for line in subprocess.check_output(["git","status","--porcelain","-uall"],text=True).splitlines() if line.strip()}
+          assert actual==expected,('R15104_UNEXPECTED_BUILD_FILES',sorted(actual))
+          print("BLUE_R15104_FINAL_SCOPE_PASS")
+          PY_R15104_FINAL
+          git diff --check
+      - name: Commit only approved source after successful tests
+        if: inputs.apply_changes
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add worker/src/index.ts web/src/main.tsx web/src/SmartBasket.tsx web/src/r1599-pattern-filters.css
+          git diff --cached --check
+          git diff --cached --quiet || {
+            git commit -m 'BLUE R1.5.10.4: align list and basket with verified chart evidence'
+            git push origin HEAD:main
+          }
+          echo BLUE_R15104_SOURCE_COMMITTED
+      - name: State strict non-deployment safety boundary
+        shell: bash
+        run: |
+          echo 'BLUE_R15104_ALL_CHECKS_PASS'
+          echo 'No remote D1 writes, no KIS requests/tokens, no Collector changes, no orders.'
+          echo 'API Worker and frontend require separate deployment verification after apply_changes=true.'
