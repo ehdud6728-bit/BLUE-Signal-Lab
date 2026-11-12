@@ -2,6 +2,7 @@ import { handleAi, getCachedAi } from './ai';
 import { liveQuotes } from './live';
 import { handleBasketAi } from './basket';
 import {basketWatch} from './performance';
+import {comparePrices} from './price-compare';
 interface Env {
   DB: D1Database;
   CORS_ORIGIN?: string;
@@ -123,6 +124,13 @@ export default {
       }
       // R1.4: D1-only intraday snapshots; same Cloudflare Access guard as BLUE AI.
       // Never forward KIS credentials or the encrypted token vault to browsers.
+      // R1593_PRICE_COMPARE: Access-protected, read-only saved price/history.
+      if (p === '/api/prices/compare' && request.method === 'GET') {
+        if (!access) return respond({error:'ACCESS_REQUIRED',message:'Cloudflare Access 로그인 필요'},401);
+        const upstream=await comparePrices(env.DB,u);
+        return new Response(upstream.body,{status:upstream.status,headers:{...cors,
+          'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store'}});
+      }
       if (p === '/api/live/quotes' && request.method === 'GET') {
         if (!access) return respond({error:'ACCESS_REQUIRED',message:'Cloudflare Access 로그인 필요'},401);
         return respond(await liveQuotes(env.DB));
