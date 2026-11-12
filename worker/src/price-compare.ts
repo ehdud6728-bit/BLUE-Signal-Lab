@@ -69,7 +69,7 @@ export async function comparePrices(db:D1Database,url:URL):Promise<Response>{
  const today=new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Seoul',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date());
  const pairs=decodePairs(url.searchParams.get('items')||'',today);
  if(!pairs)return reply({error:'INVALID_PAIRS',message:'최대 24개 코드:날짜 조합만 조회할 수 있습니다.'},400);
- const tableRows=await db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name IN ('blue_basket_watch_r153','blue_kis_live_quotes_r141','blue_kis_live_quotes_r14','chart_snapshots')").all<{name:string}>();
+ const tableRows=await db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name IN ('blue_basket_watch_r153','blue_kis_live_quotes_r141','blue_kis_live_quotes_r14','chart_snapshots','blue_search_quote_priority_r1594')").all<{name:string}>();
  const tables=new Set(tableRows.results.map(x=>x.name));
  const out:PriceCompareRow[]=[];
  for(const {code,day} of pairs){
@@ -105,6 +105,18 @@ export async function comparePrices(db:D1Database,url:URL):Promise<Response>{
     // Intraday highs are supplemental observations, never proof of full coverage.
     if(iso(v.quote_day)&&v.quote_day>day&&money(v.quote_high))
      highs.push({price:v.quote_high as number,day:v.quote_day,source:'KIS_QUOTE_DAY_HIGH',coverageTo:v.quote_day,full:false});
+   }
+  }
+  // Search-triggered KIS REST snapshots: latest observed only, not full-period coverage.
+  if(tables.has('blue_search_quote_priority_r1594')){
+   const q=await db.prepare(`SELECT status,trade_date,price,high,quote_at_utc,market
+      FROM blue_search_quote_priority_r1594 WHERE code=? LIMIT 1`).bind(code)
+     .first<{status:string;trade_date:string|null;price:number|null;high:number|null;quote_at_utc:string|null;market:string|null}>();
+   if(q&&['READY','QUEUED','RETRY'].includes(q.status)&&q.trade_date&&iso(q.trade_date)&&q.trade_date>day&&money(q.price)){
+    candidates.push({price:q.price!,day:q.trade_date,source:'KIS_SEARCH_PRIORITY_R1594',
+      at:q.quote_at_utc,market:q.market,priority:85});
+    if(money(q.high)&&q.high! >= q.price!)highs.push({price:q.high!,day:q.trade_date,
+      source:'KIS_SEARCH_PRIORITY_DAY_HIGH_R1594',coverageTo:q.trade_date,full:false});
    }
   }
   for(const table of ['blue_kis_live_quotes_r141','blue_kis_live_quotes_r14']){

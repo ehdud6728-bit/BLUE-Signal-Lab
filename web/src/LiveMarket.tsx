@@ -39,7 +39,7 @@ const phaseName:Record<string,string>={NXT_PRE:'프리마켓',NXT_MAIN:'메인�
  LEGACY_R14_UNVERIFIED:'이전 수집',UNKNOWN_PHASE:'시장 구간 미확인'};
 
 // R152_TRACKING_ACTIVE: suspended polling while the tracking tab is inactive.
-export default function LiveMarket({active=true}: {active?:boolean}){
+export default function LiveMarket({active=true,refreshKey=0}: {active?:boolean;refreshKey?:number}){
  const [payload,setPayload]=useState<Payload|null>(null);
  const [error,setError]=useState('');
  const [busy,setBusy]=useState(false);
@@ -62,7 +62,7 @@ export default function LiveMarket({active=true}: {active?:boolean}){
    const visible=()=>{if(document.visibilityState==='visible')void poll();};
    document.addEventListener('visibilitychange',visible);
    return()=>{controller.abort();window.clearInterval(timer);document.removeEventListener('visibilitychange',visible);};
- },[active]);
+ },[active,refreshKey]);
  const items=useMemo(()=>((payload?.items||[]).filter(q=>filter==='ALL'||q.market===filter)),[payload,filter]);
  const status=payload?.status||'CONNECTING';
  const fresh=!error&&status==='RECENT_SNAPSHOT';

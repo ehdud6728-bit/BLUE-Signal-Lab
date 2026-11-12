@@ -84,10 +84,11 @@ function baselineReturn(item:BasketItem,quote:Quote|undefined):number|null{
  return (quote.price/item.baseline-1)*100;
 }
 // R151_QUICK_ADD: controlled one-tap requests from the search results list.
-export default function SmartBasket({quickAddRequest,onItemsChange,active=true}: {
+export default function SmartBasket({quickAddRequest,onItemsChange,active=true,refreshKey=0}: {
  quickAddRequest?:{serial:number;item:SearchRow}|null;
  onItemsChange?:(ids:string[])=>void;
  active?:boolean;
+ refreshKey?:number;
 }){
  const [items,setItems]=useState<BasketItem[]>(readItems);
  const evidenceAttempted=useRef<Set<string>>(new Set());
@@ -123,7 +124,7 @@ export default function SmartBasket({quickAddRequest,onItemsChange,active=true}:
   const wake=()=>{if(document.visibilityState==='visible')void load();};
   document.addEventListener('visibilitychange',wake);
   return ()=>{ctrl.abort();window.clearInterval(timer);document.removeEventListener('visibilitychange',wake);};
- },[active,idsKey]);
+ },[active,idsKey,refreshKey]);
  // Register immediately after any new item (including quick-add from hidden search tab).
  useEffect(()=>{
    if(!idsKey)return;
@@ -162,7 +163,7 @@ export default function SmartBasket({quickAddRequest,onItemsChange,active=true}:
    const wake=()=>{if(document.visibilityState==='visible')void load();};
    document.addEventListener('visibilitychange',wake);
    return()=>{disposed=true;window.clearInterval(timer);document.removeEventListener('visibilitychange',wake);};
- },[active,idsKey]);
+ },[active,idsKey,refreshKey]);
  // R1591: gently recover evidence for pre-existing baskets and AI picks.
  // Existing API read endpoint; no new Worker or schema and no mass full-market fetch.
  useEffect(()=>{
@@ -208,7 +209,7 @@ export default function SmartBasket({quickAddRequest,onItemsChange,active=true}:
   };
   void load();const id=window.setInterval(()=>void load(),60000);
   return()=>{mounted=false;window.clearInterval(id);};
- },[]);
+ },[refreshKey]);
  function add(data:SearchRow|AiPick,source:'MANUAL'|'AI'){
   if(!validCode(data.code)||!validDay(data.day)||!Number.isFinite(data.close_price)||!data.close_price||data.close_price<=0){
    setError('확정 종가와 거래일이 있는 종목만 담을 수 있습니다.');return;

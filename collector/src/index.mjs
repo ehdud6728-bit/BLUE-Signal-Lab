@@ -1,11 +1,13 @@
 import {collect} from './core.mjs';
 import {collectBasket} from './basket.mjs';
+import {collectSearchPriority} from './search-quote-priority.mjs';
 
 export default {
   async scheduled(_event,env,ctx){
     // R1.5.3: watch queue every minute; original research collection every 5 minutes.
     ctx.waitUntil((async()=>{
       const minute=new Date().getUTCMinutes();
+      await collectSearchPriority(env).catch(()=>{console.warn('BLUE_R1594_PRIORITY_UNAVAILABLE');});
       await collectBasket(env); // prioritize newly added watch symbols
       if(minute%5===0)await collect(env); // preserve original five-minute cadence
     })());

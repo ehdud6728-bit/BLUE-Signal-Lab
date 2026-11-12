@@ -2,6 +2,7 @@ import StockChart from './StockChart';
 import LiveMarket from './LiveMarket';
 import SmartBasket from './SmartBasket';
 import PriceCompareMini from './PriceCompareMini';
+import {requestSearchPriority} from './search-priority';
 import {comparisonKey,fetchCompared,type PriceCompare} from './price-compare';
 import AiWidget from './AiWidget';
 import React, {useEffect, useRef, useState} from 'react';
@@ -23,6 +24,7 @@ import './r157-ui.css';
 // R159_MA_EVIDENCE
 import './r159-ma-evidence.css';
 import './r1591-evidence-basket.css';
+import './r1594-refresh.css';
 // R1581_SCAN_RESUME: persistent scan status across tabs and reloads.
 import './r1581-scan-monitor.css';
 
@@ -100,18 +102,46 @@ function App(){
   const summaryRef=useRef<HTMLDivElement>(null);
   const aiRef=useRef<HTMLDivElement>(null);
   const searchVersion=useRef(0);
+  const [r1594Refresh,setR1594Refresh]=useState(0);
+  const [r1594TrackingRefresh,setR1594TrackingRefresh]=useState(0);
+  const [r1594BasketRefresh,setR1594BasketRefresh]=useState(0);
+  const [r1594AiRefresh,setR1594AiRefresh]=useState(0);
+  const [r1594QueueStatus,setR1594QueueStatus]=useState('');
   // R1593: browser reads only validated D1 snapshots; no KIS call on search.
   const [r1593Prices,setR1593Prices]=useState<Record<string,PriceCompare>>({});
   const [r1593Busy,setR1593Busy]=useState(false);
   const [r1593Error,setR1593Error]=useState('');
   useEffect(()=>{
     if(activeView!=='research'||!rows.length)return;
-    const ctrl=new AbortController();setR1593Busy(true);setR1593Error('');setR1593Prices({});
+    const ctrl=new AbortController();setR1593Busy(true);setR1593Error('');
     void fetchCompared(rows,ctrl.signal).then(result=>{if(!ctrl.signal.aborted)setR1593Prices(result);})
       .catch(e=>{if(!ctrl.signal.aborted)setR1593Error(e instanceof Error?e.message:'최근 시세 확인 실패');})
       .finally(()=>{if(!ctrl.signal.aborted)setR1593Busy(false);});
     return ()=>ctrl.abort();
-  },[rows,activeView]);
+  },[rows,activeView,r1594Refresh]);
+
+  // R1594: submit at most eight verified visible search symbols to the server queue.
+  // This does NOT block the D1 search and NEVER calls KIS from the browser.
+  useEffect(()=>{
+    if(activeView!=='research'||!rows.length)return;
+    const ctrl=new AbortController();let count=0;let timer=0;
+    const priority=rows.filter(x=>/^\d{6}$/.test(x.code)&&x.close_price!==null&&x.close_price>0)
+      .filter((x,i,a)=>a.findIndex(y=>y.code===x.code)===i).slice(0,8);
+    setR1594QueueStatus('저장 시세는 즉시 조회 · 신규 시세 수집 요청 중');
+    void requestSearchPriority(priority,ctrl.signal).then(result=>{
+      if(ctrl.signal.aborted)return;
+      const n=result.queued;
+      setR1594QueueStatus(n?`KIS 서버 우선 수집 대기 ${n}종목 · 저장 시세를 자동 재확인합니다`:
+        result.throttled?'최근 요청된 종목 · 저장 시세 확인 중':'저장 시세 확인 중');
+      if(n||result.throttled){timer=window.setInterval(()=>{
+        if(ctrl.signal.aborted||document.visibilityState==='hidden'||++count>12){window.clearInterval(timer);return;}
+        void fetchCompared(priority,ctrl.signal).then(prices=>{
+          if(!ctrl.signal.aborted)setR1593Prices(previous=>({...previous,...prices}));
+        }).catch(()=>{});
+      },12000);}
+    }).catch(e=>{if(!ctrl.signal.aborted)setR1594QueueStatus(e instanceof Error?e.message:'우선 수집 요청 실패');});
+    return ()=>{ctrl.abort();window.clearInterval(timer);};
+  },[rows,activeView,r1594Refresh]);
 
   useEffect(()=>{
     const onBeforeInstall=(event:Event)=>{event.preventDefault();setInstallPrompt(event as InstallPrompt);};
@@ -291,6 +321,15 @@ function App(){
       window.setTimeout(()=>summaryRef.current?.scrollIntoView({behavior:'smooth',block:'start'}),35);
     }
   };
+  const refreshCurrentView=()=>{
+    if(activeView==='research'){
+      setR1594Refresh(v=>v+1);
+      void loadDates().catch(e=>setR1593Error(String(e)));
+      if(total!==null)void search(page,false);
+    }else if(activeView==='tracking')setR1594TrackingRefresh(v=>v+1);
+    else if(activeView==='basket')setR1594BasketRefresh(v=>v+1);
+    else setR1594AiRefresh(v=>v+1);
+  };
   const openDetail=(r:Signal)=>setSelected(r);
   const closeDetail=()=>setSelected(null);
   useEffect(()=>{
@@ -311,6 +350,11 @@ function App(){
         {!standalone&&<button className="install-btn" onClick={()=>{void installApp();}} aria-label="앱 설치 방법"><Download size={17}/><span>앱 설치</span></button>}
       </div>
     </header>
+    <div className="r1594-view-toolbar" role="group" aria-label="현재 화면 데이터 새로고침">
+      <span>{({research:'종목 검색',tracking:'종목 추적',ai:'AI 시황',basket:'장바구니'} as const)[activeView]}</span>
+      <button type="button" disabled={activeView==='research'&&(busy||requestBusy)}
+        onClick={refreshCurrentView}><RefreshCw size={16}/> 새로고침</button>
+    </div>
     {(watchDate||completedDate||scanInfo)&&<div className="r1581-scan-monitor" role="status">
       <RefreshCw size={16} className={watchDate?'r1581-pending':''}/>
       <div className="r1581-scan-text">
@@ -348,14 +392,14 @@ function App(){
       </aside>
       <section className="content">
         <div className={'r151-basket-content '+(activeView==='basket'?'':'r151-hidden')}>
-          <SmartBasket quickAddRequest={basketRequest} onItemsChange={setBasketIds} active={activeView==='basket'}/>
+          <SmartBasket quickAddRequest={basketRequest} onItemsChange={setBasketIds} active={activeView==='basket'} refreshKey={r1594BasketRefresh}/>
         </div>
         <div className={'r152-tracking-content '+(activeView==='tracking'?'':'r151-hidden')}>
-          <LiveMarket active={activeView==='tracking'}/>
+          <LiveMarket active={activeView==='tracking'} refreshKey={r1594TrackingRefresh}/>
         </div>
         <div className={'r152-ai-content '+(activeView==='ai'?'':'r151-hidden')}>
           <section ref={aiRef} id="ai-panel" className="r152-ai-section">
-            <AiWidget key={'market-'+(mode==='single'?date:latest||end)} kind="market"
+            <AiWidget key={'market-'+(mode==='single'?date:latest||end)+'-'+r1594AiRefresh} kind="market"
               date={mode==='single'?date:latest||end}
               observed={mode==='single'?days.find(d=>d.day===date)?.observed_stocks:null}
               matched={mode==='single'?days.find(d=>d.day===date)?.matched_stocks:null}
@@ -376,6 +420,7 @@ function App(){
           <div className="result-heading"><h2><BarChart3 size={18}/> 검색된 종목 <small>{total===null?'검색 전':total+'건'}</small></h2><span className="eod-pill"><Clock3 size={13}/> EOD</span></div>
           <p className="result-hint">검색일 확정 종가와 이후 D1 저장 시세·기간 고가를 구분해 표시합니다. 가격이 없으면 미수집으로 표시합니다.</p>
           {r1593Error&&<p className="r1593-comparison-status" role="status">가격 비교: {r1593Error}</p>}
+          {rows.length>0&&<p className="r1594-quote-note" role="status">{r1594QueueStatus} · 수집 가능한 시장 시간에만 KIS 가격이 갱신됩니다.</p>}
           <div className="gc-filter-panel" aria-label="골든크로스 종목 필터">
             <div className="gc-filter-heading"><strong><ListFilter size={15}/> 골든크로스 필터</strong><span>검색 전체 결과에 적용 · 당일 발생만</span></div>
             <div className="gc-quick-actions">

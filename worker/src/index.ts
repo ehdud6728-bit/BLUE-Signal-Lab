@@ -3,6 +3,7 @@ import { liveQuotes } from './live';
 import { handleBasketAi } from './basket';
 import {basketWatch} from './performance';
 import {comparePrices} from './price-compare';
+import {requestSearchQuotes} from './search-quote-priority';
 interface Env {
   DB: D1Database;
   CORS_ORIGIN?: string;
@@ -128,6 +129,14 @@ export default {
       if (p === '/api/prices/compare' && request.method === 'GET') {
         if (!access) return respond({error:'ACCESS_REQUIRED',message:'Cloudflare Access 로그인 필요'},401);
         const upstream=await comparePrices(env.DB,u);
+        return new Response(upstream.body,{status:upstream.status,headers:{...cors,
+          'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store'}});
+      }
+      // R1.5.9.4: authenticated batch request, no direct browser KIS access.
+      if (p === '/api/prices/request' && request.method === 'POST') {
+        if (!access) return respond({error:'ACCESS_REQUIRED'},401);
+        if (request.headers.get('Origin')!==origin) return respond({error:'ORIGIN_DENIED'},403);
+        const upstream=await requestSearchQuotes(request,env.DB);
         return new Response(upstream.body,{status:upstream.status,headers:{...cors,
           'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store'}});
       }
