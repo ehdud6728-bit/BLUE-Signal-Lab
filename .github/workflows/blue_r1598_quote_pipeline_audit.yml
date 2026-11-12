@@ -1,0 +1,215 @@
+name: BLUE R1.5.9.8 KIS Price Pipeline Audit (READ ONLY)
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: 'snapshot = inspect only (safe anytime); market_verify = require a current KST trading-session quote for one of three verified sample codes.'
+        required: true
+        type: choice
+        options: [snapshot, market_verify]
+        default: snapshot
+
+permissions:
+  contents: read
+
+concurrency:
+  group: blue-r1598-readonly-quote-audit
+  cancel-in-progress: false
+
+jobs:
+  inspect_d1_pipeline:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Guard exact repository and main
+        shell: bash
+        run: |
+          test "$GITHUB_REPOSITORY" = 'ehdud6728-bit/BLUE-Signal-Lab'
+          test "$GITHUB_REF" = 'refs/heads/main'
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install encrypted-vault dependency (no provider requests)
+        run: python -m pip install 'cryptography>=43,<48'
+      - name: Original token-manager regressions (offline)
+        run: |
+          python -m unittest discover -s tests -p test_blue_kis_token_vault_r131.py -q
+          python -m unittest discover -s tests -p test_blue_kis_daily_token_r1597.py -q
+      - name: Diagnose actual remote D1 with SELECT statements only
+        shell: bash
+        env:
+          KIS_APP_KEY: ${{ secrets.KIS_APP_KEY }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          AUDIT_MODE: ${{ inputs.mode }}
+        run: |
+          set -euo pipefail
+          test -n "$KIS_APP_KEY" && test -n "$CLOUDFLARE_ACCOUNT_ID" && test -n "$CLOUDFLARE_API_TOKEN"
+          mkdir -p output/r1598
+          python - <<'PYTHON_AUDIT'
+          import json
+          import os
+          import sys
+          from datetime import datetime, timedelta, timezone
+          from pathlib import Path
+
+          sys.path.insert(0, 'scripts')
+          import blue_kis_token_vault_r131 as vault
+
+          UTC = timezone.utc
+          KST = timezone(timedelta(hours=9))
+          now = datetime.now(UTC)
+          kst = now.astimezone(KST)
+          day = kst.date().isoformat()
+          mode = os.environ.get('AUDIT_MODE', 'snapshot')
+          assert mode in ('snapshot', 'market_verify'), 'R1598_INVALID_MODE'
+          codes = ('000020', '000050', '000227')
+          report = {
+              'version': 'R1598_READONLY_D1_AUDIT',
+              'executed_at_utc': now.isoformat(timespec='seconds'),
+              'kst_day': day,
+              'mode': mode,
+              'scope': 'SELECT_ONLY_NO_KIS_CALLS_NO_TOKEN_CONTENT',
+          }
+
+          # Unlike ensure_table(), D1Vault() does not write or migrate D1.
+          # Never query ciphertext or print the app key, app secret, scope, or token.
+          db = vault.D1Vault()
+          def read(sql, params=None):
+              assert sql.lstrip().upper().startswith('SELECT '), 'R1598_NON_READONLY_SQL_BLOCKED'
+              assert 'CIPHERTEXT' not in sql.upper(), 'R1598_TOKEN_CONTENT_BLOCKED'
+              return db.query(sql, params or [])
+
+          names = (
+              'blue_kis_token_vault_v1',
+              'blue_kis_token_issuance_r1597',
+              'blue_kis_collector_runs_r142',
+              'blue_search_quote_priority_r1594',
+              'blue_basket_watch_r153',
+              'blue_kis_live_quotes_r141',
+          )
+          placeholders = ','.join('?' for _ in names)
+          existing = {x['name'] for x in read(
+              f'SELECT name FROM sqlite_master WHERE type=\'table\' AND name IN ({placeholders})', list(names))}
+          report['tables_present'] = {n: n in existing for n in names}
+
+          metadata = []
+          if 'blue_kis_token_vault_v1' in existing:
+              metadata = read(
+                  'SELECT saved_at_utc,expires_at_utc FROM blue_kis_token_vault_v1 WHERE scope=?',
+                  [vault.scope_for(os.environ['KIS_APP_KEY'])],
+              )
+          token_state = 'NOT_FOUND'
+          saved = None
+          if len(metadata) == 1:
+              try:
+                  saved = vault.parse_expiry(metadata[0]['saved_at_utc'])
+                  expiry = vault.parse_expiry(metadata[0]['expires_at_utc'])
+                  token_state = 'VALID_METADATA' if expiry > now + timedelta(minutes=5) else 'EXPIRED_OR_NEAR_EXPIRY'
+                  report['token'] = {
+                      'state': token_state,
+                      'saved_at_utc': saved.isoformat(timespec='seconds'),
+                      'expires_at_utc': expiry.isoformat(timespec='seconds'),
+                      'minutes_left': int((expiry-now).total_seconds()/60),
+                      'note': 'Metadata validity alone does not prove collector decryption or KIS response.',
+                  }
+              except (KeyError, TypeError, ValueError, vault.VaultError):
+                  token_state = 'INVALID_METADATA'
+          elif len(metadata) > 1:
+              token_state = 'MULTIPLE_SCOPE_ROWS'
+          if 'token' not in report:
+              report['token'] = {'state': token_state}
+
+          if 'blue_kis_token_issuance_r1597' in existing:
+              report['token_issuance_ledger'] = read(
+                  'SELECT last_attempt_at_utc,last_attempt_day_kst,status,last_success_at_utc '
+                  'FROM blue_kis_token_issuance_r1597 WHERE scope=?',
+                  [vault.scope_for(os.environ['KIS_APP_KEY'])],
+              )[:1]
+          else:
+              report['token_issuance_ledger'] = []
+
+          if 'blue_kis_collector_runs_r142' in existing:
+              report['collector_recent'] = read(
+                  'SELECT started_at_utc,status,attempted,saved,rejected,reason '
+                  'FROM blue_kis_collector_runs_r142 ORDER BY started_at_utc DESC LIMIT 8')
+          else:
+              report['collector_recent'] = []
+
+          if 'blue_search_quote_priority_r1594' in existing:
+              report['sample_search_quotes'] = read(
+                  'SELECT code,base_day,status,requested_at_utc,checked_at_utc,next_due_utc,'
+                  'trade_date,price,high,quote_at_utc,market,last_error '
+                  'FROM blue_search_quote_priority_r1594 '
+                  'WHERE code IN (?,?,?) ORDER BY code', list(codes))
+              report['queue_status_counts'] = read(
+                  'SELECT status,COUNT(*) AS count,MAX(checked_at_utc) AS last_checked_utc '
+                  'FROM blue_search_quote_priority_r1594 GROUP BY status ORDER BY status')
+          else:
+              report['sample_search_quotes'] = []
+              report['queue_status_counts'] = []
+
+          if 'blue_basket_watch_r153' in existing:
+              report['basket_status_counts'] = read(
+                  'SELECT status,COUNT(*) AS count,MAX(checked_at_utc) AS last_checked_utc '
+                  'FROM blue_basket_watch_r153 GROUP BY status ORDER BY status')
+          else:
+              report['basket_status_counts'] = []
+
+          if 'blue_kis_live_quotes_r141' in existing:
+              report['saved_market_snapshot_days'] = read(
+                  'SELECT trade_date,COUNT(*) AS count,MAX(received_at_utc) AS latest_saved_utc '
+                  'FROM blue_kis_live_quotes_r141 GROUP BY trade_date ORDER BY trade_date DESC LIMIT 3')
+          else:
+              report['saved_market_snapshot_days'] = []
+
+          last = report['collector_recent'][0] if report['collector_recent'] else None
+          collector_after_token = False
+          if saved and last and last.get('started_at_utc'):
+              try:
+                  collector_after_token = vault.parse_expiry(last['started_at_utc']) > saved
+              except vault.VaultError:
+                  pass
+          ready_today = [x['code'] for x in report['sample_search_quotes']
+                         if x.get('status') == 'READY' and x.get('trade_date') == day
+                         and isinstance(x.get('price'), (float, int)) and x['price'] > 0]
+          report['assessment'] = {
+              'token_metadata_valid': token_state == 'VALID_METADATA',
+              'collector_report_after_token_saved': collector_after_token,
+              'collector_latest_status': last.get('status') if last else None,
+              'sample_codes_with_saved_quote_today': ready_today,
+              'market_snapshot_today_available': any(x['trade_date'] == day
+                  for x in report['saved_market_snapshot_days']),
+          }
+
+          report_file = Path('output/r1598/quote_pipeline_audit.json')
+          report_file.parent.mkdir(parents=True, exist_ok=True)
+          report_file.write_text(
+              json.dumps(report, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
+          print('BLUE_R1598_AUDIT ' + json.dumps(report, ensure_ascii=False, sort_keys=True))
+          print('BLUE_R1598_NO_MARKET_REQUEST_NO_DATABASE_WRITE_NO_TOKEN_ISSUANCE')
+
+          if mode == 'market_verify':
+              minute = kst.hour * 60 + kst.minute
+              if kst.weekday() >= 5 or not (9*60+30 <= minute < 15*60+20):
+                  raise SystemExit('R1598_MARKET_VERIFY_REQUIRES_WEEKDAY_09_30_TO_15_20_KST')
+              if token_state != 'VALID_METADATA':
+                  raise SystemExit('R1598_TOKEN_METADATA_NOT_VALID')
+              if not collector_after_token:
+                  raise SystemExit('R1598_NO_COLLECTOR_REPORT_AFTER_TOKEN_REFRESH')
+              if last.get('status') == 'PAUSED_TOKEN_EXPIRED_OR_MISSING':
+                  raise SystemExit('R1598_COLLECTOR_STILL_WAITING_FOR_TOKEN')
+              if not ready_today:
+                  raise SystemExit('R1598_NO_SAVED_TODAY_QUOTES_FOR_TEST_CODES')
+              print('BLUE_R1598_MARKET_QUOTE_SAVED_AND_COLLECTOR_ACTIVE')
+          PYTHON_AUDIT
+      - name: Preserve sanitized audit output (no tokens or ciphertext)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: BLUE_R1598_PRICE_AUDIT_${{ github.run_id }}
+          path: output/r1598/quote_pipeline_audit.json
+          if-no-files-found: warn
+          retention-days: 7
