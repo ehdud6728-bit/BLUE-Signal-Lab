@@ -1,0 +1,146 @@
+name: BLUE WEB R1.5.10 Manual Frontend Deploy (MANUAL SAFE)
+
+on:
+  workflow_dispatch:
+    inputs:
+      deploy_web:
+        description: 'FALSE builds and dry-runs only. TRUE explicitly deploys existing blue-signal-lab frontend Worker.'
+        type: boolean
+        required: true
+        default: false
+      confirm_target:
+        description: 'When deploy_web=true, type blue-signal-lab to approve overwriting this existing frontend Worker.'
+        type: string
+        required: false
+        default: ''
+
+permissions:
+  contents: read
+
+concurrency:
+  group: blue-web-manual-production-deploy
+  cancel-in-progress: false
+
+jobs:
+  build_and_optional_deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Guard exact repository and branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REPOSITORY" = 'ehdud6728-bit/BLUE-Signal-Lab'
+          test "$GITHUB_REF" = 'refs/heads/main'
+
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install frontend dependencies
+        working-directory: web
+        shell: bash
+        run: npm install --no-package-lock --no-audit --no-fund
+
+      - name: Build TypeScript and Vite production site
+        working-directory: web
+        shell: bash
+        run: npm run build
+
+      - name: Verify expected production files and PWA
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -s web/dist/index.html
+          test -s web/dist/sw.js
+          test -s web/dist/manifest.webmanifest
+          js_file=$(find web/dist/assets -maxdepth 1 -type f -name 'index-*.js' -print -quit)
+          test -n "$js_file" && test -s "$js_file"
+          grep -q '/assets/' web/dist/index.html
+          echo 'BLUE_WEB_BUILD_ASSETS_OK'
+
+      - name: Upload built frontend archive for inspection and backup
+        uses: actions/upload-artifact@v4
+        with:
+          name: BLUE_WEB_DIST_${{ github.run_id }}
+          path: web/dist/
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Dry-run Cloudflare assets deployment (no remote changes)
+        working-directory: web
+        shell: bash
+        run: |
+          set -euo pipefail
+          npx --yes wrangler@4 deploy \
+            --name blue-signal-lab \
+            --assets ./dist \
+            --compatibility-date 2026-11-13 \
+            --dry-run \
+            --outdir /tmp/blue-web-static-dryrun
+          echo 'BLUE_WEB_WRANGLER_DRY_RUN_OK'
+
+      - name: Check existing Cloudflare frontend Worker metadata (read only)
+        if: ${{ inputs.deploy_web }}
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_WORKER_DEPLOY_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          CONFIRM_TARGET: ${{ inputs.confirm_target }}
+        run: |
+          set -euo pipefail
+          test "$CONFIRM_TARGET" = 'blue-signal-lab' || { echo 'CONFIRM_TARGET_MUST_EQUAL_blue-signal-lab'; exit 1; }
+          test -n "$CLOUDFLARE_API_TOKEN" || { echo 'MISSING_CLOUDFLARE_WORKER_DEPLOY_TOKEN'; exit 1; }
+          test -n "$CLOUDFLARE_ACCOUNT_ID" || { echo 'MISSING_CLOUDFLARE_ACCOUNT_ID'; exit 1; }
+          # Check an existing worker, rather than silently creating a wrong new app.
+          # Binding guard prevents replacing Workers with unrelated code and resources.
+          curl --fail --silent --show-error --retry 2 \
+            -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+            "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/blue-signal-lab/settings" \
+            -o "$RUNNER_TEMP/blue-web-worker-settings.json"
+          python - <<'PY'
+          import json,os
+          from pathlib import Path
+          path=Path(os.environ['RUNNER_TEMP'])/'blue-web-worker-settings.json'
+          data=json.loads(path.read_text())
+          if not data.get('success'):
+              raise SystemExit('WORKER_SETTINGS_UNAVAILABLE: do not deploy until existing Worker is verified')
+          result=data.get('result') or {}
+          bindings=result.get('bindings') or []
+          unsafe=[{'type':b.get('type'),'name':b.get('name')} for b in bindings
+                  if b.get('type') not in ('assets','version_metadata')]
+          if unsafe:
+              raise SystemExit('EXISTING_WORKER_HAS_CUSTOM_BINDINGS: manual review required; deployment blocked')
+          # If the remote Worker does not report static assets, it may use a custom script.
+          # Fail closed rather than replace it with an assets-only Worker.
+          asset_present=bool(result.get('assets')) or any(b.get('type')=='assets' for b in bindings)
+          if not asset_present:
+              raise SystemExit('EXISTING_WORKER_ASSET_TYPE_UNCONFIRMED: deployment blocked; inspect Cloudflare dashboard')
+          print('BLUE_WEB_EXISTING_STATIC_WORKER_CONFIRMED')
+          PY
+
+      - name: Deploy to existing frontend Worker after approval
+        if: ${{ inputs.deploy_web }}
+        working-directory: web
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_WORKER_DEPLOY_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          npx --yes wrangler@4 deploy \
+            --name blue-signal-lab \
+            --assets ./dist \
+            --compatibility-date 2026-11-13
+          echo "BLUE_WEB_DEPLOY_COMPLETE source_sha=$GITHUB_SHA"
+          echo 'Frontend URL: https://blue-signal-lab.ehdud6728.workers.dev'
+
+      - name: Read-only verification summary
+        if: ${{ !inputs.deploy_web }}
+        shell: bash
+        run: |
+          echo 'BLUE_WEB_VERIFY_ONLY_OK: no Cloudflare changes were made'
+          echo 'Set deploy_web=true and confirm_target=blue-signal-lab only after reviewing deployment strategy.'
