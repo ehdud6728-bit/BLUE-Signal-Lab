@@ -1,0 +1,11 @@
+/* R1.5.9.1: highlight ONLY verified historical in-sample evidence (n >= 8, up >= 70%).
+   Tomato is a visual research label, not a future probability or trade recommendation. */
+.r1591-search-tech{display:inline-flex;align-items:center;justify-content:center;margin:2px 3px 2px 0;padding:3px 6px;border:1px solid #b5cee8;border-radius:6px;background:#edf5ff;color:#315d91;font-size:10px;font-weight:800;line-height:1.3;white-space:nowrap}
+.r1591-mobile-tech{display:flex;flex-wrap:wrap;gap:3px;margin:4px 0 6px;min-width:0}
+.basket-record.r1591-basket-tomato{border:2px solid #e87968!important;background:linear-gradient(180deg,#fff8f5 0,#fff 100px);box-shadow:0 0 0 1px rgba(232,121,104,.08)}
+.r1591-basket-evidence{display:inline-flex;align-items:center;margin:0 0 8px;padding:5px 8px;border-radius:7px;border:1px solid #ef978b;background:#fce2dc;color:#ad4435;font-size:11px;font-weight:800;line-height:1.45;max-width:100%;box-sizing:border-box}
+/* Preserve the already-existing search highlight and improve outline stability on wide tables. */
+.desktop-results tr.r159-tomato-stock>td{background:#fff7f4;box-shadow:inset 0 2px #e87968,inset 0 -2px #e87968}
+.desktop-results tr.r159-tomato-stock>td:first-child{border-left:2px solid #e87968}
+.desktop-results tr.r159-tomato-stock>td:last-child{border-right:2px solid #e87968}
+@media(max-width:520px){.r1591-search-tech{font-size:10px;padding:3px 6px}.r1591-basket-evidence{font-size:10px}}
