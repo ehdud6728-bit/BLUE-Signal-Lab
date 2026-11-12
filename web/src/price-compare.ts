@@ -4,6 +4,7 @@ export type PriceCompare = {
  latest_price:number|null;latest_day:string|null;latest_source:string|null;latest_at:string|null;latest_market:string|null;
  period_high:number|null;period_high_day:string|null;period_high_source:string|null;
  high_coverage_to:string|null;high_complete:boolean;
+ quote_status?:string|null;quote_checked_at?:string|null;quote_error?:string|null;
 };
 export const comparisonKey=(v:{code:string;day:string})=>`${v.code}:${v.day}`;
 const API=(import.meta.env.VITE_API_BASE||'https://blue-signal-lab-api-v2.ehdud6728.workers.dev').replace(/\/+$/,'');

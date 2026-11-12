@@ -27,7 +27,15 @@ export async function collectSearchPriority(env,now=new Date(),deps={}){
   if(!due.results.length)return {status:'IDLE'};
   let token=null;
   if(env.KIS_APP_KEY&&env.KIS_APP_SECRET){try{token=await (deps.token||cachedToken)(db,env.KIS_APP_KEY,env.KIS_APP_SECRET,now);}catch{}}
-  if(!token)return {status:'WAITING_TOKEN',count:due.results.length};
+  if(!token){
+   // Persist the blocked reason without deleting any previously validated price.
+   const next=dateISO(now.getTime()+5*60000);
+   for(const item of due.results){
+    await db.prepare("UPDATE blue_search_quote_priority_r1594 SET status='WAITING_TOKEN',checked_at_utc=?,last_error='KIS_TOKEN_CACHE_UNAVAILABLE',next_due_utc=? WHERE code=?")
+      .bind(stamp,next,item.code).run();
+   }
+   return {status:'WAITING_TOKEN',count:due.results.length};
+  }
   const [market,phase]=phases.find(x=>x[0]==='J')||phases[0];
   let saved=0;let errors=0;
   for(const item of due.results.slice(0,LIMIT)){

@@ -28,9 +28,21 @@ export function decodeRequested(value:unknown,nowDay:string):{code:string;day:st
 }
 export async function requestSearchQuotes(req:Request,db:D1Database):Promise<Response>{
  if(req.method!=='POST')return reply({error:'METHOD_NOT_ALLOWED'},405);
- const raw=await req.text();if(raw.length>3500)return reply({error:'PAYLOAD_TOO_LARGE'},413);
- let body:unknown;try{body=JSON.parse(raw);}catch{return reply({error:'INVALID_JSON'},400);}
- const items=decodeRequested((body as {items?:unknown})?.items,today());
+ const url=new URL(req.url);
+ const queryItems=url.searchParams.get('items');
+ let payload:unknown;
+ if(queryItems!==null){
+  if(queryItems.length>200)return reply({error:'QUERY_TOO_LONG'},400);
+  const pairs=queryItems.split(',');
+  payload=pairs.map(pair=>{const [code,day,...rest]=pair.split(':');
+   return rest.length?null:{code,day};});
+ }else{
+  // Backward compatibility with previously deployed web bundles.
+  const raw=await req.text();if(raw.length>3500)return reply({error:'PAYLOAD_TOO_LARGE'},413);
+  let body:unknown;try{body=JSON.parse(raw);}catch{return reply({error:'INVALID_JSON'},400);}
+  payload=(body as {items?:unknown})?.items;
+ }
+ const items=decodeRequested(payload,today());
  if(!items)return reply({error:'INVALID_ITEMS',message:'검색 결과의 유효한 종목·날짜를 최대 8개 요청하세요.'},400);
  await db.prepare(CREATE).run();
  const stamp=new Date().toISOString();const throttle=new Date(Date.now()-10*60000).toISOString();

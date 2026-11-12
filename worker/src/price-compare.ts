@@ -9,6 +9,7 @@ export type PriceCompareRow = {
  latest_at:string|null;latest_market:string|null;
  period_high:number|null;period_high_day:string|null;period_high_source:string|null;
  high_coverage_to:string|null;high_complete:boolean;
+ quote_status?:string|null;quote_checked_at?:string|null;quote_error?:string|null;
 };
 type Observation={price:number;day:string;source:string;at:string|null;market:string|null;priority:number};
 type HighObservation={price:number;day:string;source:string;coverageTo:string;full:boolean};
@@ -84,6 +85,7 @@ export async function comparePrices(db:D1Database,url:URL):Promise<Response>{
     period_high_source:null,high_coverage_to:null,high_complete:false});continue;
   }
   const candidates:Observation[]=[];const highs:HighObservation[]=[];
+  let quoteStatus:string|null=null,quoteCheckedAt:string|null=null,quoteError:string|null=null;
   if(tables.has('blue_basket_watch_r153')){
    // Multiple discovery dates for one ticker share *latest quote* evidence,
    // but NEVER share a period high computed from a different start date.
@@ -109,10 +111,12 @@ export async function comparePrices(db:D1Database,url:URL):Promise<Response>{
   }
   // Search-triggered KIS REST snapshots: latest observed only, not full-period coverage.
   if(tables.has('blue_search_quote_priority_r1594')){
-   const q=await db.prepare(`SELECT status,trade_date,price,high,quote_at_utc,market
+   const q=await db.prepare(`SELECT status,trade_date,price,high,quote_at_utc,market,checked_at_utc,last_error
       FROM blue_search_quote_priority_r1594 WHERE code=? LIMIT 1`).bind(code)
-     .first<{status:string;trade_date:string|null;price:number|null;high:number|null;quote_at_utc:string|null;market:string|null}>();
-   if(q&&['READY','QUEUED','RETRY'].includes(q.status)&&q.trade_date&&iso(q.trade_date)&&q.trade_date>day&&money(q.price)){
+     .first<{status:string;trade_date:string|null;price:number|null;high:number|null;quote_at_utc:string|null;market:string|null;checked_at_utc:string|null;last_error:string|null}>();
+   if(q){quoteStatus=q.status;quoteCheckedAt=q.checked_at_utc;quoteError=q.last_error;}
+   // A temporarily blocked request cannot erase the last genuine observed price.
+   if(q&&['READY','QUEUED','RETRY','WAITING_TOKEN'].includes(q.status)&&q.trade_date&&iso(q.trade_date)&&q.trade_date>day&&money(q.price)){
     candidates.push({price:q.price!,day:q.trade_date,source:'KIS_SEARCH_PRIORITY_R1594',
       at:q.quote_at_utc,market:q.market,priority:85});
     if(money(q.high)&&q.high! >= q.price!)highs.push({price:q.high!,day:q.trade_date,
@@ -158,7 +162,8 @@ export async function comparePrices(db:D1Database,url:URL):Promise<Response>{
   out.push({code,day,status:latest?'READY':'NO_LATER_PRICE',latest_price:latest?.price||null,
    latest_day:latest?.day||null,latest_source:latest?.source||null,latest_at:latest?.at||null,
    latest_market:latest?.market||null,period_high:high.price,period_high_day:high.day,
-   period_high_source:high.source,high_coverage_to:high.coverageTo,high_complete:high.complete});
+   high_coverage_to:high.coverageTo,high_complete:high.complete,
+   quote_status:quoteStatus,quote_checked_at:quoteCheckedAt,quote_error:quoteError});
  }
  return reply({status:'OK',items:out,asof:today,source:'D1_VERIFIED_SAVED_ONLY',note:
   '최근 확인가는 서버 저장 시세이며 실시간 체결 보장이 없습니다. 기간 최고가는 저장된 검증 자료 범위 안에서만 계산합니다.'});

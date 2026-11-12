@@ -487,11 +487,9 @@ function App(){
                  </button>
                </div></td>
               <td>{r.signals.map(s=><span className="tag" key={s}>{showSignal(s)}</span>)}{techBadges(r).map(t=><span className="r1591-search-tech" key={t}>{t}</span>)}</td><td className="r1593-price-cell"><strong>{money(r.close_price)}원</strong><small> · 검색일 종가</small>
-                <PriceCompareMini data={r1593Prices[comparisonKey(r)]} baseline={r.close_price} loading={r1593Busy}/>
-                {!r1593Busy&&!r1593Prices[comparisonKey(r)]?.latest_price&&<button type="button" className="r1595-request-price"
-                  disabled={!!r1595Requesting||r1595Timers.current.size>=3} onClick={e=>{e.stopPropagation();void requestMissingQuote(r);}}
-                  onKeyDown={e=>e.stopPropagation()}>
-                    {r1595Requesting===comparisonKey(r)?'요청 중…':'시세 수집 요청'}</button>}
+                <PriceCompareMini data={r1593Prices[comparisonKey(r)]} baseline={r.close_price} loading={r1593Busy}
+                  onRequest={()=>{void requestMissingQuote(r);}} requesting={r1595Requesting===comparisonKey(r)}
+                  requestDisabled={!!r1595Requesting||r1595Timers.current.size>=3}/>
               </td>
               <td>{fmt(r,'rsi')} <small>{crossed(r,'rsi_gc')}</small></td><td>{fmt(r,'slow_14_3_3_k')} / {fmt(r,'slow_14_3_3_d')} <small>{crossed(r,'slow_14_3_3_gc')}</small></td>
               <td>{fmt(r,'macd_12_26_9')} <small>{crossed(r,'macd_gc')}</small></td><td>{present(r,'valid_line_candidates_json')?`${validLines(r).length}개`:'미계산'}</td>
@@ -499,13 +497,17 @@ function App(){
             </tr>):<tr><td className="empty" colSpan={9}>{total!==null?'조건에 맞는 종목이 없습니다.':'날짜와 조건을 선택해 검색하세요.'}</td></tr>}</tbody></table></div>
           <div className="mobile-results">
             {visibleRows.length?visibleRows.map((r,i)=><div className={'r151-mobile-row'+(patternUp(r)!==null?' r159-tomato-stock':'')} key={`${r.code}-${r.day}-${i}`}>
-              <button className="stock-card" onClick={()=>openDetail(r)} aria-label={`${displayName(r)} 상세 분석 보기`}>
+              <div className="stock-card" role="button" tabIndex={0} onClick={()=>openDetail(r)}
+                onKeyDown={e=>{if(e.target===e.currentTarget&&(e.key==='Enter'||e.key===' ')){e.preventDefault();openDetail(r);}}}
+                aria-label={`${displayName(r)} 상세 분석 보기`}>
               <div className="stock-top"><div className="stock-identity"><strong>{displayName(r)}</strong><span>{r.code} <span className="stock-dot">·</span> {r.day}</span></div><div className="stock-price"><b>{money(r.close_price)}<small>원</small></b><span>종가</span></div><ChevronRight size={19} className="stock-chevron"/></div>
-              <PriceCompareMini compact data={r1593Prices[comparisonKey(r)]} baseline={r.close_price} loading={r1593Busy}/>
+              <PriceCompareMini compact data={r1593Prices[comparisonKey(r)]} baseline={r.close_price} loading={r1593Busy}
+                onRequest={()=>{void requestMissingQuote(r);}} requesting={r1595Requesting===comparisonKey(r)}
+                requestDisabled={!!r1595Requesting||r1595Timers.current.size>=3}/>
               <div className="stock-tags">{r.signals.slice(0,4).map(s=><span className="tag" key={s}>{showSignal(s)}</span>)}{r.signals.length>4&&<span className="tag tag-more">+{r.signals.length-4}</span>}{patternUp(r)!==null&&<span className="r159-prob-chip">과거 10일 상승 {patternUp(r)!.toFixed(1)}% · {num(r,'r159_pattern_n_10d')}건</span>}</div>
               {techBadges(r).length>0&&<div className="r1591-mobile-tech">{techBadges(r).map(t=><span className="r1591-search-tech" key={t}>{t}</span>)}</div>}
                <div className="stock-quick"><div><small>RSI</small><strong>{fmt(r,'rsi',1)}</strong></div><div><small>Slow GC</small><strong className={flag(r,'slow_14_3_3_gc')?'positive':''}>{crossed(r,'slow_14_3_3_gc')}</strong></div><div><small>MACD GC</small><strong className={flag(r,'macd_gc')?'positive':''}>{crossed(r,'macd_gc')}</strong></div><div><small>상단 매물</small><strong>{supplyGrade(r)}</strong></div></div>
-            </button>
+            </div>
               <button type="button" className={'r151-mobile-add '+(inBasket(r)?'saved':'')}
                 title={inBasket(r)?'장바구니에 담김':'장바구니에 담기'}
                 aria-label={`${displayName(r)} ${inBasket(r)?'장바구니에 담김':'장바구니에 담기'}`}
@@ -514,11 +516,7 @@ function App(){
                 {inBasket(r)?<CheckCircle2 size={19}/>:<ShoppingBasket size={19}/>}
                 <span>{inBasket(r)?'담김':'담기'}</span>
               </button>
-              {!r1593Busy&&!r1593Prices[comparisonKey(r)]?.latest_price&&<button type="button"
-                className="r1595-request-price r1595-request-mobile"
-                disabled={!!r1595Requesting||r1595Timers.current.size>=3}
-                onClick={()=>{void requestMissingQuote(r);}}>
-                 {r1595Requesting===comparisonKey(r)?'수집 요청 중…':'이 종목 시세 수집 요청'}</button>}
+              {/* Quote refresh is now visible directly beside the saved quote above. */}
               </div>):<div className="mobile-empty"><Search size={30}/><strong>{localQuery?'현재 페이지에서 일치하는 종목이 없습니다.':total===0?'해당 조건의 종목이 없습니다.':'검색 조건을 선택해 주세요.'}</strong><p>{gcFields.length?'선택한 골든크로스 조건을 만족하는 종목이 없습니다.':'과거 거래일을 선택한 다음 검색 버튼을 누르세요.'}</p><button onClick={()=>nav('search')}>검색 조건 열기</button></div>}
           </div>
           {total!==null&&total>100&&<div className="pager"><button disabled={busy||page===1} onClick={()=>{void search(page-1,false);}}>이전</button><span>{page} / {Math.ceil(total/100)}</span><button disabled={busy||page>=Math.ceil(total/100)} onClick={()=>{void search(page+1,false);}}>다음</button></div>}
@@ -539,7 +537,9 @@ function App(){
       <section className="detail-sheet" role="dialog" aria-modal="true" aria-label={`${displayName(selected)} 상세 분석`}>
         <div className="detail-handle" aria-hidden="true"/><div className="detail-toolbar"><button onClick={closeDetail} className="detail-back"><ArrowLeft size={19}/> 뒤로</button><span className="detail-eod">일봉 · 연구용</span><button onClick={closeDetail} className="detail-x" aria-label="상세 닫기"><X size={21}/></button></div>
         <div className="detail-head"><div><small>{selected.code} · {selected.day}</small><h2>{displayName(selected)}</h2></div><div className="detail-close"><span>종가</span><strong>{money(selected.close_price)} <small>원</small></strong></div></div>
-        <PriceCompareMini compact data={r1593Prices[comparisonKey(selected)]} baseline={selected.close_price} loading={r1593Busy}/>
+        <PriceCompareMini compact data={r1593Prices[comparisonKey(selected)]} baseline={selected.close_price} loading={r1593Busy}
+          onRequest={()=>{void requestMissingQuote(selected);}} requesting={r1595Requesting===comparisonKey(selected)}
+          requestDisabled={!!r1595Requesting||r1595Timers.current.size>=3}/>
         <div className="study-tags">{selected.signals.map(s=><span key={s}>{showSignal(s)}</span>)}</div>
         <StockChart key={'chart-'+selected.code+'-'+selected.day} code={selected.code}
           day={selected.day} name={displayName(selected)}

@@ -18,3 +18,9 @@
 .desktop-results td.r1593-price-cell .r1595-request-price{margin-top:5px}
 .r1595-request-mobile{grid-column:1 / -1;justify-self:stretch;min-height:30px}
 .r1595-request-status{font-size:11px;color:#42678e;margin:6px 0;line-height:1.5}
+/* R1596: refresh adjacent to the observed price, not below the entire stock card. */
+.r1596-inline-request{display:inline-flex;align-items:center;justify-content:center;border:1px solid #8bb0e2;background:#e8f1ff;color:#1d57a8;border-radius:7px;padding:4px 7px;font-size:10px;font-weight:800;line-height:1.3;min-height:27px;white-space:nowrap;cursor:pointer}
+.r1596-inline-request:disabled{opacity:.55;cursor:default}
+.r1596-stale{color:#ae5544;font-weight:800}
+.r1593-compare-line>.r1596-inline-request{margin-left:auto;flex-shrink:0}
+@media(max-width:520px){.r1596-inline-request{padding:5px 7px;font-size:10px}.r1593-compare-line>.r1596-inline-request{margin-left:5px}}
