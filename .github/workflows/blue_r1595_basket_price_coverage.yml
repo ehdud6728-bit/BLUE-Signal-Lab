@@ -1,0 +1,258 @@
+name: BLUE R1.5.9.5 Grouped Basket and Price Coverage (MANUAL SAFE)
+
+on:
+  workflow_dispatch:
+    inputs:
+      apply_changes:
+        description: 'FALSE test-only, TRUE commit to main after tests pass.'
+        type: boolean
+        required: true
+        default: false
+
+permissions:
+  contents: write
+
+concurrency:
+  group: blue-r1595-basket-price-verified
+  cancel-in-progress: false
+
+jobs:
+  verify_and_optional_apply:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Verify BLUE repository and main branch
+        run: |
+          test "$GITHUB_REPOSITORY" = 'ehdud6728-bit/BLUE-Signal-Lab'
+          test "$GITHUB_REF_NAME" = 'main'
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Restore only reviewed R1595 patch files and verify checksum
+        run: |
+          python - <<'PYRESTORE'
+          import base64,hashlib,io,zipfile
+          from pathlib import Path
+          data="""
+          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
+          """
+          blob=base64.b64decode(''.join(data.split()))
+          assert hashlib.sha256(blob).hexdigest()=='3d19edaacc094d82ea15068d0635da72b1dbfe5bd8484e4d938cfc7b7b2f7776','R1595_BAD_HASH'
+          approved={'scripts/blue_r1595_install.py','tests/test_r1595_grouping.mjs','tests/test_r1595_install.py','tests/test_r1595_queue.mjs','web/src/basket-grouping.ts','web/src/r1595-group-price.css'}
+          with zipfile.ZipFile(io.BytesIO(blob)) as z:
+            assert set(z.namelist())==approved,'R1595_UNEXPECTED_ZIP_FILE'
+            for path in sorted(approved):
+              dest=Path(path);dest.parent.mkdir(parents=True,exist_ok=True)
+              content=z.read(path)
+              if dest.exists():assert dest.read_bytes()==content,'R1595_SOURCE_CONFLICT '+path
+              else:dest.write_bytes(content)
+              print('R1595_RESTORED',path)
+          PYRESTORE
+      - name: Check and apply exact safe source edits, then verify replay
+        run: |
+          python scripts/blue_r1595_install.py --check
+          python scripts/blue_r1595_install.py --apply
+          python scripts/blue_r1595_install.py --check
+          python scripts/blue_r1595_install.py --apply
+          python -m py_compile scripts/blue_r1595_install.py
+      - name: Run R1595 grouping, collector and installer regression tests
+        run: |
+          python -m unittest discover -s tests -p 'test_r1595_install.py' -v
+          node --experimental-strip-types --test tests/test_r1595_grouping.mjs
+          node --test tests/test_r1595_queue.mjs
+      - name: Preserve R1593 and R1594 price API and AI regressions
+        run: |
+          node --experimental-strip-types --test tests/test_r1593_compare.mjs
+          node --experimental-strip-types --test tests/test_r1594_priority.mjs
+          node --test tests/test_r1594_collector.mjs
+          node --experimental-strip-types --test tests/test_basket_r15.mjs
+      - name: Existing full repository Python regressions
+        run: |
+          python -m pip install pandas numpy pyarrow requests 'pykrx==1.2.9' 'cryptography>=43,<48'
+          python -m unittest discover -s tests -v
+      - name: Build React TypeScript frontend without deploy
+        working-directory: web
+        run: |
+          npm install --no-package-lock --no-audit --no-fund
+          npm run build
+      - name: Validate KIS Collector tests and dry-run compile
+        working-directory: collector
+        run: |
+          npm install --no-package-lock --no-audit --no-fund
+          npm test
+          npm run build:check
+      - name: Assert file scope, no source algorithm, secrets, Worker or D1 schema edits
+        run: |
+          python - <<'PYGUARD'
+          from pathlib import Path
+          import subprocess
+          touched=set(subprocess.check_output(['git','diff','--name-only'],text=True).splitlines())
+          expected={'web/src/main.tsx','web/src/SmartBasket.tsx','web/src/price-compare.ts','collector/src/search-quote-priority.mjs'}
+          assert touched==expected,('R1595_UNEXPECTED_MODIFICATIONS',sorted(touched))
+          expected_new={'scripts/blue_r1595_install.py','tests/test_r1595_grouping.mjs','tests/test_r1595_install.py','tests/test_r1595_queue.mjs','web/src/basket-grouping.ts','web/src/r1595-group-price.css'}
+          assert all(Path(p).exists() for p in expected_new),'R1595_MISSING_PACKAGE_FILE'
+          assert 'groupBasketRecords(visible,groupSimilar)' in Path('web/src/SmartBasket.tsx').read_text()
+          assert 'onBatch?' in Path('web/src/price-compare.ts').read_text()
+          assert 'requestMissingQuote(r)' in Path('web/src/main.tsx').read_text()
+          assert "WHEN 'QUEUED' THEN 0" in Path('collector/src/search-quote-priority.mjs').read_text()
+          assert 'new Date' not in Path('web/src/basket-grouping.ts').read_text()
+          print('R1595_SCOPE_OK', sorted(touched))
+          PYGUARD
+      - name: Commit only after passing all tests and explicit user approval
+        if: inputs.apply_changes
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add web/src/main.tsx web/src/SmartBasket.tsx web/src/price-compare.ts \
+            web/src/basket-grouping.ts web/src/r1595-group-price.css \
+            collector/src/search-quote-priority.mjs scripts/blue_r1595_install.py \
+            tests/test_r1595_grouping.mjs tests/test_r1595_queue.mjs tests/test_r1595_install.py
+          git diff --cached --quiet || {
+            git commit -m 'BLUE R1.5.9.5: group basket dates and improve saved price coverage'
+            git push origin HEAD:main
+          }
+      - name: Deployment boundary and final result
+        run: |
+          echo 'R1595_ALL_TESTS_PASS'
+          echo 'No auto-deploy: only frontend + KIS Collector require deployment after approved commit.'
+          echo 'API Worker and existing D1 schema are unchanged.'
