@@ -115,10 +115,17 @@ export function parseQuote(candidate, market, phase, json, received, day){
   const reported=String(o.stck_bsop_date||'');
   if(reported&&reported!==day.replaceAll('-',''))throw Error('PROVIDER_TRADE_DAY_MISMATCH');
   const hhmmss=String(o.stck_cntg_hour||'');
+   // R157_PREV_CLOSE: KIS provider-supplied percentage, NOT the scanner signal-day return.
+   // Absence or invalid values remain null for older snapshots; never fabricate a prior close.
+   const prevRaw=String(o.prdy_ctrt??'').trim();
+   const prevPct=prevRaw!==''?Number(prevRaw):NaN;
+   const changeFromPrev=Number.isFinite(prevPct)&&prevPct>=-100&&prevPct<=1000
+     ?Math.round(prevPct*100)/100:null;
   return {code:candidate.code,name:candidate.name,market,market_label:market==='J'?'KRX':'NXT',phase,
     trade_date_kst:day,received_at_utc:received.toISOString(),
     price,open,high,low,accumulated_volume:volume,
     change_from_eod_pct:Math.round((price/candidate.eod_close-1)*1e6)/1e4,
+    change_from_prev_close_pct:changeFromPrev,
     day_range_position_pct:high>low?Math.round((price-low)/(high-low)*1e4)/100:null,
     eod_asof:candidate.eod_asof,eod_close:candidate.eod_close,eod_signals:candidate.eod_signals,
     source_krx_run_id:candidate.source_krx_run_id,

@@ -16,6 +16,8 @@ import './r153-performance.css';
 import './r154-clarity.css';
 // R155_AI_REPAIR: restore independent AI briefing styles.
 import './r155-ai-repair.css';
+// R157_UI_FILTERS
+import './r157-ui.css';
 
 // Keep the existing production API and Cloudflare Access cookies.
 const API = (import.meta.env.VITE_API_BASE || 'https://blue-signal-lab-api-v2.ehdud6728.workers.dev').replace(/\/+$/, '');
@@ -35,7 +37,7 @@ const ALL_GC_KEYS=GC_OPTIONS.map(x=>x.key);
 type InstallPrompt = Event & {prompt:()=>Promise<void>;userChoice:Promise<{outcome:string}>};
 const tags=['BB20','BB30','BB40','ENV20','ENV40'];
 const todayKST=()=>new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Seoul',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date());
-const showSignal=(t:string)=>t.replace(/^BB/,'BLUE');
+const showSignal=(t:string)=>t.replace(/^(?:BLUE|BB)(?=\d)/i,'B');
 const money=(n:number|null|undefined)=>n==null?'—':n.toLocaleString('ko-KR');
 
 function App(){

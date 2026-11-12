@@ -100,6 +100,16 @@ test('quote is unverified for exchange tick; inconsistent and older trading days
   assert.throws(()=>parseQuote(candidate,'NX','NXT_MAIN',inconsistent,at(11),'2026-11-11'),/QUOTE_INCONSISTENT/);
 });
 
+test('R1.5.7 prior-day return is provider-derived, absent values are null',()=>{
+  const candidate=normalizeCandidate(seed(),'R141_VERIFIED_EOD_ARTIFACT');
+  const withPct={...quote,output:{...quote.output,prdy_ctrt:'-1.23'}};
+  const q=parseQuote(candidate,'J','KRX_REGULAR',withPct,at(9,5),'2026-11-11');
+  assert.equal(q.change_from_prev_close_pct,-1.23);
+  assert.equal(parseQuote(candidate,'J','KRX_REGULAR',quote,at(9,5),'2026-11-11').change_from_prev_close_pct,null);
+  const invalid={...quote,output:{...quote.output,prdy_ctrt:'not-a-number'}};
+  assert.equal(parseQuote(candidate,'J','KRX_REGULAR',invalid,at(9,5),'2026-11-11').change_from_prev_close_pct,null);
+});
+
 test('D1 100 parameter SQL limit is preserved at 40 valid market quotes',()=>{
   const db=fakeDb();const seedQuote=parseQuote(normalizeCandidate(seed(),'R141_VERIFIED_EOD_ARTIFACT'),'J','KRX_REGULAR',quote,at(9,5),'2026-11-11');
   const list=Array.from({length:40},(_,i)=>({...seedQuote,code:String(i).padStart(6,'0')}));

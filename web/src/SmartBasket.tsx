@@ -20,7 +20,7 @@ const pctText=(p:number|null)=>p===null?'—':`${p>0?'+':''}${p.toFixed(2)}%`;
 const discoveredSignals=(stored:string[]|undefined,verified:string|null|undefined):string[]=>{
  const source=stored?.length?stored:(verified||'').split(',');
  return [...new Set(source.flatMap(s=>String(s).split(',')).map(s=>s.trim())
-   .filter(s=>/^[A-Za-z0-9_\-]{2,48}$/.test(s)).map(s=>s.replace(/^BB/i,'BLUE')))];
+   .filter(s=>/^[A-Za-z0-9_\-]{2,48}$/.test(s)).map(s=>s.replace(/^(?:BLUE|BB)(?=\d)/i,'B')))];
 };
 const statusText=(s:string)=>({QUEUED:'등록 완료 · 수집 대기',NOT_REGISTERED:'수집 요청 전',
   HISTORY_PARTIAL:'과거 가격 확인 중',WAITING_TOKEN:'KIS 토큰 확인 필요',
@@ -61,6 +61,10 @@ export default function SmartBasket({quickAddRequest,onItemsChange,active=true}:
 }){
  const [items,setItems]=useState<BasketItem[]>(readItems);
  const [filter,setFilter]=useState<'ALL'|'MANUAL'|'AI'>('ALL');
+ // R157_BASKET_FILTERS: local display filters; persisted basket order/data never changed.
+ const [rank,setRank]=useState<'RECENT'|'GAIN_TOP'|'LOSS_TOP'>('RECENT');
+ const [dayFilter,setDayFilter]=useState('ALL');
+ const [query,setQuery]=useState('');
  const [ai,setAi]=useState<AiResult|null>(null);
   const [aiBusy,setAiBusy]=useState(false);
   // R152_COMPACT_BASKET: AI results stay collapsed until requested.
@@ -154,7 +158,28 @@ export default function SmartBasket({quickAddRequest,onItemsChange,active=true}:
    headers:{'Content-Type':'text/plain;charset=UTF-8'},body:'{}',cache:'no-store'});
    const d=await r.json() as AiResult;
    if(!r.ok)throw Error(`${d.message||'AI 후보 생성 실패'}${d.error?' ('+d.error+')':''} · HTTP ${r.status}`);
-   setAi(d);if(d.status==='READY')setShowAi(true);if(d.status==='PENDING')setMessage('다른 요청에서 분석 중입니다. 잠시 뒤 화면을 다시 열어 주세요.');
+    setAi(d);
+    if(d.status==='READY'){
+     // R157_AI_AUTO_ADD: only server-verified picks, never invent a basket item.
+     const picked=(Array.isArray(d.items)?d.items:[]).filter(p=>validCode(p.code)&&validDay(p.day)&&
+       Number.isFinite(p.close_price)&&p.close_price>0).slice(0,6);
+     const already=new Set(items.map(x=>x.id));
+     const unique=picked.filter(p=>!already.has(`AI:${p.code}:${p.day}`));
+     setItems(old=>{
+      const existing=new Set(old.map(x=>x.id));
+      const room=Math.max(0,100-old.length);
+      const additions=unique.filter(p=>!existing.has(`AI:${p.code}:${p.day}`)).slice(0,room).map(p=>({
+       id:`AI:${p.code}:${p.day}`,source:'AI' as const,code:p.code,name:p.name||p.code,
+       day:p.day,baseline:p.close_price,added_at:new Date().toISOString(),signals:p.signals||[],
+       memo:'',reason:p.reason,risk:p.risk,watch:p.watch
+      }));
+      return additions.length?[...additions,...old]:old;
+     });
+     setShowAi(false);setFilter('AI');setDayFilter('ALL');setRank('RECENT');setQuery('');
+     setMessage(picked.length?`AI 후보 ${picked.length}종목 확인 · 신규 ${Math.min(unique.length,Math.max(0,100-items.length))}종목 자동 등록 · 기존 후보는 중복 제외`:
+       'AI가 이번 기준일의 관찰 후보를 보류했습니다.');
+    }
+    if(d.status==='PENDING')setMessage('다른 요청에서 분석 중입니다. 잠시 뒤 화면을 다시 열어 주세요.');
    else if(d.status!=='READY')setMessage(d.message||'검증된 최근 종가 후보를 찾지 못했습니다.');
   }catch(e){setError(e instanceof Error?e.message:'AI 후보 생성 실패');}
   finally{setAiBusy(false);}
@@ -174,13 +199,24 @@ export default function SmartBasket({quickAddRequest,onItemsChange,active=true}:
  }
  const latestQuote=new Map<string,Quote>();
  for(const q of quotes?.items||[]){if(q.market==='J'&&validCode(q.code)&&q.price>0)latestQuote.set(q.code,q);}
- const visible=items.filter(x=>filter==='ALL'||x.source===filter);
+ // R157_FILTER_SOURCE: keep source/date/name filtering independent of saved records.
+ const availableDays=[...new Set(items.map(x=>x.day))].sort((a,b)=>b.localeCompare(a));
+ const normalizedQuery=query.trim().toLocaleLowerCase('ko-KR');
+ const scoped=items.filter(x=>(filter==='ALL'||x.source===filter)&&
+   (dayFilter==='ALL'||x.day===dayFilter)&&
+   (!normalizedQuery||x.code.includes(normalizedQuery)||x.name.toLocaleLowerCase('ko-KR').includes(normalizedQuery)));
  const pct=(x:BasketItem)=>{
   const pr=performance[perfId(x)];const price=pr?.quote_day&&pr.quote_day>x.day&&pr.quote_day>=(pr.recent_day||'')
    ?pr.quote_price:pr?.recent_day&&pr.recent_day>x.day?pr.recent_close:null;
   return pctChange(price,x.baseline)??baselineReturn(x,latestQuote.get(x.code));
  };
- const summary=(kind:'MANUAL'|'AI')=>{
+  const visible=rank==='RECENT'?scoped:
+    scoped.filter(x=>{const v=pct(x);return v!==null&&(rank==='GAIN_TOP'?v>0:v<0);})
+     .sort((a,b)=>{
+      const left=pct(a)??0,right=pct(b)??0;
+      return (rank==='GAIN_TOP'?right-left:left-right)||a.day.localeCompare(b.day)||a.code.localeCompare(b.code);
+     }).slice(0,10);
+  const summary=(kind:'MANUAL'|'AI')=>{
   const list=items.filter(x=>x.source===kind&&pct(x)!==null);
   const days=new Set(list.map(x=>x.day));
   return {n:list.length,avg:list.length&&days.size===1?list.reduce((s,x)=>s+(pct(x)??0),0)/list.length:null,
@@ -191,7 +227,7 @@ export default function SmartBasket({quickAddRequest,onItemsChange,active=true}:
    new Set(items.filter(x=>pct(x)!==null).map(x=>x.day)).size===1;
   return <section className="panel blue-basket r152-basket-compact" id="blue-basket" aria-labelledby="blue-basket-h">
    <header className="r152-basket-head">
-     <div><h2 id="blue-basket-h"><ShoppingBasket size={18}/> AI 스마트 장바구니 <small>R1.5.4</small></h2>
+     <div><h2 id="blue-basket-h"><ShoppingBasket size={18}/> AI 스마트 장바구니 <small>R1.5.7</small></h2>
        <p>검색 결과의 장바구니 아이콘으로 직접 담고, 이곳에서 AI 후보와 비교합니다.</p></div>
      <button type="button" className="r152-ai-generate" disabled={aiBusy} onClick={()=>void generateAi()}>
        {aiBusy?<RefreshCw size={17}/>:<Bot size={17}/>}{aiBusy?'AI 분석 중…':'AI 후보 만들기'}
@@ -209,8 +245,7 @@ export default function SmartBasket({quickAddRequest,onItemsChange,active=true}:
        {(ai.items||[]).map(p=><article key={p.code}><div><b>{p.name} ({p.code})</b>
          <span>기준 종가 {cash(p.close_price)}원</span></div><p>{p.reason||'관찰 근거 추가 확인 필요'}</p>
          <small>반대 시나리오: {p.risk||'미기재'}</small><small>다음 확인: {p.watch||'미기재'}</small>
-         <button type="button" disabled={items.some(x=>x.id===`AI:${p.code}:${p.day}`)} onClick={()=>add(p,'AI')}>
-           {items.some(x=>x.id===`AI:${p.code}:${p.day}`)?'AI 관찰함에 담김':'AI 관찰함에 담기'}</button>
+          <small className="r157-auto-picked">{items.some(x=>x.id===`AI:${p.code}:${p.day}`)?'자동 등록됨':'AI 후보 생성 버튼으로 자동 등록'}</small>
        </article>)}
      </div>
    </details>}
@@ -224,7 +259,20 @@ export default function SmartBasket({quickAddRequest,onItemsChange,active=true}:
    </p>}
   <div className="basket-tabs" role="group" aria-label="장바구니 분류">{([['ALL','전체'],['MANUAL','내 선택'],['AI','AI 선택']] as const).map(([key,title])=><button
     key={key} type="button" aria-pressed={filter===key} className={filter===key?'active':''} onClick={()=>setFilter(key)}>{title}</button>)}</div>
-  {!visible.length?<div className="basket-empty">아직 담긴 종목이 없습니다. 검색 결과에서 담기 아이콘을 누르거나 AI 후보를 생성하세요.</div>:
+   <div className="r157-basket-filters" aria-label="장바구니 정렬과 검색">
+     <div className="r157-rank-pills" role="group" aria-label="수익률 필터">
+      {([['RECENT','최신 등록'],['GAIN_TOP','상승 TOP 10'],['LOSS_TOP','하락 TOP 10']] as const).map(([key,label])=><button
+       key={key} type="button" className={rank===key?'active':''} aria-pressed={rank===key} onClick={()=>setRank(key)}>{label}</button>)}
+     </div>
+     <div className="r157-filter-controls">
+      <label>발견일 <select aria-label="발견 날짜" value={dayFilter} onChange={e=>setDayFilter(e.target.value)}>
+       <option value="ALL">전체 날짜</option>{availableDays.map(day=><option key={day} value={day}>{day}</option>)}
+      </select></label>
+      <input type="search" aria-label="종목명 또는 종목코드 검색" value={query} onChange={e=>setQuery(e.target.value)} placeholder="종목명 · 코드 검색"/>
+     </div>
+     <p className="r157-filter-count">{visible.length}종목 표시{rank!=='RECENT'?' · 확인된 검색일 이후 수익률만 순위에 포함':''} · 전체 저장 {items.length}종목</p>
+   </div>
+   {!visible.length?<div className="basket-empty">{items.length?'선택한 조건에 해당하는 종목이 없습니다. 필터를 바꿔 주세요.':'아직 담긴 종목이 없습니다. 검색 결과에서 담거나 AI 후보 만들기를 눌러 주세요.'}</div>:
    <div className="basket-list">{visible.map(it=>{const q=latestQuote.get(it.code),growth=pct(it);
      const pr=performance[perfId(it)];
      const signalChips=discoveredSignals(it.signals,pr?.signal_names);

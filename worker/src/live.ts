@@ -5,7 +5,7 @@
 export type LiveQuote = {
   code:string;name:string;received_at_utc:string;trade_date_kst:string;
   price:number;open:number;high:number;low:number;accumulated_volume:number;
-  change_from_eod_pct:number|null;day_range_position_pct:number|null;
+   change_from_eod_pct:number|null;change_from_prev_close_pct?:number|null;day_range_position_pct:number|null;
   eod_asof:string|null;eod_close:number|null;eod_signals:string;
   market:string;market_label:string;phase:string;
   reported_trade_date?:string|null;reported_trade_day_matches_today?:boolean|null;

@@ -6,7 +6,7 @@ type Quote={
  code:string;name:string;market:string;market_label:string;phase:string;
  received_at_utc:string;trade_date_kst:string;price:number;open:number;
  high:number;low:number;accumulated_volume:number;
- change_from_eod_pct:number|null;day_range_position_pct:number|null;
+ change_from_eod_pct:number|null;change_from_prev_close_pct?:number|null;day_range_position_pct:number|null;
  eod_asof:string|null;eod_close:number|null;eod_signals:string;
  reported_trade_day_matches_today?:boolean|null;
  exchange_tick_time_verified:boolean;
@@ -22,12 +22,18 @@ const timeKST=(s:string|null|undefined)=>{if(!s)return '—';const d=new Date(s)
 // R154_CLARITY: provenance-based reason, never an AI recommendation or ranking.
 const signalLabels=(raw:string|null|undefined)=>[...new Set((raw||'').split(',')
  .map(s=>s.trim()).filter(s=>/^[A-Za-z0-9_\-]{2,48}$/.test(s))
- .map(s=>s.replace(/^BB/i,'BLUE')))];
+ .map(s=>s.replace(/^(?:BLUE|BB)(?=\d)/i,'B')))];
 const firstDate=(stamp:string|null|undefined)=>{
  if(!stamp)return '기록 없음';
  const d=new Date(stamp);if(!Number.isFinite(d.valueOf()))return '기록 없음';
  return new Intl.DateTimeFormat('sv-SE',{timeZone:'Asia/Seoul',year:'numeric',month:'2-digit',day:'2-digit'}).format(d);
 };
+// R157_MOBILE_PRICE: label the source of each change; old snapshots only have signal-day change.
+const performance=(q:Quote)=>typeof q.change_from_prev_close_pct==='number'&&Number.isFinite(q.change_from_prev_close_pct)
+ ?{value:q.change_from_prev_close_pct,label:'전일 종가 대비'}
+ :{value:q.change_from_eod_pct,label:'신호일 종가 대비'};
+const percent=(n:number|null)=>n===null?'—':`${n>0?'+':''}${n.toFixed(2)}%`;
+const trend=(n:number|null)=>n===null?'':n>0?'blue-live-up':n<0?'blue-live-down':'';
 const phaseName:Record<string,string>={NXT_PRE:'프리마켓',NXT_MAIN:'메인마켓',
  NXT_AFTER:'애프터마켓',KRX_REGULAR:'정규장',KRX_AFTER:'애프터마켓',
  LEGACY_R14_UNVERIFIED:'이전 수집',UNKNOWN_PHASE:'시장 구간 미확인'};
@@ -62,7 +68,7 @@ export default function LiveMarket({active=true}: {active?:boolean}){
  const fresh=!error&&status==='RECENT_SNAPSHOT';
  return <section className="panel blue-live" aria-labelledby="blue-live-heading">
   <div className="blue-live-head">
-    <div><h2 id="blue-live-heading"><Activity size={19}/> KIS KRX·NXT 종목 추적 <small>R1.5.4 UI</small></h2>
+    <div><h2 id="blue-live-heading"><Activity size={19}/> KIS KRX·NXT 종목 추적 <small>R1.5.7 UI</small></h2>
     <p>08:00~20:00 KST · 거래소별 운영 구간에 5분 간격 수집 시도 · 휴장·지연 가능</p></div>
     <span className={'blue-live-indicator '+(fresh?'blue-live-fresh':'')}>
       {error?'연결 오류':fresh?'최근 수집':status==='CONNECTING'?'연결 중':
@@ -85,7 +91,7 @@ export default function LiveMarket({active=true}: {active?:boolean}){
   {!items.length&&<p className="blue-live-note">{status==='NOT_CONFIGURED'? 'R1.4.1 시세 저장소 준비 전입니다.':
    '선택한 시장에서 저장된 시세가 없습니다. 대상 종목이 거래되지 않거나 수집이 아직 시작되지 않았을 수 있습니다.'}</p>}
   {!!items.length&&<div className="blue-live-tablewrap"><table className="blue-live-table">
-   <thead><tr><th>종목·시장</th><th>마지막 조회가</th><th>전일 종가 대비</th><th>누적 거래량</th><th>조회 시각</th></tr></thead>
+   <thead><tr><th>종목·시장</th><th>마지막 조회가</th><th>가격 변화</th><th>누적 거래량</th><th>조회 시각</th></tr></thead>
    <tbody>{items.map(q=><tr key={q.market+'-'+q.code}>
     <td><strong>{q.name||q.code}</strong><small>{q.code} · {q.market_label} {phaseName[q.phase]||q.phase}</small>
       <small className="r154-track-dates">추적 최초 확인 {firstDate(q.tracking_started_at_utc)}{q.tracking_start_source==='RETAINED_HISTORY'?' (보관 기록 기준)':''}</small>
@@ -94,12 +100,30 @@ export default function LiveMarket({active=true}: {active?:boolean}){
         `${signalLabels(q.eod_signals).slice(0,4).join(' · ')} 기술 신호 발생`:'이전 검색 기록 기반 · 개별 신호 확인 불가'}</small>
       <small className="r154-track-perspective">관찰 관점: 신호 이후 가격·변동 및 추세 유지 확인</small></td>
     <td className="blue-live-number">{money(q.price)}</td>
-    <td className={'blue-live-number '+(q.change_from_eod_pct==null?'':q.change_from_eod_pct>0?'blue-live-up':q.change_from_eod_pct<0?'blue-live-down':'')}>
-      {q.change_from_eod_pct==null?'—':`${q.change_from_eod_pct>0?'+':''}${q.change_from_eod_pct.toFixed(2)}%`}</td>
+    <td className={'blue-live-number '+trend(performance(q).value)}>
+      {percent(performance(q).value)}<small>{performance(q).label}</small></td>
     <td className="blue-live-number">{money(q.accumulated_volume)}</td>
     <td className="blue-live-number">{timeKST(q.received_at_utc)}</td>
    </tr>)}</tbody>
   </table></div>}
+  {!!items.length&&<div className="r157-live-cards" aria-label="종목 추적 모바일 카드">
+   {items.map(q=><article className="r157-track-card" key={q.market+'-'+q.code}>
+    <div className="r157-track-main">
+     <div className="r157-track-identity"><strong>{q.name||q.code}</strong>
+      <small>{q.code} · {q.market_label} {phaseName[q.phase]||q.phase}</small></div>
+     <div className="r157-track-price"><strong>{money(q.price)}원</strong>
+      <b className={trend(performance(q).value)}>{percent(performance(q).value)}</b>
+      <small>{performance(q).label}</small></div>
+    </div>
+    <div className="r157-track-meta">신호일 {q.eod_asof||'미확인'} · 추적 최초 확인 {firstDate(q.tracking_started_at_utc)}
+      {q.tracking_start_source==='RETAINED_HISTORY'?' (보관 기록 기준)':''}</div>
+    <details className="r157-track-details"><summary>신호·추적 관점 보기</summary>
+     <p>관찰 근거: {signalLabels(q.eod_signals).length?signalLabels(q.eod_signals).slice(0,6).join(' · '):'원본 신호 확인 불가'}</p>
+     <p>관찰 관점: 신호 이후 가격·변동 및 추세 유지 확인</p>
+     <p>거래일 {q.reported_trade_day_matches_today===true?'일치':q.reported_trade_day_matches_today===false?'불일치':'미확인'} · 누적 거래량 {money(q.accumulated_volume)} · 수집 {timeKST(q.received_at_utc)}</p>
+    </details>
+   </article>)}
+  </div>}
   <p className="blue-live-disclaimer"><AlertTriangle size={14}/>
     연구 전용 · KRX/NXT 시세와 거래량은 시장별 별개이며 합산하지 않습니다.
     마지막 API 응답 시각은 실제 거래소 체결 시각이 아닙니다. 호가·예상체결가·초 단위 WebSocket은 별도입니다.</p>
