@@ -95,6 +95,12 @@ function App(){
   const [onlyPattern,setOnlyPattern]=useState(()=>{
     try{return localStorage.getItem('blue_r1599_only_pattern')==='true';}catch{return false;}
   });
+  // Historical pattern evidence saved in D1 has a hard support floor of 8.
+  const [patternSampleMin,setPatternSampleMin]=useState<number>(()=>{
+    try{const value=localStorage.getItem('blue_r15103_pattern_min_samples');
+      return value&&['8','10','15','20','30'].includes(value)?Number(value):8;}
+    catch{return 8;}
+  });
   const amountEok=amountChoice==='custom'?Number(customAmount):Number(amountChoice);
   const amountValid=Number.isInteger(amountEok)&&amountEok>=0&&amountEok<=50000;
   const highlightMin=patternThreshold==='off'?null:Number(patternThreshold);
@@ -102,9 +108,10 @@ function App(){
     try{localStorage.setItem('blue_r1599_amount_choice',amountChoice);
       localStorage.setItem('blue_r1599_custom_amount',customAmount);
       localStorage.setItem('blue_r1599_pattern_threshold',patternThreshold);
-      localStorage.setItem('blue_r1599_only_pattern',String(onlyPattern));}
+      localStorage.setItem('blue_r1599_only_pattern',String(onlyPattern));
+      localStorage.setItem('blue_r15103_pattern_min_samples',String(patternSampleMin));}
     catch{/* Browsers blocking storage can still use current choices. */}
-  },[amountChoice,customAmount,patternThreshold,onlyPattern]);
+  },[amountChoice,customAmount,patternThreshold,onlyPattern,patternSampleMin]);
   // R151_BASKET_TAB: keep both workspaces mounted, toggle only visibility.
   // R152_FOUR_TABS: separate search, live tracking, AI briefing and basket.
   const [activeView,setActiveView]=useState<'research'|'tracking'|'ai'|'basket'>('research');
@@ -233,7 +240,7 @@ function App(){
     }catch(e){setError(String(e));}
     finally{setRequestBusy(false);}
   }
-  async function search(p=1,scroll=true,selectedGc:GcKey[]=gcFields,selectedGcLogic:'any'|'all'=gcLogic,requestedDay?:string,patternOverride?:{enabled?:boolean;threshold?:number|null}){
+  async function search(p=1,scroll=true,selectedGc:GcKey[]=gcFields,selectedGcLogic:'any'|'all'=gcLogic,requestedDay?:string,patternOverride?:{enabled?:boolean;threshold?:number|null;minSamples?:number}){
     const serial=++searchVersion.current;
     if(!amountValid){setError('거래대금은 0~50,000억원 사이 정수로 입력하세요.');return;}
     setBusy(true);setError('');setStatus('');
@@ -250,7 +257,11 @@ function App(){
       // Results-panel controls apply immediately without waiting for React state updates.
       const effectiveOnlyPattern=patternOverride?.enabled??onlyPattern;
       const effectiveHighlightMin=patternOverride?.threshold!==undefined?patternOverride.threshold:highlightMin;
-      if(effectiveOnlyPattern&&effectiveHighlightMin!==null){u.searchParams.set('only_pattern','1');u.searchParams.set('min_pattern_up',String(effectiveHighlightMin));}
+      const effectiveMinSamples=patternOverride?.minSamples??patternSampleMin;
+      if(effectiveOnlyPattern&&effectiveHighlightMin!==null){
+        u.searchParams.set('only_pattern','1');u.searchParams.set('min_pattern_up',String(effectiveHighlightMin));
+        u.searchParams.set('min_pattern_n',String(effectiveMinSamples));
+      }
       const r=await fetch(u.toString(),{credentials:'include',cache:'no-store'});
       const d=await r.json();
       if(!r.ok)throw new Error(d.error||`검색 오류: ${r.status}`);
@@ -309,9 +320,9 @@ function App(){
 
   const extra=(r:Signal,k:string):unknown=>r.extras?.[k];
   const num=(r:Signal,k:string):number|null=>{const v=extra(r,k);if(v==null||v==='')return null;const n=Number(v);return Number.isFinite(n)?n:null;};
-  // The highlighted metric comes only from actual in-sample EOD pattern counts (n>=8).
+  // Only stored EOD pattern evidence is eligible: support n>=8, higher if selected.
   const patternUp=(r:Signal)=>{const p=num(r,'r159_pattern_up_10d');const n=num(r,'r159_pattern_n_10d');
-    return highlightMin!==null&&n!==null&&n>=8&&p!==null&&p>=highlightMin?p:null;};
+    return highlightMin!==null&&n!==null&&n>=patternSampleMin&&p!==null&&p>=highlightMin?p:null;};
   const patternDays=(r:Signal):string[]=>{
     const raw=extra(r,'r159_pattern_signal_days_10d_json');
     try{const v=typeof raw==='string'?JSON.parse(raw):raw;
@@ -481,7 +492,7 @@ function App(){
       </aside>
       <section className="content">
         <div className={'r151-basket-content '+(activeView==='basket'?'':'r151-hidden')}>
-          <SmartBasket quickAddRequest={basketRequest} onItemsChange={setBasketIds} active={activeView==='basket'} refreshKey={r1594BasketRefresh} patternHighlightMin={highlightMin}/>
+          <SmartBasket quickAddRequest={basketRequest} onItemsChange={setBasketIds} active={activeView==='basket'} refreshKey={r1594BasketRefresh} patternHighlightMin={highlightMin} patternSampleMin={patternSampleMin}/>
         </div>
         <div className={'r152-tracking-content '+(activeView==='tracking'?'':'r151-hidden')}>
           <LiveMarket active={activeView==='tracking'} refreshKey={r1594TrackingRefresh}/>
@@ -507,7 +518,7 @@ function App(){
         {scanInfo&&<div className="notice" role="status"><RefreshCw size={17}/><div>{scanInfo}{actionsUrl&&<div><a href={actionsUrl} target="_blank" rel="noreferrer">GitHub 실행 결과 확인</a></div>}</div></div>}
         <section className="panel result" ref={resultRef} id="results-panel">
           <div className="result-heading"><h2><BarChart3 size={18}/> 검색된 종목 <small>{total===null?'검색 전':total+'건'}</small></h2><span className="eod-pill"><Clock3 size={13}/> EOD</span></div>
-          <p className="r1599-active-filters">검색 조건 · 거래대금 {amountEok>0?amountEok.toLocaleString('ko-KR')+'억원 이상':'전체'} · 토마토 {highlightMin===null?'꺼짐':highlightMin+'% 이상 · 표본 8건 이상'}{onlyPattern&&highlightMin!==null?' · 해당 종목만 보기':''}</p>
+          <p className="r1599-active-filters">검색 조건 · 거래대금 {amountEok>0?amountEok.toLocaleString('ko-KR')+'억원 이상':'전체'} · 토마토 {highlightMin===null?'꺼짐':highlightMin+'% 이상 · 표본 '+patternSampleMin+'건 이상'}{onlyPattern&&highlightMin!==null?' · 해당 종목만 보기':''}</p>
           <p className="result-hint">검색일 확정 종가와 이후 D1 저장 시세·기간 고가를 구분해 표시합니다. 가격이 없으면 미수집으로 표시합니다.</p>
           {r1593Error&&<p className="r1593-comparison-status" role="status">가격 비교: {r1593Error}</p>}
           {r1595RequestNote&&<p className="r1595-request-status" role="status">{r1595RequestNote}</p>}
@@ -541,13 +552,21 @@ function App(){
                 <option value="off">강조 안 함</option><option value="60">60% 이상</option>
                 <option value="70">70% 이상 (기본)</option><option value="80">80% 이상</option><option value="90">90% 이상</option>
               </select>
+              <label htmlFor="r15103-min-samples">표본</label>
+              <select id="r15103-min-samples" aria-label="토마토 최소 표본 수" value={patternSampleMin}
+                onChange={e=>{const nextMin=Number(e.target.value);setPatternSampleMin(nextMin);
+                  if(onlyPattern&&total!==null)void search(1,false,gcFields,gcLogic,undefined,{minSamples:nextMin});
+                }}>
+                <option value={8}>8건 (기본)</option><option value={10}>10건</option>
+                <option value={15}>15건</option><option value={20}>20건</option><option value={30}>30건</option>
+              </select>
               <label className="r1599-hot-only"><input type="checkbox" checked={onlyPattern} disabled={patternThreshold==='off'}
                 onChange={e=>{
                   const checked=e.target.checked;setOnlyPattern(checked);
                   if(total!==null)void search(1,false,gcFields,gcLogic,undefined,{enabled:checked});
                 }}/> 해당 종목만 보기</label>
             </div>
-            <p className="gc-filter-note">GC는 당일 발생 기준 · 토마토는 10거래일 상승 관측 비율(표본 8건 이상)입니다. 토마토 기준은 목록·장바구니 공통이며 미래 수익을 보장하지 않습니다.</p>
+            <p className="gc-filter-note">GC는 당일 발생 기준 · 토마토는 10거래일 상승 관측 비율과 선택한 최소 표본 수를 함께 충족해야 합니다. 원본 근거는 8건 이상만 저장되며, 과거 성과는 미래 수익을 보장하지 않습니다.</p>
           </div>
           {rows.length>0&&<label className="result-quick-search"><Search size={16}/><span className="sr-only">현재 페이지 종목명 또는 코드 찾기</span><input type="search" value={localQuery} onChange={e=>setLocalQuery(e.target.value)} placeholder="현재 페이지에서 종목명 · 코드 찾기" aria-label="현재 페이지에서 종목명 또는 코드 찾기"/></label>}
           <div className="desktop-results tablewrap"><table><thead><tr><th>날짜</th><th>종목명 / 코드</th><th>신호</th><th>검색일 종가 / 최근 확인가 / 기간 최고가</th><th>RSI / GC</th><th>Slow(14,3,3) / GC</th><th>MACD / GC</th><th>돌파선 후보</th><th>상단 매물대</th></tr></thead><tbody>
@@ -626,7 +645,7 @@ function App(){
           day={selected.day} name={displayName(selected)}
           supplyPrice={num(selected,'supply_reference_price')}
           supplyGrade={supplyGrade(selected)}
-          lineCandidates={validLines(selected).map(l=>({signal:l.signal,price:l.price}))} highlightThreshold={highlightMin}/>
+          lineCandidates={validLines(selected).map(l=>({signal:l.signal,price:l.price}))} highlightThreshold={highlightMin} highlightSamplesMin={patternSampleMin}/>
         <h3 className="detail-section-title"><Activity size={17}/> 보조지표</h3>
         <div className="info-grid indicator-grid">
           <div><strong>RSI (14) / Signal (9)</strong><p className="indicator-value">{fmt(selected,'rsi')} <small>/ {fmt(selected,'rsi_signal')}</small></p><p className={flag(selected,'rsi_gc')?'positive':''}>{crossed(selected,'rsi_gc')} · 최근 GC {lastCross(selected,'rsi_last_gc')}</p></div>

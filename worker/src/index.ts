@@ -201,11 +201,14 @@ export default {
         }
         const onlyPattern=(u.searchParams.get('only_pattern')||'0').trim();
         const minPattern=(u.searchParams.get('min_pattern_up')||'70').trim();
-        if(!['0','1'].includes(onlyPattern)||!['60','70','80','90'].includes(minPattern))
+        const minPatternN=(u.searchParams.get('min_pattern_n')||'8').trim();
+        if(!['0','1'].includes(onlyPattern)||!['60','70','80','90'].includes(minPattern)||
+           !['8','10','15','20','30'].includes(minPatternN))
           return respond({error:'INVALID_PATTERN_FILTER'},400);
         if(onlyPattern==='1'){
           filters.push(`(CASE WHEN json_valid(extras_json) THEN
-            CAST(json_extract(extras_json,'$.r159_pattern_n_10d') AS INTEGER) ELSE 0 END)>=8`);
+            CAST(json_extract(extras_json,'$.r159_pattern_n_10d') AS INTEGER) ELSE 0 END)>=?`);
+          args.push(Number(minPatternN));
           filters.push(`(CASE WHEN json_valid(extras_json) THEN
             CAST(json_extract(extras_json,'$.r159_pattern_up_10d') AS REAL) ELSE -1 END)>=?`);
           args.push(Number(minPattern));

@@ -32,3 +32,7 @@
 .r15102-tomato-inline .r1599-hot-only input{flex-shrink:0}
 @media(max-width:790px){.r15102-unified-filter{padding:10px 9px}.r15102-unified-filter .gc-filter-chip{padding:5px 6px}.r15102-tomato-inline{gap:6px}.r15102-tomato-inline select{min-width:110px}}
 @media(max-width:370px){.r15102-tomato-inline .r1599-hot-only{font-size:10px}.r15102-tomato-inline select{min-width:94px}.r15102-unified-filter .gc-filter-chip{font-size:9px}}
+
+/* R1.5.10.3 minimum pattern samples selector */
+.r15102-tomato-inline #r15103-min-samples{min-width:98px;max-width:135px}
+@media(max-width:520px){.r15102-tomato-inline{column-gap:6px;row-gap:7px}.r15102-tomato-inline #r15103-min-samples{min-width:94px;max-width:120px}.r15102-tomato-inline .r1599-hot-only{font-size:10px}}

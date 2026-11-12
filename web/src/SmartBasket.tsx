@@ -86,23 +86,24 @@ function patternEvidence(data:SearchRow|AiPick):Pick<BasketItem,'patternUp10d'|'
  }catch{/* Old research snapshots did not contain occurrence dates. */}
  return {patternUp10d:p,patternN10d:n,patternLabel10d:label,...(days?{patternDays10d:days}:{})};
 }
-const hotPattern=(x:BasketItem,threshold:number|null)=>threshold!==null&&
+const hotPattern=(x:BasketItem,threshold:number|null,minSamples:number)=>threshold!==null&&
  typeof x.patternUp10d==='number'&&x.patternUp10d>=threshold&&
- typeof x.patternN10d==='number'&&x.patternN10d>=8;
+ typeof x.patternN10d==='number'&&x.patternN10d>=minSamples;
 function baselineReturn(item:BasketItem,quote:Quote|undefined):number|null{
  if(!quote||!Number.isFinite(quote.price)||quote.price<=0||quote.trade_date_kst<=item.day)return null;
  return (quote.price/item.baseline-1)*100;
 }
 // R151_QUICK_ADD: controlled one-tap requests from the search results list.
-export default function SmartBasket({quickAddRequest,onItemsChange,active=true,refreshKey=0,patternHighlightMin=70}: {
+export default function SmartBasket({quickAddRequest,onItemsChange,active=true,refreshKey=0,patternHighlightMin=70,patternSampleMin=8}: {
  quickAddRequest?:{serial:number;item:SearchRow}|null;
  onItemsChange?:(ids:string[])=>void;
  active?:boolean;
  refreshKey?:number;
  patternHighlightMin?:number|null;
+ patternSampleMin?:number;
 }){
  const [items,setItems]=useState<BasketItem[]>(readItems);
- const isHot=(x:BasketItem)=>hotPattern(x,patternHighlightMin);
+ const isHot=(x:BasketItem)=>hotPattern(x,patternHighlightMin,patternSampleMin);
  const evidenceAttempted=useRef<Set<string>>(new Set());
  const [filter,setFilter]=useState<'ALL'|'MANUAL'|'AI'|'PROTECTED'>('ALL');
  const [cleanupDays,setCleanupDays]=useState(60);
