@@ -1,0 +1,32 @@
+/* R159_TOMATO_EVIDENCE: research-sample highlighting, not a recommendation. */
+.r159-order-note{font-size:11px;color:#5a708a;margin:7px 0 10px;line-height:1.5}
+.r159-pattern-list{display:grid;gap:9px;margin:8px 0 13px;min-width:0}
+.r159-pattern-card{border:1px solid #d9e4f4;border-radius:11px;background:#fff;min-width:0;overflow:hidden}
+.r159-pattern-card>summary{list-style:none;cursor:pointer;display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;gap:9px;padding:11px}
+.r159-pattern-card>summary::-webkit-details-marker{display:none}
+.r159-pattern-left{min-width:0;display:grid;gap:4px}
+.r159-pattern-left>strong{font-size:12px;line-height:1.45;overflow-wrap:anywhere;color:#253e62}
+.r159-pattern-left>small{font-size:10px;color:#7187a2}
+.r159-pattern-score{display:grid;justify-items:end;gap:3px;white-space:nowrap}
+.r159-pattern-score small{color:#71829b;font-size:10px}
+.r159-pattern-score b{font-size:19px;color:#1958a2;font-variant-numeric:tabular-nums}
+.r159-pattern-card[open]>summary{border-bottom:1px solid #e5edf6}
+.r159-pattern-detail{padding:9px 11px 13px}
+.r159-returns{display:flex;flex-wrap:wrap;gap:8px 14px;font-size:11px;color:#506683}
+.r159-returns b{color:#274b79;font-variant-numeric:tabular-nums}
+.r159-data-note{font-size:10px;color:#7789a2;line-height:1.55;margin:9px 0}
+.r159-case-table{width:100%;overflow-x:auto}
+.r159-case-table table{border-collapse:collapse;width:100%;font-size:10px;min-width:335px}
+.r159-case-table th,.r159-case-table td{padding:8px 5px;text-align:left;white-space:nowrap;border-bottom:1px solid #e9edf5;font-variant-numeric:tabular-nums}
+.r159-case-table th{color:#697d9c}.r159-positive{color:#ce5056;font-weight:800}.r159-negative{color:#3368c2;font-weight:800}
+.r159-tomato{border:2px solid #ef7465;background:#fff6f3}
+.r159-tomato .r159-pattern-score b{color:#db5c4c}
+.blue-chart-panel.r159-tomato-stock{border:2px solid #ed7968;background:linear-gradient(180deg,#fff8f6,#fff 115px)}
+.r151-mobile-row.r159-tomato-stock{border:2px solid #e87968!important;border-radius:13px;background:#fff8f5}
+.desktop-results tr.r159-tomato-stock{outline:2px solid #e87968;outline-offset:-2px;background:#fff7f4}
+.r159-prob-chip{display:inline-flex;background:#fce2dc;border:1px solid #ef9889;color:#ba4334;font-size:10px;font-weight:800;padding:3px 7px;border-radius:7px}
+.r159-tech-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin:8px 0}
+.r159-tech-grid>div{display:flex;flex-direction:column;gap:6px;padding:11px;border:1px solid #dfe8f4;border-radius:10px;background:#f9fbff;min-width:0}
+.r159-tech-grid b{font-size:11px;color:#58708c}.r159-tech-grid strong{font-size:14px;color:#244f8e}
+.r159-tech-grid small{font-size:10px;color:#8c99ab}
+@media(max-width:520px){.r159-pattern-card>summary{padding:10px 8px;gap:6px}.r159-pattern-score b{font-size:17px}.r159-tech-grid{gap:6px}.r159-tech-grid>div{padding:9px}}
