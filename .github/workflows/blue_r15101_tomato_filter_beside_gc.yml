@@ -1,0 +1,237 @@
+name: BLUE R1.5.10.1 Tomato Filter Beside Golden Cross (MANUAL SAFE)
+
+on:
+  workflow_dispatch:
+    inputs:
+      apply_changes:
+        type: boolean
+        required: true
+        default: false
+        description: 'FALSE verifies UI only; TRUE commits two web files after all tests pass. No deployment.'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: blue-r15101-tomato-gc-layout
+  cancel-in-progress: false
+
+jobs:
+  validate_and_optional_commit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Guard exact BLUE repository and main branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REPOSITORY" = 'ehdud6728-bit/BLUE-Signal-Lab'
+          test "$GITHUB_REF" = 'refs/heads/main'
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Restore SHA256-pinned UI patch and apply strictly to two web files
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > "$RUNNER_TEMP/blue_r15101_ui_patch.py" <<'BLUE_R15101_PATCH'
+          #!/usr/bin/env python3
+          """BLUE R1.5.10.1: UI-only relocation of tomato filter next to Golden Cross.
+          Only edits web/src/main.tsx and web/src/r1599-pattern-filters.css.
+          No KIS, D1, server code, or search-algorithm change.
+          """
+          from pathlib import Path
+          
+          ROOT=Path.cwd()
+          MAIN=ROOT/'web/src/main.tsx'
+          CSS=ROOT/'web/src/r1599-pattern-filters.css'
+          text=MAIN.read_text(encoding='utf-8')
+          styles=CSS.read_text(encoding='utf-8')
+          
+          def replace_once(original, old, new, name):
+              count=original.count(old)
+              if count!=1:
+                  raise AssertionError('%s_EXPECTED_ONE_ANCHOR_ACTUAL_%d' % (name,count))
+              return original.replace(old,new,1)
+          
+          text=replace_once(text,
+              "async function search(p=1,scroll=true,selectedGc:GcKey[]=gcFields,selectedGcLogic:'any'|'all'=gcLogic,requestedDay?:string){",
+              "async function search(p=1,scroll=true,selectedGc:GcKey[]=gcFields,selectedGcLogic:'any'|'all'=gcLogic,requestedDay?:string,patternOverride?:{enabled?:boolean;threshold?:number|null}){",
+              'SEARCH_SIGNATURE')
+          text=replace_once(text,
+              "      if(onlyPattern&&highlightMin!==null){u.searchParams.set('only_pattern','1');u.searchParams.set('min_pattern_up',String(highlightMin));}",
+              """      // Results-panel controls apply immediately without waiting for React state updates.
+                const effectiveOnlyPattern=patternOverride?.enabled??onlyPattern;
+                const effectiveHighlightMin=patternOverride?.threshold!==undefined?patternOverride.threshold:highlightMin;
+                if(effectiveOnlyPattern&&effectiveHighlightMin!==null){u.searchParams.set('only_pattern','1');u.searchParams.set('min_pattern_up',String(effectiveHighlightMin));}""",
+              'SEARCH_PATTERN_QUERY')
+          
+          form_start='          <div className="r1599-filters" role="group" aria-label="거래대금 및 과거 다중 조건 패턴">'
+          form_end='          <button className="primary search-submit"'
+          if text.count(form_start)!=1 or text.count(form_end)!=1:
+              raise AssertionError('SEARCH_FORM_ANCHOR_MISSING_OR_AMBIGUOUS')
+          i1=text.index(form_start)
+          i2=text.index(form_end,i1)
+          old_form=text[i1:i2]
+          marker='            <label htmlFor="r1599-pattern">'
+          if old_form.count(marker)!=1:
+              raise AssertionError('TOMATO_IN_SEARCH_FORM_NOT_FOUND')
+          trade_only=old_form[:old_form.index(marker)].replace(
+              'aria-label="거래대금 및 과거 다중 조건 패턴"',
+              'aria-label="거래대금 검색 조건"') + \
+              '            <small>거래대금은 검색일 확정 일봉의 실제 원화 금액입니다. 금액이 저장되지 않은 과거 기록은 기준 검색에서 제외됩니다.</small>\n          </div>\n'
+          text=text[:i1]+trade_only+text[i2:]
+          
+          gc_start='          <div className="gc-filter-panel" aria-label="골든크로스 종목 필터">'
+          gc_end='          {rows.length>0&&<label className="result-quick-search"'
+          if text.count(gc_start)!=1 or text.count(gc_end)!=1:
+              raise AssertionError('GC_PANEL_ANCHORS_MISSING_OR_AMBIGUOUS')
+          j1=text.index(gc_start)
+          j2=text.index(gc_end,j1)
+          gc_block='\n'.join('  '+line for line in text[j1:j2].rstrip().splitlines())
+          new_group='''          <div className="r15101-analysis-filters" role="group" aria-label="검색 결과 골든크로스 및 과거 패턴 필터">
+          ''' + gc_block + '''
+                      <section className="r15101-tomato-panel" aria-label="다중 조건 과거 패턴 토마토색 기준">
+                        <div className="r15101-tomato-heading"><strong><ListFilter size={15}/> 토마토색 패턴 필터</strong><span>과거 다중 조건</span></div>
+                        <label htmlFor="r1599-pattern">10거래일 상승 비율</label>
+                        <select id="r1599-pattern" value={patternThreshold} onChange={e=>{
+                          const v=e.target.value as typeof patternThreshold;
+                          const nextMin=v==='off'?null:Number(v);
+                          setPatternThreshold(v);
+                          if(v==='off')setOnlyPattern(false);
+                          if(onlyPattern&&total!==null)void search(1,false,gcFields,gcLogic,undefined,{enabled:v!=='off',threshold:nextMin});
+                        }}>
+                          <option value="off">강조 안 함</option><option value="60">60% 이상</option>
+                          <option value="70">70% 이상 (기본)</option><option value="80">80% 이상</option><option value="90">90% 이상</option>
+                        </select>
+                        <label className="r1599-hot-only"><input type="checkbox" checked={onlyPattern} disabled={patternThreshold==='off'}
+                          onChange={e=>{
+                            const checked=e.target.checked;setOnlyPattern(checked);
+                            if(total!==null)void search(1,false,gcFields,gcLogic,undefined,{enabled:checked});
+                          }}/> 해당 종목만 보기</label>
+                        <small>표본 8건 이상 · 토마토색 테두리는 검색 목록과 장바구니에 함께 적용됩니다.</small>
+                        <small>탐색적 과거 관측이며 미래 상승 확률을 뜻하지 않습니다.</small>
+                      </section>
+                    </div>
+          '''
+          text=text[:j1]+new_group+text[j2:]
+          
+          css_add='''
+          /* R1.5.10.1: keep Tomato pattern controls beside Golden Cross in results. */
+          .r15101-analysis-filters{display:grid;grid-template-columns:minmax(0,1.35fr) minmax(0,1fr);gap:10px;align-items:stretch;margin:10px 0 14px}
+          .r15101-analysis-filters>*{min-width:0}
+          .r15101-analysis-filters .gc-filter-panel{min-width:0;margin:0;padding:12px;border-radius:12px;border:1px solid #dce5f5;background:#f7faff}
+          .r15101-analysis-filters .gc-filter-heading{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:5px;margin-bottom:10px;font-size:12px;color:#375372}
+          .r15101-analysis-filters .gc-filter-heading strong,.r15101-tomato-heading strong{display:inline-flex;align-items:center;gap:5px;font-size:12px;font-weight:800}
+          .r15101-analysis-filters .gc-filter-heading span,.r15101-tomato-heading span{color:#7b8ba2;font-size:10px;line-height:1.4}
+          .r15101-analysis-filters .gc-quick-actions{display:flex;gap:6px;flex-wrap:wrap;margin:0 0 8px}
+          .r15101-analysis-filters .gc-quick-actions button,.r15101-analysis-filters .gc-logic button{border:1px solid #d4dfef;background:white;color:#3b5e99;border-radius:7px;padding:6px 8px;font-size:11px;font-weight:750}
+          .r15101-analysis-filters .gc-quick-actions button.active,.r15101-analysis-filters .gc-logic button.active{background:#235cce;color:#fff;border-color:#235cce}
+          .r15101-analysis-filters .gc-filter-options{display:flex;gap:5px;flex-wrap:wrap;margin:0 0 8px}
+          .r15101-analysis-filters .gc-filter-chip{display:inline-flex;align-items:center;gap:4px;padding:5px 7px;border:1px solid #d8e4f3;background:#fff;color:#536f95;border-radius:7px;font-size:10px;line-height:1.35;font-weight:750}
+          .r15101-analysis-filters .gc-filter-chip.selected{border-color:#91b4f4;background:#eaf2ff;color:#245cc4}
+          .r15101-analysis-filters .gc-filter-chip input{width:13px;height:13px;flex-shrink:0;accent-color:#245fe2}
+          .r15101-analysis-filters .gc-logic{display:flex;gap:5px;align-items:center;flex-wrap:wrap;margin:0 0 8px;font-size:10px}
+          .r15101-analysis-filters .gc-filter-note{font-size:10px;line-height:1.5;color:#7486a3;margin:6px 0 0}
+          .r15101-tomato-panel{display:flex;flex-direction:column;align-items:stretch;gap:7px;border:1px solid #efc7c0;background:#fff9f8;border-radius:12px;padding:12px}
+          .r15101-tomato-heading{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:5px;margin-bottom:3px;color:#a54f44}
+          .r15101-tomato-panel>label:not(.r1599-hot-only){font-size:11px;color:#684c49;font-weight:800}
+          .r15101-tomato-panel select{width:100%;min-width:0;min-height:36px;border:1px solid #e6c2ba;border-radius:8px;padding:7px 9px;background:#fff;color:#463b43;font-size:12px;font-weight:700}
+          .r15101-tomato-panel .r1599-hot-only{display:flex;gap:7px;align-items:center;margin:2px 0;font-size:11px;color:#665453;font-weight:800}
+          .r15101-tomato-panel .r1599-hot-only input{flex-shrink:0}
+          .r15101-tomato-panel small{font-size:10px;color:#96756f;line-height:1.5}
+          @media(max-width:790px){.r15101-analysis-filters{grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:7px}.r15101-analysis-filters .gc-filter-panel,.r15101-tomato-panel{padding:9px 8px}.r15101-tomato-heading strong,.r15101-analysis-filters .gc-filter-heading strong{font-size:11px}.r15101-tomato-panel select{font-size:11px}.r15101-analysis-filters .gc-filter-heading span,.r15101-tomato-heading span{font-size:9px}}
+          @media(max-width:370px){.r15101-analysis-filters .gc-filter-chip{padding:4px 5px;font-size:9px}.r15101-analysis-filters .gc-quick-actions button{padding:5px;font-size:10px}.r15101-tomato-panel .r1599-hot-only{font-size:10px}}
+          '''
+          if 'R1.5.10.1:' in styles or 'className="r15101-tomato-panel"' in text and text.count('r15101-tomato-panel')>1:
+              raise AssertionError('ALREADY_PATCHED_OR_DUPLICATE')
+          styles=styles.rstrip()+'\n'+css_add
+          
+          expect={
+              'TOMATO_SELECT':(text.count('id="r1599-pattern"'),1),
+              'TOMATO_CHECKBOX':(text.count('해당 종목만 보기</label>'),1),
+              'TOMATO_PANEL':(text.count('className="r15101-tomato-panel"'),1),
+              'GC_PANEL':(text.count('className="gc-filter-panel"'),1),
+              'AMOUNT_SELECT':(text.count('id="r1599-amount"'),1),
+              'BASKET_SHARED':(text.count('patternHighlightMin={highlightMin}'),1),
+              'QUERY_OVERRIDE':(text.count('effectiveOnlyPattern'),2),
+          }
+          for tag,(found,expected) in expect.items():
+              if found!=expected:raise AssertionError('%s_EXPECTED_%s_GOT_%s' % (tag,expected,found))
+          if 'r1599-pattern' in text[text.index('className="r1599-filters"'):text.index('className="primary search-submit"')]:
+              raise AssertionError('TOMATO_NOT_RELOCATED')
+          if text.index('className="gc-filter-panel"')>text.index('className="r15101-tomato-panel"'):
+              raise AssertionError('TOMATO_NOT_BESIDE_GC')
+          MAIN.write_text(text,encoding='utf-8')
+          CSS.write_text(styles,encoding='utf-8')
+          print('BLUE_R15101_PATCH_OK: web UI only, source anchors verified, two files')
+          BLUE_R15101_PATCH
+          printf '%s  %s\n' '840e74f04c7e46abee5eec1a4d3447ba6e46fa18e0c608e6b0e11489bd60b47b' "$RUNNER_TEMP/blue_r15101_ui_patch.py" | sha256sum -c -
+          python -m py_compile "$RUNNER_TEMP/blue_r15101_ui_patch.py"
+          python "$RUNNER_TEMP/blue_r15101_ui_patch.py"
+      - name: Verify exact source scope and UI semantics
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PYVERIFY'
+          from pathlib import Path
+          import subprocess
+          changed=set(subprocess.check_output(['git','status','--porcelain','-uall'],text=True).splitlines())
+          names={x[3:] for x in changed if x.strip()}
+          expected={'web/src/main.tsx','web/src/r1599-pattern-filters.css'}
+          assert names==expected,('UNEXPECTED_CHANGED_FILES',sorted(names))
+          main=Path('web/src/main.tsx').read_text(encoding='utf-8')
+          css=Path('web/src/r1599-pattern-filters.css').read_text(encoding='utf-8')
+          assert main.count('className="r15101-analysis-filters"')==1
+          assert main.count('className="gc-filter-panel"')==1
+          assert main.count('className="r15101-tomato-panel"')==1
+          assert main.count('id="r1599-pattern"')==1
+          assert main.count('id="r1599-amount"')==1
+          assert main.count('patternHighlightMin={highlightMin}')==1
+          assert 'if(total!==null)void search(1,false,gcFields,gcLogic,undefined,{enabled:checked});' in main
+          assert 'R1.5.10.1:' in css
+          print('BLUE_R15101_SOURCE_SCOPE_AND_LAYOUT_PASS',sorted(names))
+          PYVERIFY
+          git diff --check
+          printf '\n/web/node_modules/\n/web/dist/\n*.tsbuildinfo\n__pycache__/\n*.pyc\n' >> .git/info/exclude
+      - name: Run full web TypeScript and Vite production build
+        shell: bash
+        working-directory: web
+        run: |
+          set -euo pipefail
+          npm install --no-package-lock --no-audit --no-fund
+          npm run build
+      - name: Post-build strict file scope and whitespace check
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PYFINAL'
+          import subprocess
+          names={x[3:] for x in subprocess.check_output(['git','status','--porcelain','-uall'],text=True).splitlines() if x.strip()}
+          expected={'web/src/main.tsx','web/src/r1599-pattern-filters.css'}
+          assert names==expected,('UNEXPECTED_BUILD_FILES',sorted(names))
+          print('BLUE_R15101_WEB_BUILD_AND_SCOPE_PASS')
+          PYFINAL
+          git diff --check
+      - name: Commit only after successful checks and explicit user selection
+        if: inputs.apply_changes
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add web/src/main.tsx web/src/r1599-pattern-filters.css
+          git diff --cached --check
+          git commit -m 'BLUE R1.5.10.1: relocate tomato filter beside golden cross'
+          git push origin HEAD:main
+      - name: State no-deployment boundary
+        shell: bash
+        run: |
+          echo 'BLUE_R15101_UI_TESTS_PASS'
+          echo 'Only web/src/main.tsx and web/src/r1599-pattern-filters.css may change.'
+          echo 'KIS Collector, D1 prices and trade amount backfill are not touched.'
+          echo 'Frontend Cloudflare deployment must be checked separately.'
