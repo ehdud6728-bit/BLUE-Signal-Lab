@@ -1,0 +1,133 @@
+name: BLUE R1.5.9.3 Tomato Positive Returns UI
+
+on:
+  workflow_dispatch:
+    inputs:
+      apply_changes:
+        description: "false = build/test only; true = commit verified UI color change"
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: write
+
+concurrency:
+  group: blue-r1593-tomato-returns
+  cancel-in-progress: false
+
+jobs:
+  verify_and_apply:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - name: Guard repository, branch and expected R1593 files
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REPOSITORY" = "ehdud6728-bit/BLUE-Signal-Lab"
+          test "$GITHUB_REF" = "refs/heads/main"
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Apply focused repeat-safe UI-only color edits
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY_PATCH'
+          from pathlib import Path
+
+          def replace_once(path, old, new, label):
+              f=Path(path)
+              s=f.read_text(encoding='utf-8')
+              if s.count(old)==1:
+                  f.write_text(s.replace(old,new,1),encoding='utf-8')
+                  print('PATCHED',label)
+              elif old not in s and new in s:
+                  print('ALREADY',label)
+              else:
+                  raise SystemExit('SOURCE_MISMATCH: '+label)
+
+          f='web/src/PriceCompareMini.tsx'
+          replace_once(f,
+              "const difference=(n:number|null|undefined,base:number|null|undefined)=>typeof n==='number'&&typeof base==='number'&&n>0&&base>0?` · 발견가 대비 ${n>=base?'+':''}${((n/base-1)*100).toFixed(2)}%`:'';",
+              """const difference=(n:number|null|undefined,base:number|null|undefined)=>{
+           if(typeof n!=='number'||typeof base!=='number'||!Number.isFinite(n)||!Number.isFinite(base)||n<=0||base<=0)return null;
+           const pct=(n/base-1)*100;
+           const tone=pct>0?'r1593-delta-up':pct<0?'r1593-delta-down':'r1593-delta-flat';
+           return <span className={'r1593-delta '+tone}> · 발견가 대비 {pct>0?'+':''}{pct.toFixed(2)}%</span>;
+          };""",'difference-render')
+          replace_once(f,
+              "<small>{hasLatest?`${data!.latest_day} · ${sourceName(data!.latest_source)}${data!.latest_market?' · '+(data!.latest_market==='J'?'KRX':data!.latest_market==='NX'?'NXT':data!.latest_market):''}${received(data!.latest_at)}${difference(data!.latest_price,baseline)}`:loading?'저장 시세 조회 중':'후속 시세 미수집'}</small></div>",
+              "<small>{hasLatest?<>{data!.latest_day} · {sourceName(data!.latest_source)}{data!.latest_market?' · '+(data!.latest_market==='J'?'KRX':data!.latest_market==='NX'?'NXT':data!.latest_market):''}{received(data!.latest_at)}{difference(data!.latest_price,baseline)}</>:loading?'저장 시세 조회 중':'후속 시세 미수집'}</small></div>",
+              'latest-price-delta')
+          replace_once(f,
+              "<small>{hasHigh?`${data!.period_high_day} · ${data!.high_complete?'저장된 전 기간 확인':'확인된 구간만'}${data!.high_coverage_to?' ('+data!.high_coverage_to+'까지)':''}${difference(data!.period_high,baseline)}`:loading?'고가 조회 중':'기간 고가 미확인'}</small></div>",
+              "<small>{hasHigh?<>{data!.period_high_day} · {data!.high_complete?'저장된 전 기간 확인':'확인된 구간만'}{data!.high_coverage_to?' ('+data!.high_coverage_to+'까지)':''}{difference(data!.period_high,baseline)}</>:loading?'고가 조회 중':'기간 고가 미확인'}</small></div>",
+              'period-high-delta')
+
+          css=Path('web/src/r1593-price-compare.css')
+          s=css.read_text(encoding='utf-8')
+          marker='/* R1593_TOMATO_RETURN_PCT: visual only; no price source changes. */'
+          if marker not in s:
+              s+='\n'+marker+'\n'+''.join([
+                  '.r1593-compare-line>small .r1593-delta{font-size:10px;font-weight:800;white-space:nowrap}\n',
+                  '.r1593-compare-line>small .r1593-delta-up{color:#c44b3c}\n',
+                  '.r1593-compare-line>small .r1593-delta-down{color:#296ab9}\n',
+                  '.r1593-compare-line>small .r1593-delta-flat{color:#718297}\n'
+              ])
+              css.write_text(s,encoding='utf-8')
+              print('PATCHED compare-css')
+          else: print('ALREADY compare-css')
+
+          replace_once('web/src/smart-basket.css',
+              '.basket-record-stats .basket-rise{color:#d14848}',
+              '.basket-record-stats .basket-rise{color:#c44b3c}',
+              'basket-positive-color')
+
+          jsx=Path(f).read_text(encoding='utf-8')
+          assert "pct>0?'r1593-delta-up':pct<0?'r1593-delta-down'" in jsx
+          assert jsx.count('difference(data!.')==2
+          assert '후속 시세 미수집' in jsx and '기간 고가 미확인' in jsx
+          assert '#c44b3c' in css.read_text(encoding='utf-8')
+          print('R1593_TOMATO_SOURCE_CHECK_OK')
+          PY_PATCH
+      - name: Verify only three approved UI files differ
+        shell: bash
+        run: |
+          set -euo pipefail
+          git diff --check
+          python - <<'PY_SCOPE'
+          import subprocess
+          changed=set(subprocess.check_output(['git','diff','--name-only'],text=True).splitlines())
+          allowed={'web/src/PriceCompareMini.tsx','web/src/r1593-price-compare.css','web/src/smart-basket.css'}
+          assert changed.issubset(allowed),f'Unexpected changed files: {sorted(changed-allowed)}'
+          print('R1593_TOMATO_SCOPE_OK',sorted(changed))
+          PY_SCOPE
+      - name: Build and TypeScript check web application
+        working-directory: web
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm install --no-package-lock --no-audit --no-fund
+          npm run build
+      - name: Commit verified UI colors to main only when approved
+        if: ${{ inputs.apply_changes }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -- web/src/PriceCompareMini.tsx web/src/r1593-price-compare.css web/src/smart-basket.css
+          if ! git diff --cached --quiet; then
+            git commit -m 'BLUE R1.5.9.3: tomato highlight for positive observed returns'
+            git push origin HEAD:main
+          else
+            echo 'R1593_TOMATO_ALREADY_APPLIED'
+          fi
+      - name: Display result and deployment boundary
+        run: |
+          echo 'R1593_TOMATO_TESTS_PASS'
+          echo 'Frontend UI must be deployed separately after commit.'
+          echo 'No API Worker, collector, market scan or basket data modified.'
