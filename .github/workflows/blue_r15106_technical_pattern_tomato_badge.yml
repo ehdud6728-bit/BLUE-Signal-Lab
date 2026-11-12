@@ -1,0 +1,217 @@
+name: BLUE R1.5.10.6 Technical Pattern Tomato Badge (MANUAL SAFE)
+
+on:
+  workflow_dispatch:
+    inputs:
+      apply_changes:
+        description: 'FALSE = patch test and build only; TRUE = commit approved three source files if all checks pass. No deployments or D1 writes.'
+        type: boolean
+        required: true
+        default: false
+
+permissions:
+  contents: write
+
+concurrency:
+  group: blue-r15106-pattern-evidence-badge
+  cancel-in-progress: false
+
+jobs:
+  test_and_optional_commit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Restrict BLUE repository and main branch
+        shell: bash
+        run: |
+          test "$GITHUB_REPOSITORY" = 'ehdud6728-bit/BLUE-Signal-Lab'
+          test "$GITHUB_REF" = 'refs/heads/main'
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Restore source patch with SHA256 verification
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > "$RUNNER_TEMP/blue_r15106_patch.py" <<'PY_R15106_PATCH'
+          #!/usr/bin/env python3
+          """R1.5.10.6: surface the actual historical technical-pattern evidence above EOD quotes.
+
+          No trading engine, market data, KIS API or database change. Applies to both
+          R1.5.10.4 and R1.5.10.5 source UI (min N=3 installer may be run independently).
+          """
+          from pathlib import Path
+          import argparse, subprocess
+
+          FILES=('web/src/main.tsx','web/src/SmartBasket.tsx','web/src/r1599-pattern-filters.css')
+
+          def replace_one(source:str,old:str,new:str,label:str)->str:
+              count=source.count(old)
+              if count!=1:raise RuntimeError(f'BLUE_R15106_ANCHOR_{label}_EXPECTED_1_GOT_{count}')
+              if old==new:raise RuntimeError(f'BLUE_R15106_NO_CHANGE_{label}')
+              print('BLUE_R15106_ANCHOR_PASS',label)
+              return source.replace(old,new,1)
+
+          def transform(original):
+              m,b,css=(original[name] for name in FILES)
+              m=replace_one(m,'  const patternDays=(r:Signal):string[]=>{', '''  // Single presentation predicate shared by outline, basket evidence and search filter.
+            // R1.5.10.4 /api/search chooses a SAME-DAY active historical setup at the
+            // user's selected minimum sample floor; never derive a rate from price moves.
+            const patternEvidenceBlock=(r:Signal)=>{
+              const up=patternUp(r);
+              if(up===null)return null;
+              const n=num(r,'r159_pattern_n_10d');
+              const raw=extra(r,'r159_pattern_label_10d');
+              const label=typeof raw==='string'?raw.trim().slice(0,150):'';
+              return <div className="r15106-search-pattern-evidence" role="note" aria-label="기술 패턴 과거 상승 관측 결과">
+                <span className="r1591-basket-evidence">과거 10일 상승 {up.toFixed(1)}% · 표본 {n}건 · 탐색적 결과</span>
+                {label&&<small className="r15106-matched-pattern" title={label}>일치 기술 패턴: {label}</small>}
+                {n!==null&&n<8&&<small className="r15106-small-sample">소표본 · 신뢰도 낮음 (미래 상승 확률 아님)</small>}
+              </div>;
+            };
+            const patternDays=(r:Signal):string[]=>{''','EVIDENCE_COMPONENT')
+              m=replace_one(m,
+                  "{patternUp(r)!==null&&<div><span className=\"r159-prob-chip\">과거 10일 상승 {patternUp(r)!.toFixed(1)}% · {num(r,'r159_pattern_n_10d')}건</span></div>}",
+                  '{patternEvidenceBlock(r)}','DESKTOP_BADGE')
+              m=replace_one(m,
+                  "{patternUp(r)!==null&&<span className=\"r159-prob-chip\">과거 10일 상승 {patternUp(r)!.toFixed(1)}% · {num(r,'r159_pattern_n_10d')}건</span>}",
+                  '','MOBILE_REMOVE_BOTTOM_BADGE')
+              key='<div className="stock-top"><div className="stock-identity"><strong>{displayName(r)}</strong><span>{r.code} <span className="stock-dot">·</span> {r.day}</span></div><div className="stock-price"><b>{money(r.close_price)}<small>원</small></b><span>종가</span></div><ChevronRight size={19} className="stock-chevron"/></div>'
+              m=replace_one(m,key,key+'\n              {patternEvidenceBlock(r)}','MOBILE_BADGE_ABOVE_QUOTE')
+              m=replace_one(m,
+                  'if(onlyPattern&&total!==null)void search(1,false,gcFields,gcLogic,undefined,{minSamples:nextMin});',
+                  'if(total!==null)void search(1,false,gcFields,gcLogic,undefined,{minSamples:nextMin});',
+                  'SAMPLE_CHANGE_REFRESHES_LIST_EVEN_WITHOUT_ONLY_MODE')
+              b=replace_one(b,
+                  '      {Array.isArray(it.patternDays10d)&&it.patternDays10d.length>0&&',
+                  '''      {isHot(it)&&it.patternLabel10d?.trim()&&<div className="r15106-basket-pattern" title={it.patternLabel10d}>
+                  일치 기술 패턴: {it.patternLabel10d}
+                </div>}
+                {isHot(it)&&typeof it.patternN10d==='number'&&it.patternN10d<8&&
+                  <div className="r15106-small-sample">소표본 · 신뢰도 낮음 (미래 상승 확률 아님)</div>}
+                {Array.isArray(it.patternDays10d)&&it.patternDays10d.length>0&&''',
+                  'BASKET_SAME_PATTERN_LABEL')
+              css_add='''
+
+          /* R1.5.10.6: the basket-style pattern evidence belongs inside the stock card. */
+          .r15106-search-pattern-evidence{display:flex;flex-direction:column;align-items:flex-start;gap:4px;max-width:100%;margin:7px 0 9px;min-width:0}
+          .r15106-search-pattern-evidence .r1591-basket-evidence{margin:0;max-width:100%;white-space:normal;overflow-wrap:anywhere}
+          .r15106-matched-pattern,.r15106-basket-pattern{display:block;max-width:100%;font-size:10px;font-weight:650;line-height:1.5;color:#ad6056;overflow-wrap:anywhere}
+          .r15106-small-sample{font-size:10px;color:#a66328;line-height:1.45}
+          .r151-mobile-row.r159-tomato-stock>.stock-card{border:2px solid #e87968!important;background:linear-gradient(180deg,#fff8f6,#fff 92px)!important}
+          .desktop-results tr.r159-tomato-stock>td:first-child .r15106-search-pattern-evidence{margin:5px 0}
+          @media(max-width:520px){.r15106-search-pattern-evidence{margin:8px 0}.r15106-search-pattern-evidence .r1591-basket-evidence{font-size:10px;padding:6px 8px}.r15106-matched-pattern,.r15106-basket-pattern{font-size:10px}}
+          '''
+              css=replace_one(css,'/* R1.5.10.4: outline stock card, not the separate basket-action rail. */',
+                              '/* R1.5.10.4: outline stock card, not the separate basket-action rail. */',
+                              'CSS_ANCHOR') if False else css
+              if css.count('/* R1.5.10.4: outline stock card, not the separate basket-action rail. */')!=1 or 'R1.5.10.6:' in css:
+                  raise RuntimeError('BLUE_R15106_BAD_CSS_BASE')
+              css=css.rstrip('\n')+css_add
+              outputs={FILES[0]:m,FILES[1]:b,FILES[2]:css}
+              assert 'r159_pattern_label_10d' in outputs[FILES[0]]
+              assert 'patternEvidenceBlock(r)' in outputs[FILES[0]]
+              assert '.r15106-search-pattern-evidence' in outputs[FILES[2]]
+              assert 'r15106-basket-pattern' in outputs[FILES[1]]
+              assert m.count('patternEvidenceBlock(r)')==2, 'Desktop and mobile must use the same evidence block'
+              assert m.count('r159-tomato-stock')>=2
+              print('BLUE_R15106_STATIC_ASSERTIONS_PASS')
+              return outputs
+
+          def main():
+              a=argparse.ArgumentParser();a.add_argument('--check',action='store_true');args=a.parse_args()
+              originals={p:Path(p).read_text(encoding='utf-8') for p in FILES}
+              outputs=transform(originals)
+              if args.check:
+                  assert all(outputs[p]!=originals[p] for p in FILES)
+                  print('BLUE_R15106_REAL_SOURCE_PREFLIGHT_PASS',len(outputs),'source files, no writes')
+                  return
+              for p in FILES:Path(p).write_text(outputs[p],encoding='utf-8')
+              changed=subprocess.check_output(['git','diff','--name-only'],text=True).splitlines()
+              assert set(changed)==set(FILES),(changed,FILES)
+              print('BLUE_R15106_SOURCE_PATCHED',changed)
+
+          if __name__=='__main__':main()
+          PY_R15106_PATCH
+          python - <<'PY_R15106_SHA'
+          import hashlib,os
+          from pathlib import Path
+          p=Path(os.environ['RUNNER_TEMP'])/'blue_r15106_patch.py'
+          assert hashlib.sha256(p.read_bytes()).hexdigest()=='10f89199e882de950b5d65895df4ab616b3bae2ac36fec5797e3ab8b845eda4c'
+          print('BLUE_R15106_PATCH_SHA256_PASS')
+          PY_R15106_SHA
+          python -m py_compile "$RUNNER_TEMP/blue_r15106_patch.py"
+      - name: Preflight anchor checks on REAL source without writing
+        shell: bash
+        run: |
+          python "$RUNNER_TEMP/blue_r15106_patch.py" --check
+          git diff --quiet
+      - name: Apply compact pattern badge changes only
+        shell: bash
+        run: |
+          set -euo pipefail
+          printf '\n__pycache__/\n*.pyc\n*.tsbuildinfo\ndist/\nnode_modules/\n' >> .git/info/exclude
+          python "$RUNNER_TEMP/blue_r15106_patch.py"
+          git diff --check
+      - name: Verify true source evidence path and card placement
+        shell: bash
+        run: |
+          python - <<'PY_R15106_STATIC'
+          from pathlib import Path
+          m=Path('web/src/main.tsx').read_text()
+          b=Path('web/src/SmartBasket.tsx').read_text()
+          c=Path('web/src/r1599-pattern-filters.css').read_text()
+          assert m.count('{patternEvidenceBlock(r)}')==2, 'Desktop/mobile cards must share evidence'
+          assert 'const up=patternUp(r)' in m and 'r159_pattern_label_10d' in m
+          assert '과거 10일 상승 {up.toFixed(1)}% · 표본 {n}건 · 탐색적 결과' in m
+          assert '일치 기술 패턴: {label}' in m
+          assert '일치 기술 패턴: {it.patternLabel10d}' in b
+          assert 'if(total!==null)void search(1,false,gcFields,gcLogic,undefined,{minSamples:nextMin});' in m
+          assert 'r151-mobile-row.r159-tomato-stock>.stock-card' in c
+          assert 'min_pattern_n' in m, 'Only authentic stored pattern stats'
+          print('BLUE_R15106_SEARCH_AND_BASKET_EVIDENCE_PASS')
+          PY_R15106_STATIC
+      - name: Existing stock/price regression tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --test tests/test_r1593_compare.mjs
+      - name: React TypeScript and production Vite build
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd web
+          npm install --no-audit --no-fund --package-lock=false
+          npm run build
+          echo BLUE_R15106_WEB_BUILD_PASS
+      - name: Strict three-file final scope check
+        shell: bash
+        run: |
+          python - <<'PY_R15106_SCOPE'
+          import subprocess
+          expected={'web/src/main.tsx','web/src/SmartBasket.tsx','web/src/r1599-pattern-filters.css'}
+          actual={row[3:] for row in subprocess.check_output(['git','status','--porcelain','-uall'],text=True).splitlines() if row.strip()}
+          assert actual==expected,(sorted(actual),sorted(expected))
+          print('BLUE_R15106_FINAL_SCOPE_PASS')
+          PY_R15106_SCOPE
+          git diff --check
+      - name: Commit reviewed source only when approved
+        if: ${{ inputs.apply_changes }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add web/src/main.tsx web/src/SmartBasket.tsx web/src/r1599-pattern-filters.css
+          git commit -m 'BLUE R1.5.10.6: show basket-style technical pattern evidence on search cards'
+          git push origin HEAD:main
+          echo BLUE_R15106_MAIN_COMMITTED
+      - name: Clearly state boundary
+        shell: bash
+        run: |
+          echo BLUE_R15106_ALL_CHECKS_PASS
+          echo 'No API, KIS, Collector or D1 changes; website must be deployed separately.'
