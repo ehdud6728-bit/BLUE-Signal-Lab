@@ -3,7 +3,9 @@
  * Stored in this browser only until user exports/imports a backup.
  */
 import {useEffect,useRef,useState} from 'react';
-import {Bot,Download,Upload,Trash2,RefreshCw,AlertCircle,ShoppingBasket,Bookmark,BookmarkCheck} from 'lucide-react';
+import {Bot,Download,Upload,Trash2,RefreshCw,AlertCircle,ShoppingBasket,Bookmark,BookmarkCheck,ChevronDown} from 'lucide-react';
+import {groupBasketRecords} from './basket-grouping';
+import './r1595-group-price.css';
 import './smart-basket.css';
 import './r158-long-watch.css';
 import {comparisonKey,fetchCompared,sourceName,type PriceCompare} from './price-compare';
@@ -97,6 +99,8 @@ export default function SmartBasket({quickAddRequest,onItemsChange,active=true,r
  const [lastRemoved,setLastRemoved]=useState<BasketItem[]>([]);
  // R157_BASKET_FILTERS: local display filters; persisted basket order/data never changed.
  const [rank,setRank]=useState<'RECENT'|'GAIN_TOP'|'LOSS_TOP'>('RECENT');
+ const [groupSimilar,setGroupSimilar]=useState(true);
+ const [expandedCodes,setExpandedCodes]=useState<string[]>([]);
  const [dayFilter,setDayFilter]=useState('ALL');
  const [query,setQuery]=useState('');
  const [ai,setAi]=useState<AiResult|null>(null);
@@ -116,7 +120,7 @@ export default function SmartBasket({quickAddRequest,onItemsChange,active=true,r
  useEffect(()=>{
   if(!active||!idsKey)return;const ctrl=new AbortController();let loading=false;
   const load=async()=>{if(loading||document.visibilityState==='hidden')return;loading=true;
-   try{const result=await fetchCompared(items,ctrl.signal);if(!ctrl.signal.aborted){setR1593Prices(result);setR1593Error('');}}
+   try{const result=await fetchCompared(items,ctrl.signal,partial=>{if(!ctrl.signal.aborted)setR1593Prices(prev=>({...prev,...partial}));});if(!ctrl.signal.aborted){setR1593Prices(prev=>({...prev,...result}));setR1593Error('');}}
    catch(e){if(!ctrl.signal.aborted)setR1593Error(e instanceof Error?e.message:'최근 시세 확인 실패');}
    finally{loading=false;}
   };
@@ -331,6 +335,7 @@ export default function SmartBasket({quickAddRequest,onItemsChange,active=true,r
   return {n:list.length,avg:list.length&&days.size===1?list.reduce((s,x)=>s+(pct(x)??0),0)/list.length:null,
    comparable:days.size<=1};
  };
+ const displayGroups=groupBasketRecords(visible,groupSimilar);
  const manual=summary('MANUAL'),machine=summary('AI');
  const comparable=manual.n>0&&machine.n>0&&manual.comparable&&machine.comparable&&
    new Set(items.filter(x=>pct(x)!==null).map(x=>x.day)).size===1;
@@ -381,7 +386,13 @@ export default function SmartBasket({quickAddRequest,onItemsChange,active=true,r
       </select></label>
       <input type="search" aria-label="종목명 또는 종목코드 검색" value={query} onChange={e=>setQuery(e.target.value)} placeholder="종목명 · 코드 검색"/>
      </div>
-     <p className="r157-filter-count">{visible.length}종목 표시{rank!=='RECENT'?' · 확인된 검색일 이후 수익률만 순위에 포함':''} · 일반 {normalCount} · 장기 {lockedCount}건</p>
+     <p className="r157-filter-count">{visible.length}개 발견 기록 · {new Set(visible.map(x=>x.code)).size}종목{rank!=='RECENT'?' · 확인된 후속 수익률 기준':''} · 일반 {normalCount} · 장기 {lockedCount}건</p>
+     <div className="r1595-display-controls"><span>같은 종목의 날짜별 발견가·수익률은 별도 보존</span>
+       <div className="r1595-view-modes" role="group" aria-label="장바구니 동일 종목 묶음 방식">
+         <button type="button" aria-pressed={groupSimilar} onClick={()=>setGroupSimilar(true)}>종목별 묶기</button>
+         <button type="button" aria-pressed={!groupSimilar} onClick={()=>setGroupSimilar(false)}>개별 기록</button>
+       </div>
+     </div>
      <details className="r158-cleanup">
       <summary>오래된 일반 종목 정리 <span>{expired.length}건 대상</span></summary>
       <div className="r158-cleanup-controls"><label>발견일 기준
@@ -395,7 +406,17 @@ export default function SmartBasket({quickAddRequest,onItemsChange,active=true,r
      </details>
    </div>
    {!visible.length?<div className="basket-empty">{items.length?'선택한 조건에 해당하는 종목이 없습니다. 필터를 바꿔 주세요.':'아직 담긴 종목이 없습니다. 검색 결과에서 담거나 AI 후보 만들기를 눌러 주세요.'}</div>:
-   <div className="basket-list">{visible.map(it=>{const q=latestQuote.get(it.code),growth=pct(it);
+   <div className="basket-list">{displayGroups.map(group=><section key={group.key}
+     className={'r1595-symbol-group'+(group.records.length>1&&groupSimilar?' is-multiple':'')}>
+     {groupSimilar&&group.records.length>1&&<button type="button"
+       className={'r1595-group-header'+(group.records.some(hotPattern)?' hot':'')}
+       aria-expanded={expandedCodes.includes(group.code)}
+       onClick={()=>setExpandedCodes(prev=>prev.includes(group.code)?prev.filter(c=>c!==group.code):[...prev,group.code])}>
+       <span><strong>{group.name} ({group.code}) · {group.records.length}개 발견 기록</strong>
+         <small>{group.records.map(it=>it.day).join(' · ')} · 펼쳐서 개별 수익률 확인</small></span>
+       <ChevronDown size={17}/></button>}
+     {(!groupSimilar||group.records.length===1||expandedCodes.includes(group.code))&&
+       <div className="r1595-group-records">{group.records.map(it=>{const q=latestQuote.get(it.code),growth=pct(it);
      const pr=performance[perfId(it)];
      const signalChips=discoveredSignals(it.signals,pr?.signal_names);
      const quoteIsLater=!!(pr?.quote_day&&pr.quote_day>it.day&&pr.quote_day>=(pr.recent_day||''));
@@ -452,7 +473,7 @@ export default function SmartBasket({quickAddRequest,onItemsChange,active=true,r
        {it.source==='AI'&&<p className="basket-insight">AI 관찰 근거: {it.reason||'미기재'} · 위험: {it.risk||'미기재'}</p>}
        <label className="basket-memo">관찰 메모<input value={it.memo} maxLength={240} placeholder="추세선·거래량·다음 확인 항목" onChange={e=>setItems(old=>old.map(x=>x.id===it.id?{...x,memo:e.target.value}:x))}/></label>
      </details>
-    </article>})}</div>}
+    </article>})}</div>}</section>)}</div>}
   <p className="basket-foot">장기 관찰 보호는 이 브라우저에서의 목록 정리·삭제 방지 기능입니다. 캐시 삭제·기기 변경까지 보장하지 않으므로 JSON 백업을 보관하세요. R1.5.3 검색일 다음 거래일부터의 KIS 원주가 일봉 고가를 사용합니다. 액면분할·합병에 따른 가격 보정은 하지 않아 수익률 왜곡 가능성이 있습니다. 수집 토큰 상태·장외시간에 따라 2분 안에 값이 표시되지 않을 수 있습니다. 장중 확인가는 확정 종가와 다릅니다. 연구 전용 · 등록 기준은 실제 체결가가 아닌 과거 확정 종가입니다. 성과는 후속 KRX 수집 스냅샷이 있을 때만 참고 비교하며, 최신 체결 확인·수수료·세금·배당·수정주가를 반영하지 않습니다. AI 후보는 검증된 투자 우위가 아닙니다. 장바구니는 현재 브라우저에만 저장됩니다.</p>
    <details className="r152-data-management"><summary>데이터 관리 · 기기 변경 시 백업</summary>
      <div className="basket-actions"><button type="button" onClick={saveBackup}><Download size={15}/> 백업 저장</button>

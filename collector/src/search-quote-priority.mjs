@@ -18,10 +18,11 @@ export async function collectSearchPriority(env,now=new Date(),deps={}){
   .bind(now.getTime()+55000,now.getTime()).run();
  if(lock.meta?.changes!==1)return {status:'BUSY'};
  try{
-  const since=dateISO(now.getTime()-2*3600000);
+  // Keep a bounded overnight/weekend backlog until the next eligible KIS session.
+  const since=dateISO(now.getTime()-7*86400000);
   const due=await db.prepare(`SELECT code,base_day,baseline_close FROM blue_search_quote_priority_r1594
     WHERE next_due_utc<=? AND requested_at_utc>=?
-    ORDER BY next_due_utc ASC,requested_at_utc DESC LIMIT 4`)
+    ORDER BY CASE status WHEN 'QUEUED' THEN 0 WHEN 'RETRY' THEN 1 ELSE 2 END,requested_at_utc DESC,next_due_utc ASC LIMIT 4`)
     .bind(stamp,since).all();
   if(!due.results.length)return {status:'IDLE'};
   let token=null;

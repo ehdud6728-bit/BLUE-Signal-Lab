@@ -23,19 +23,38 @@ export function sourceName(s:string|null|undefined):string {
   default:return '저장된 시세';
  }
 }
-export async function fetchCompared(items:{code:string;day:string}[],signal?:AbortSignal):Promise<Record<string,PriceCompare>>{
+export async function fetchCompared(items:{code:string;day:string}[],signal?:AbortSignal,
+ onBatch?:(partial:Record<string,PriceCompare>)=>void):Promise<Record<string,PriceCompare>>{
  const unique=[...new Map(items.filter(x=>/^\d{6}$/.test(x.code)&&/^20\d{2}-\d{2}-\d{2}$/.test(x.day))
   .map(x=>[comparisonKey(x),x] as const)).values()];
  const all:Record<string,PriceCompare>={};
- for(let i=0;i<unique.length;i+=20){
+ let failed=0,firstError='';
+ // Eight date-pairs per request avoid large D1 work per Worker invocation.
+ // Each successfully completed chunk is rendered before the remaining requests finish.
+ for(let i=0;i<unique.length;i+=8){
   if(signal?.aborted)throw new Error('CANCELLED');
   const u=new URL(API+'/api/prices/compare');
-  u.searchParams.set('items',unique.slice(i,i+20).map(comparisonKey).join(','));
-  const r=await fetch(u.toString(),{credentials:'include',cache:'no-store',signal});
-  if(!r.ok)throw new Error(r.status===401?'Cloudflare Access 로그인이 필요합니다.':
-   r.status===404?'시세 비교 API 배포가 필요합니다.':`시세 비교 API ${r.status}`);
-  const data=await r.json() as {items?:PriceCompare[]};
-  for(const item of data.items||[])if(item&&/^\d{6}$/.test(item.code))all[comparisonKey(item)]=item;
+  u.searchParams.set('items',unique.slice(i,i+8).map(comparisonKey).join(','));
+  try{
+   const r=await fetch(u.toString(),{credentials:'include',cache:'no-store',signal});
+   if(!r.ok){
+    const err=r.status===401?'Cloudflare Access 로그인이 필요합니다.':
+     r.status===404?'시세 비교 API 배포가 필요합니다.':`시세 비교 API ${r.status}`;
+    if(r.status===401||r.status===404)throw new Error(err);
+    throw new Error(err);
+   }
+   const data=await r.json() as {items?:PriceCompare[]};
+   const partial:Record<string,PriceCompare>={};
+   for(const item of data.items||[]){if(item&&/^\d{6}$/.test(item.code)){
+    const key=comparisonKey(item);partial[key]=item;all[key]=item;
+   }}
+   if(Object.keys(partial).length)onBatch?.(partial);
+  }catch(e){
+   if(signal?.aborted)throw e;
+   failed++;if(!firstError)firstError=e instanceof Error?e.message:String(e);
+   if(firstError.includes('Access 로그인')||firstError.includes('API 배포'))throw e;
+  }
  }
+ if(failed)throw new Error(`시세 ${failed}묶음 조회 실패 · 확인된 자료는 유지 (${firstError})`);
  return all;
 }

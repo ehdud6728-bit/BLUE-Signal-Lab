@@ -4,6 +4,7 @@ import SmartBasket from './SmartBasket';
 import PriceCompareMini from './PriceCompareMini';
 import {requestSearchPriority} from './search-priority';
 import {comparisonKey,fetchCompared,type PriceCompare} from './price-compare';
+import './r1595-group-price.css';
 import AiWidget from './AiWidget';
 import React, {useEffect, useRef, useState} from 'react';
 import {createRoot} from 'react-dom/client';
@@ -107,6 +108,10 @@ function App(){
   const [r1594BasketRefresh,setR1594BasketRefresh]=useState(0);
   const [r1594AiRefresh,setR1594AiRefresh]=useState(0);
   const [r1594QueueStatus,setR1594QueueStatus]=useState('');
+  const [r1595Requesting,setR1595Requesting]=useState('');
+  const [r1595RequestNote,setR1595RequestNote]=useState('');
+  const r1595Timers=useRef<Map<string,number>>(new Map());
+  useEffect(()=>()=>{for(const timer of r1595Timers.current.values())window.clearInterval(timer);r1595Timers.current.clear();},[]);
   // R1593: browser reads only validated D1 snapshots; no KIS call on search.
   const [r1593Prices,setR1593Prices]=useState<Record<string,PriceCompare>>({});
   const [r1593Busy,setR1593Busy]=useState(false);
@@ -114,7 +119,7 @@ function App(){
   useEffect(()=>{
     if(activeView!=='research'||!rows.length)return;
     const ctrl=new AbortController();setR1593Busy(true);setR1593Error('');
-    void fetchCompared(rows,ctrl.signal).then(result=>{if(!ctrl.signal.aborted)setR1593Prices(result);})
+    void fetchCompared(rows,ctrl.signal,partial=>{if(!ctrl.signal.aborted)setR1593Prices(prev=>({...prev,...partial}));}).then(result=>{if(!ctrl.signal.aborted)setR1593Prices(prev=>({...prev,...result}));})
       .catch(e=>{if(!ctrl.signal.aborted)setR1593Error(e instanceof Error?e.message:'최근 시세 확인 실패');})
       .finally(()=>{if(!ctrl.signal.aborted)setR1593Busy(false);});
     return ()=>ctrl.abort();
@@ -330,6 +335,32 @@ function App(){
     else if(activeView==='basket')setR1594BasketRefresh(v=>v+1);
     else setR1594AiRefresh(v=>v+1);
   };
+  // R1595: manually request a missing verified symbol, then poll only that pair.
+  // The protected API validates real discovery evidence; no KIS call from this browser.
+  async function requestMissingQuote(r:Signal){
+    const key=comparisonKey(r);
+    if(r1595Requesting||r1595Timers.current.size>=3)return;
+    if(!/^\d{6}$/.test(r.code)||!r.close_price||r.close_price<=0)return;
+    setR1595Requesting(key);setR1595RequestNote('');
+    try{
+      const result=await requestSearchPriority([{code:r.code,day:r.day}]);
+      if(result.not_verified){setR1595RequestNote(`${r.name||r.code}: 검증된 발견 기록이 없어 요청할 수 없습니다.`);return;}
+      setR1595RequestNote(`${r.name||r.code}: ${result.queued?'수집 요청 완료':result.throttled?'최근 요청이 있어 대기 중':'수집 접수 확인 필요'} · 장중 거래시간에 수집됩니다.`);
+      if(r1595Timers.current.has(key))return;
+      let attempts=0,inFlight=false;
+      const timer=window.setInterval(()=>{
+        if(inFlight||document.visibilityState==='hidden')return;
+        if(++attempts>12){window.clearInterval(timer);r1595Timers.current.delete(key);return;}
+        inFlight=true;
+        void fetchCompared([{code:r.code,day:r.day}]).then(data=>{
+          setR1593Prices(prev=>({...prev,...data}));
+          if(data[key]?.latest_price){window.clearInterval(timer);r1595Timers.current.delete(key);}
+        }).catch(()=>{}).finally(()=>{inFlight=false;});
+      },12000);
+      r1595Timers.current.set(key,timer);
+    }catch(e){setR1595RequestNote(e instanceof Error?e.message:'시세 수집 요청 오류');}
+    finally{setR1595Requesting('');}
+  }
   const openDetail=(r:Signal)=>setSelected(r);
   const closeDetail=()=>setSelected(null);
   useEffect(()=>{
@@ -420,6 +451,7 @@ function App(){
           <div className="result-heading"><h2><BarChart3 size={18}/> 검색된 종목 <small>{total===null?'검색 전':total+'건'}</small></h2><span className="eod-pill"><Clock3 size={13}/> EOD</span></div>
           <p className="result-hint">검색일 확정 종가와 이후 D1 저장 시세·기간 고가를 구분해 표시합니다. 가격이 없으면 미수집으로 표시합니다.</p>
           {r1593Error&&<p className="r1593-comparison-status" role="status">가격 비교: {r1593Error}</p>}
+          {r1595RequestNote&&<p className="r1595-request-status" role="status">{r1595RequestNote}</p>}
           {rows.length>0&&<p className="r1594-quote-note" role="status">{r1594QueueStatus} · 수집 가능한 시장 시간에만 KIS 가격이 갱신됩니다.</p>}
           <div className="gc-filter-panel" aria-label="골든크로스 종목 필터">
             <div className="gc-filter-heading"><strong><ListFilter size={15}/> 골든크로스 필터</strong><span>검색 전체 결과에 적용 · 당일 발생만</span></div>
@@ -456,6 +488,10 @@ function App(){
                </div></td>
               <td>{r.signals.map(s=><span className="tag" key={s}>{showSignal(s)}</span>)}{techBadges(r).map(t=><span className="r1591-search-tech" key={t}>{t}</span>)}</td><td className="r1593-price-cell"><strong>{money(r.close_price)}원</strong><small> · 검색일 종가</small>
                 <PriceCompareMini data={r1593Prices[comparisonKey(r)]} baseline={r.close_price} loading={r1593Busy}/>
+                {!r1593Busy&&!r1593Prices[comparisonKey(r)]?.latest_price&&<button type="button" className="r1595-request-price"
+                  disabled={!!r1595Requesting||r1595Timers.current.size>=3} onClick={e=>{e.stopPropagation();void requestMissingQuote(r);}}
+                  onKeyDown={e=>e.stopPropagation()}>
+                    {r1595Requesting===comparisonKey(r)?'요청 중…':'시세 수집 요청'}</button>}
               </td>
               <td>{fmt(r,'rsi')} <small>{crossed(r,'rsi_gc')}</small></td><td>{fmt(r,'slow_14_3_3_k')} / {fmt(r,'slow_14_3_3_d')} <small>{crossed(r,'slow_14_3_3_gc')}</small></td>
               <td>{fmt(r,'macd_12_26_9')} <small>{crossed(r,'macd_gc')}</small></td><td>{present(r,'valid_line_candidates_json')?`${validLines(r).length}개`:'미계산'}</td>
@@ -477,7 +513,13 @@ function App(){
                 onClick={()=>quickBasket(r)}>
                 {inBasket(r)?<CheckCircle2 size={19}/>:<ShoppingBasket size={19}/>}
                 <span>{inBasket(r)?'담김':'담기'}</span>
-              </button></div>):<div className="mobile-empty"><Search size={30}/><strong>{localQuery?'현재 페이지에서 일치하는 종목이 없습니다.':total===0?'해당 조건의 종목이 없습니다.':'검색 조건을 선택해 주세요.'}</strong><p>{gcFields.length?'선택한 골든크로스 조건을 만족하는 종목이 없습니다.':'과거 거래일을 선택한 다음 검색 버튼을 누르세요.'}</p><button onClick={()=>nav('search')}>검색 조건 열기</button></div>}
+              </button>
+              {!r1593Busy&&!r1593Prices[comparisonKey(r)]?.latest_price&&<button type="button"
+                className="r1595-request-price r1595-request-mobile"
+                disabled={!!r1595Requesting||r1595Timers.current.size>=3}
+                onClick={()=>{void requestMissingQuote(r);}}>
+                 {r1595Requesting===comparisonKey(r)?'수집 요청 중…':'이 종목 시세 수집 요청'}</button>}
+              </div>):<div className="mobile-empty"><Search size={30}/><strong>{localQuery?'현재 페이지에서 일치하는 종목이 없습니다.':total===0?'해당 조건의 종목이 없습니다.':'검색 조건을 선택해 주세요.'}</strong><p>{gcFields.length?'선택한 골든크로스 조건을 만족하는 종목이 없습니다.':'과거 거래일을 선택한 다음 검색 버튼을 누르세요.'}</p><button onClick={()=>nav('search')}>검색 조건 열기</button></div>}
           </div>
           {total!==null&&total>100&&<div className="pager"><button disabled={busy||page===1} onClick={()=>{void search(page-1,false);}}>이전</button><span>{page} / {Math.ceil(total/100)}</span><button disabled={busy||page>=Math.ceil(total/100)} onClick={()=>{void search(page+1,false);}}>다음</button></div>}
         </section>
