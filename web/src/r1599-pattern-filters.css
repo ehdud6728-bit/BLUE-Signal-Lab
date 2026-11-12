@@ -1,0 +1,12 @@
+/* R1.5.9.9: consistent tomato evidence across search and basket; no recommendation styling. */
+.r1599-filters{display:grid;gap:7px;margin-top:14px;padding:12px;border:1px solid #d9e4f3;border-radius:10px;background:#f7faff}
+.search-panel .r1599-filters>label:not(.r1599-hot-only){font-size:12px;font-weight:800;color:#385372;margin:5px 0 0}
+.r1599-filters select,.r1599-filters input[type=number]{width:100%;min-height:38px;border:1px solid #cbd8ea;border-radius:8px;padding:8px 10px;background:white;color:#203b66;font-size:12px}
+.search-panel .r1599-hot-only{display:flex!important;align-items:center;gap:8px;margin:5px 0 0!important;color:#3d5576;font-size:12px;font-weight:750}
+.r1599-hot-only input{accent-color:#dd6b59;width:17px;height:17px}
+.r1599-filters small{color:#687f9e;line-height:1.45;font-size:10px}
+.r1599-active-filters{font-size:11px;color:#5e7395;background:#f6f9ff;border:1px solid #e1e9f4;border-radius:8px;padding:7px 9px;margin:6px 0 10px}
+.r1599-pattern-dates{font-size:10px;color:#ba5547;line-height:1.6;margin:4px 0;overflow-wrap:anywhere}
+.r1599-mobile-meta{font-size:10px;color:#7586a2;margin:5px 0 0}
+.r1591-basket-evidence+.r1599-pattern-dates{margin:0 0 9px}
+@media(max-width:520px){.r1599-filters{padding:10px 9px}.r1599-active-filters{font-size:10px}}

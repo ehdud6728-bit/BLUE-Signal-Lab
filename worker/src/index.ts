@@ -188,6 +188,28 @@ export default {
           rsi:'rsi_gc',slow14:'slow_14_3_3_gc',slow12:'slow_12_5_5_gc',
           slow20:'slow_20_12_12_gc',macd:'macd_gc'
         };
+        // R1.5.9.9: exact historical turnover in hundred-million KRW.
+        // No inferred amounts for old EOD rows. Omitted param keeps API backward compatible.
+        const amountText=(u.searchParams.get('min_amount_eok')||'0').trim();
+        if(!/^\d{1,5}$/.test(amountText)||Number(amountText)>50000)
+          return respond({error:'INVALID_MIN_AMOUNT'},400);
+        const minAmount=Number(amountText);
+        if(minAmount>0){
+          filters.push(`(CASE WHEN json_valid(extras_json) THEN
+            CAST(json_extract(extras_json,'$.traded_amount_krw') AS REAL) ELSE NULL END) >= ?`);
+          args.push(minAmount*100000000);
+        }
+        const onlyPattern=(u.searchParams.get('only_pattern')||'0').trim();
+        const minPattern=(u.searchParams.get('min_pattern_up')||'70').trim();
+        if(!['0','1'].includes(onlyPattern)||!['60','70','80','90'].includes(minPattern))
+          return respond({error:'INVALID_PATTERN_FILTER'},400);
+        if(onlyPattern==='1'){
+          filters.push(`(CASE WHEN json_valid(extras_json) THEN
+            CAST(json_extract(extras_json,'$.r159_pattern_n_10d') AS INTEGER) ELSE 0 END)>=8`);
+          filters.push(`(CASE WHEN json_valid(extras_json) THEN
+            CAST(json_extract(extras_json,'$.r159_pattern_up_10d') AS REAL) ELSE -1 END)>=?`);
+          args.push(Number(minPattern));
+        }
         const gcRaw=(u.searchParams.get('gc')||'').trim();
         const gcNames=gcRaw?gcRaw.split(',').map(x=>x.trim()).filter(Boolean):[];
         if(gcNames.length>5||new Set(gcNames).size!==gcNames.length||gcNames.some(k=>!gcAllowed[k]))

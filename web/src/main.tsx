@@ -26,6 +26,7 @@ import './r157-ui.css';
 import './r159-ma-evidence.css';
 import './r1591-evidence-basket.css';
 import './r1594-refresh.css';
+import './r1599-pattern-filters.css';
 // R1581_SCAN_RESUME: persistent scan status across tabs and reloads.
 import './r1581-scan-monitor.css';
 
@@ -77,6 +78,33 @@ function App(){
   const [localQuery,setLocalQuery]=useState('');
   const [gcFields,setGcFields]=useState<GcKey[]>([]);
   const [gcLogic,setGcLogic]=useState<'any'|'all'>('any');
+  // R1599 shared options: search outlines, detail chart and basket use same threshold.
+  const [amountChoice,setAmountChoice]=useState(()=>{
+    try{const v=localStorage.getItem('blue_r1599_amount_choice');return ['0','100','300','500','1000','custom'].includes(v||'')?v!:'500';}
+    catch{return '500';}
+  });
+  const [customAmount,setCustomAmount]=useState(()=>{
+    try{return localStorage.getItem('blue_r1599_custom_amount')||'500';}
+    catch{return '500';}
+  });
+  const [patternThreshold,setPatternThreshold]=useState<'off'|'60'|'70'|'80'|'90'>(()=>{
+    try{const v=localStorage.getItem('blue_r1599_pattern_threshold');
+      return v==='off'||v==='60'||v==='70'||v==='80'||v==='90'?v:'70';}
+    catch{return '70';}
+  });
+  const [onlyPattern,setOnlyPattern]=useState(()=>{
+    try{return localStorage.getItem('blue_r1599_only_pattern')==='true';}catch{return false;}
+  });
+  const amountEok=amountChoice==='custom'?Number(customAmount):Number(amountChoice);
+  const amountValid=Number.isInteger(amountEok)&&amountEok>=0&&amountEok<=50000;
+  const highlightMin=patternThreshold==='off'?null:Number(patternThreshold);
+  useEffect(()=>{
+    try{localStorage.setItem('blue_r1599_amount_choice',amountChoice);
+      localStorage.setItem('blue_r1599_custom_amount',customAmount);
+      localStorage.setItem('blue_r1599_pattern_threshold',patternThreshold);
+      localStorage.setItem('blue_r1599_only_pattern',String(onlyPattern));}
+    catch{/* Browsers blocking storage can still use current choices. */}
+  },[amountChoice,customAmount,patternThreshold,onlyPattern]);
   // R151_BASKET_TAB: keep both workspaces mounted, toggle only visibility.
   // R152_FOUR_TABS: separate search, live tracking, AI briefing and basket.
   const [activeView,setActiveView]=useState<'research'|'tracking'|'ai'|'basket'>('research');
@@ -207,6 +235,7 @@ function App(){
   }
   async function search(p=1,scroll=true,selectedGc:GcKey[]=gcFields,selectedGcLogic:'any'|'all'=gcLogic,requestedDay?:string){
     const serial=++searchVersion.current;
+    if(!amountValid){setError('거래대금은 0~50,000억원 사이 정수로 입력하세요.');return;}
     setBusy(true);setError('');setStatus('');
     const queryMode=requestedDay?'single':mode,queryDate=requestedDay||date;
     if(requestedDay){setMode('single');setDate(requestedDay);}
@@ -217,6 +246,8 @@ function App(){
       else {u.searchParams.set('start',start);u.searchParams.set('end',end);}
       u.searchParams.set('signals',signals.join(','));u.searchParams.set('logic',logic);u.searchParams.set('page',String(p));
       if(selectedGc.length){u.searchParams.set('gc',selectedGc.join(','));u.searchParams.set('gc_logic',selectedGcLogic);}
+      u.searchParams.set('min_amount_eok',String(amountEok));
+      if(onlyPattern&&highlightMin!==null){u.searchParams.set('only_pattern','1');u.searchParams.set('min_pattern_up',String(highlightMin));}
       const r=await fetch(u.toString(),{credentials:'include',cache:'no-store'});
       const d=await r.json();
       if(!r.ok)throw new Error(d.error||`검색 오류: ${r.status}`);
@@ -276,7 +307,16 @@ function App(){
   const extra=(r:Signal,k:string):unknown=>r.extras?.[k];
   const num=(r:Signal,k:string):number|null=>{const v=extra(r,k);if(v==null||v==='')return null;const n=Number(v);return Number.isFinite(n)?n:null;};
   // The highlighted metric comes only from actual in-sample EOD pattern counts (n>=8).
-  const patternUp=(r:Signal)=>{const p=num(r,'r159_pattern_up_10d');const n=num(r,'r159_pattern_n_10d');return n!==null&&n>=8&&p!==null&&p>=70?p:null;};
+  const patternUp=(r:Signal)=>{const p=num(r,'r159_pattern_up_10d');const n=num(r,'r159_pattern_n_10d');
+    return highlightMin!==null&&n!==null&&n>=8&&p!==null&&p>=highlightMin?p:null;};
+  const patternDays=(r:Signal):string[]=>{
+    const raw=extra(r,'r159_pattern_signal_days_10d_json');
+    try{const v=typeof raw==='string'?JSON.parse(raw):raw;
+      return Array.isArray(v)?v.filter((s):s is string=>typeof s==='string'&&/^20\d{2}-\d{2}-\d{2}$/.test(s)&&s<=r.day).slice(-12):[];
+    }catch{return [];}
+  };
+  const amountLabel=(r:Signal)=>{const n=num(r,'traded_amount_krw');
+    return n===null?'거래대금 미저장':`거래대금 ${(n/100000000).toLocaleString('ko-KR',{maximumFractionDigits:1})}억원`;};
   // R1591_SEARCH_BADGES: verified EOD indicators only, never inferred from absent data.
   const techBadges=(r:Signal):string[]=>{
     const out:string[]=[];const a=num(r,'ma20'),b=num(r,'ma40'),c=num(r,'ma60');
@@ -420,14 +460,34 @@ function App(){
           <><label htmlFor="scan-start">시작일</label><input id="scan-start" type="date" value={start} onChange={e=>setStart(e.target.value)}/><label htmlFor="scan-end">종료일</label><input id="scan-end" type="date" value={end} onChange={e=>setEnd(e.target.value)}/></>}
           <label>기술 신호</label><div className="checks">{tags.map(t=><label className="check" key={t}><input type="checkbox" checked={signals.includes(t)} onChange={()=>flip(t)}/>{showSignal(t)}</label>)}</div>
           <label htmlFor="scan-logic">신호 조합</label><select id="scan-logic" value={logic} onChange={e=>setLogic(e.target.value)}><option value="any">하나라도 충족 (OR)</option><option value="all">모두 충족 (AND)</option></select>
+          <div className="r1599-filters" role="group" aria-label="거래대금 및 과거 다중 조건 패턴">
+            <label htmlFor="r1599-amount">검색일 거래대금 최소 (억원)</label>
+            <select id="r1599-amount" value={amountChoice} onChange={e=>setAmountChoice(e.target.value)}>
+              <option value="0">전체 (제한 없음)</option><option value="100">100억원 이상</option>
+              <option value="300">300억원 이상</option><option value="500">500억원 이상 (기본)</option>
+              <option value="1000">1,000억원 이상</option><option value="custom">직접 입력</option>
+            </select>
+            {amountChoice==='custom'&&<input aria-label="최소 거래대금 직접 입력 (억원)" type="number" min="0" max="50000" step="1"
+              value={customAmount} onChange={e=>setCustomAmount(e.target.value)}/>}
+            <label htmlFor="r1599-pattern">토마토색 테두리 기준 (10거래일 상승 비율)</label>
+            <select id="r1599-pattern" value={patternThreshold} onChange={e=>{const v=e.target.value as typeof patternThreshold;
+              setPatternThreshold(v);if(v==='off')setOnlyPattern(false);}}>
+              <option value="off">강조 안 함</option><option value="60">60% 이상</option>
+              <option value="70">70% 이상 (기본)</option><option value="80">80% 이상</option><option value="90">90% 이상</option>
+            </select>
+            <label className="r1599-hot-only"><input type="checkbox" checked={onlyPattern} disabled={patternThreshold==='off'}
+              onChange={e=>setOnlyPattern(e.target.checked)}/> 토마토색 해당 종목만 검색</label>
+            <small>표본 8건 이상의 실제 과거 관측 기준 · 검색 목록과 장바구니에 동일 적용. 과거 성과가 미래 상승 확률은 아닙니다.</small>
+            <small>거래대금은 검색일 확정 일봉의 실제 원화 금액입니다. 이전에 저장된 기록에 금액이 없으면 기준 검색에서 제외되며 해당 일자 재분석이 필요합니다.</small>
+          </div>
           <button className="primary search-submit" disabled={busy||requestBusy} onClick={()=>{void search(1);}}><Search size={18}/>{busy?'검색 중…':'종목 검색하기'}</button>
-          <p className="small">저장된 결과는 즉시 조회하고, 미분석 과거 거래일은 서버에 분석을 요청합니다. 장중 현재가 아님.</p>
+          <p className="small">저장된 결과를 조회합니다. 거래대금 기준은 당일 확정 일봉이며, 저장되지 않은 이전 금액은 추정하지 않습니다. 장중 현재가 아님.</p>
         </div>
         <div className="search-compact"><div><small>기준일</small><strong>{mode==='single'?date:`${start} ~ ${end}`}</strong></div><button onClick={()=>setFilterOpen(true)}><SlidersHorizontal size={16}/> 수정</button><button className="compact-run" disabled={busy||requestBusy} onClick={()=>{void search(1);}}><Search size={16}/> 검색</button></div>
       </aside>
       <section className="content">
         <div className={'r151-basket-content '+(activeView==='basket'?'':'r151-hidden')}>
-          <SmartBasket quickAddRequest={basketRequest} onItemsChange={setBasketIds} active={activeView==='basket'} refreshKey={r1594BasketRefresh}/>
+          <SmartBasket quickAddRequest={basketRequest} onItemsChange={setBasketIds} active={activeView==='basket'} refreshKey={r1594BasketRefresh} patternHighlightMin={highlightMin}/>
         </div>
         <div className={'r152-tracking-content '+(activeView==='tracking'?'':'r151-hidden')}>
           <LiveMarket active={activeView==='tracking'} refreshKey={r1594TrackingRefresh}/>
@@ -453,6 +513,7 @@ function App(){
         {scanInfo&&<div className="notice" role="status"><RefreshCw size={17}/><div>{scanInfo}{actionsUrl&&<div><a href={actionsUrl} target="_blank" rel="noreferrer">GitHub 실행 결과 확인</a></div>}</div></div>}
         <section className="panel result" ref={resultRef} id="results-panel">
           <div className="result-heading"><h2><BarChart3 size={18}/> 검색된 종목 <small>{total===null?'검색 전':total+'건'}</small></h2><span className="eod-pill"><Clock3 size={13}/> EOD</span></div>
+          <p className="r1599-active-filters">검색 조건 · 거래대금 {amountEok>0?amountEok.toLocaleString('ko-KR')+'억원 이상':'전체'} · 토마토 {highlightMin===null?'꺼짐':highlightMin+'% 이상 · 표본 8건 이상'}{onlyPattern&&highlightMin!==null?' · 해당 종목만 보기':''}</p>
           <p className="result-hint">검색일 확정 종가와 이후 D1 저장 시세·기간 고가를 구분해 표시합니다. 가격이 없으면 미수집으로 표시합니다.</p>
           {r1593Error&&<p className="r1593-comparison-status" role="status">가격 비교: {r1593Error}</p>}
           {r1595RequestNote&&<p className="r1595-request-status" role="status">{r1595RequestNote}</p>}
@@ -480,7 +541,9 @@ function App(){
           <div className="desktop-results tablewrap"><table><thead><tr><th>날짜</th><th>종목명 / 코드</th><th>신호</th><th>검색일 종가 / 최근 확인가 / 기간 최고가</th><th>RSI / GC</th><th>Slow(14,3,3) / GC</th><th>MACD / GC</th><th>돌파선 후보</th><th>상단 매물대</th></tr></thead><tbody>
             {visibleRows.length?visibleRows.map((r,i)=><tr key={`${r.code}-${r.day}-${i}`} className={'clickable'+(patternUp(r)!==null?' r159-tomato-stock':'')} tabIndex={0} onClick={()=>openDetail(r)} onKeyDown={e=>{if(e.key==='Enter')openDetail(r);}}>
               <td>{r.day}</td><td><div className="r151-desktop-stock">
-                 <div><b>{displayName(r)}</b><div className="small">{r.code}</div></div>
+                 <div><b>{displayName(r)}</b><div className="small">{r.code} · {amountLabel(r)}</div>
+                 {patternUp(r)!==null&&<div><span className="r159-prob-chip">과거 10일 상승 {patternUp(r)!.toFixed(1)}% · {num(r,'r159_pattern_n_10d')}건</span></div>}
+                 {patternDays(r).length>0&&<div className="r1599-pattern-dates" title={patternDays(r).join(' · ')}>과거 신호일 {patternDays(r).slice(-3).join(' · ')}{patternDays(r).length>3?' 외':''}</div>}</div>
                  <button type="button" className={'r151-quick-add '+(inBasket(r)?'saved':'')}
                    title={inBasket(r)?'이미 담긴 종목':'장바구니에 담기'}
                    aria-label={`${displayName(r)} ${inBasket(r)?'장바구니에 담김':'장바구니에 담기'}`}
@@ -509,6 +572,8 @@ function App(){
                 onRequest={()=>{void requestMissingQuote(r);}} requesting={r1595Requesting===comparisonKey(r)}
                 requestDisabled={!!r1595Requesting||r1595Timers.current.size>=3}/>
               <div className="stock-tags">{r.signals.slice(0,4).map(s=><span className="tag" key={s}>{showSignal(s)}</span>)}{r.signals.length>4&&<span className="tag tag-more">+{r.signals.length-4}</span>}{patternUp(r)!==null&&<span className="r159-prob-chip">과거 10일 상승 {patternUp(r)!.toFixed(1)}% · {num(r,'r159_pattern_n_10d')}건</span>}</div>
+              <div className="r1599-mobile-meta">{amountLabel(r)}</div>
+              {patternDays(r).length>0&&<div className="r1599-pattern-dates" title={patternDays(r).join(' · ')}>과거 신호일 {patternDays(r).slice(-3).join(' · ')}{patternDays(r).length>3?' 외':''}</div>}
               {techBadges(r).length>0&&<div className="r1591-mobile-tech">{techBadges(r).map(t=><span className="r1591-search-tech" key={t}>{t}</span>)}</div>}
                <div className="stock-quick"><div><small>RSI</small><strong>{fmt(r,'rsi',1)}</strong></div><div><small>Slow GC</small><strong className={flag(r,'slow_14_3_3_gc')?'positive':''}>{crossed(r,'slow_14_3_3_gc')}</strong></div><div><small>MACD GC</small><strong className={flag(r,'macd_gc')?'positive':''}>{crossed(r,'macd_gc')}</strong></div><div><small>상단 매물</small><strong>{supplyGrade(r)}</strong></div></div>
             </div>
@@ -549,7 +614,7 @@ function App(){
           day={selected.day} name={displayName(selected)}
           supplyPrice={num(selected,'supply_reference_price')}
           supplyGrade={supplyGrade(selected)}
-          lineCandidates={validLines(selected).map(l=>({signal:l.signal,price:l.price}))}/>
+          lineCandidates={validLines(selected).map(l=>({signal:l.signal,price:l.price}))} highlightThreshold={highlightMin}/>
         <h3 className="detail-section-title"><Activity size={17}/> 보조지표</h3>
         <div className="info-grid indicator-grid">
           <div><strong>RSI (14) / Signal (9)</strong><p className="indicator-value">{fmt(selected,'rsi')} <small>/ {fmt(selected,'rsi_signal')}</small></p><p className={flag(selected,'rsi_gc')?'positive':''}>{crossed(selected,'rsi_gc')} · 최근 GC {lastCross(selected,'rsi_last_gc')}</p></div>

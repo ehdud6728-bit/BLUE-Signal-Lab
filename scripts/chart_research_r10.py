@@ -83,7 +83,7 @@ def _supply_features(d):
 
 def _feature_matrix(d):
     n=len(d);idx=d.index
-    yes=lambda v:np.asarray(pd.Series(v,index=idx).fillna(False),dtype=bool)
+    yes=lambda v:np.array(pd.Series(v,index=idx).fillna(False),dtype=bool,copy=True)
     f={}
     for days in (20,30,40):
         for suffix in ('','_ALT'):

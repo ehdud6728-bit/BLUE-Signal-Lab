@@ -10,7 +10,7 @@ type Setup={code:string;label:string;factors:string[];factor_count:number;total_
 type Stats={version:string;asof:string;status:string;history_start:string|null;history_end:string;method?:string;limitations?:string[];active_factors?:{code:string;label:string}[];candidate_count?:number;eligible_candidate_count?:number;baseline?:Record<string,Horizon>;sector_lag?:{status:string;reason?:string};setups:Setup[]};
 type Payload={status:string;chart?:{bars:Bar[];asof:string};stats?:Stats;message?:string};
 type LineCandidate={signal:string;price:number};
-type Props={code:string;day:string;name:string;supplyPrice?:number|null;supplyGrade?:string;lineCandidates?:LineCandidate[]};
+type Props={code:string;day:string;name:string;supplyPrice?:number|null;supplyGrade?:string;lineCandidates?:LineCandidate[];highlightThreshold?:number|null};
 
 function useChartResize(container:React.RefObject<HTMLDivElement|null>, fn:(element:HTMLDivElement)=>IChartApi, deps:unknown[]){
   useEffect(()=>{
@@ -112,7 +112,7 @@ function IndicatorChart({bars,type}:{bars:Bar[];type:'volume'|'rsi'|'slow'|'macd
   const meta=({volume:['거래량',''],rsi:['RSI(14) · 시그널(9)','파랑: RSI / 주황: 시그널'],slow:['Slow Stochastic(14,3,3)','파랑: %K / 주황: %D'],macd:['MACD(12,26,9)','파랑: MACD / 주황: 시그널']} as const)[type];
   return <><div className="blue-chart-label blue-indicator-caption"><span>{meta[0]}</span><small>{meta[1]}</small></div><div ref={ref} className="blue-chart-canvas"/></>;
 }
-function Evidence({stats}:{stats:Stats}){
+function Evidence({stats,highlightThreshold}:{stats:Stats;highlightThreshold:number|null}){
   const [days,setDays]=useState<'5'|'10'|'20'>('10');
   const base=stats.baseline?.[days];
   return <div className="blue-evidence">
@@ -129,7 +129,7 @@ function Evidence({stats}:{stats:Stats}){
       return Number(validY)-Number(validX)||(y.up_pct??-1)-(x.up_pct??-1)||
         (y.median_return_pct??-10000)-(x.median_return_pct??-10000)||
         (y.mean_return_pct??-10000)-(x.mean_return_pct??-10000)||y.n-x.n;
-    }).map(s=>{const x=s.horizons[days];const hot=x.n>=8&&x.up_pct!==null&&x.up_pct>=70;
+    }).map(s=>{const x=s.horizons[days];const hot=highlightThreshold!==null&&x.n>=8&&x.up_pct!==null&&x.up_pct>=highlightThreshold;
       return <details className={'r159-pattern-card'+(hot?' r159-tomato':'')} key={s.code}>
         <summary>
           <span className="r159-pattern-left"><strong>{s.label}</strong>
@@ -152,7 +152,7 @@ function Evidence({stats}:{stats:Stats}){
     <p className="blue-caution">이 결과는 당일 조건을 보고 과거 사례를 찾아본 탐색적 비교입니다. 여러 조합을 시험한 선택 편향, 짧은 표본, 20거래일 결과 중첩, 수정주가·거래비용 미반영으로 인해 미래 성과를 보장하지 않습니다. 업종 대장주 선행/후발 여부는 별도 업종과 과거 시계열이 확보되기 전에는 판정하지 않습니다.</p>
   </div>;
 }
-export default function StockChart({code,day,name,supplyPrice,supplyGrade,lineCandidates}:Props){
+export default function StockChart({code,day,name,supplyPrice,supplyGrade,lineCandidates,highlightThreshold=70}:Props){
   const [data,setData]=useState<Payload|null>(null);const [error,setError]=useState('');const [loading,setLoading]=useState(true);
   useEffect(()=>{
     const ctrl=new AbortController();setLoading(true);setData(null);setError('');
@@ -163,7 +163,7 @@ export default function StockChart({code,day,name,supplyPrice,supplyGrade,lineCa
     return ()=>ctrl.abort();
   },[code,day]);
   const hasR159Highlight=!!data?.stats?.setups?.some(s=>{
-    const x=s.horizons?.['10'];return !!x&&x.n>=8&&x.up_pct!==null&&x.up_pct>=70;
+    const x=s.horizons?.['10'];return highlightThreshold!==null&&!!x&&x.n>=8&&x.up_pct!==null&&x.up_pct>=highlightThreshold;
   });
   return <section className={'blue-chart-panel'+(hasR159Highlight?' r159-tomato-stock':'')}>
     <div className="blue-chart-header"><h3>{name} · 실제 과거 일봉 차트</h3><span>종가(EOD) · {day}까지</span></div>
@@ -176,7 +176,7 @@ export default function StockChart({code,day,name,supplyPrice,supplyGrade,lineCa
       <IndicatorChart bars={data.chart.bars} type="slow"/>
       <IndicatorChart bars={data.chart.bars} type="macd"/>
       <div className="blue-chart-note">상단 매물대: {supplyPrice==null?'미확인':supplyPrice.toLocaleString('ko-KR')+'원'} · 강도: {supplyGrade||'미확인'} (일봉 120개 기반 추정). 기준선은 검증 전 후보입니다. 모든 차트는 수정주가가 아닌 원본 시세이며 미래 날짜를 포함하지 않습니다.</div>
-      {data.stats&&<Evidence stats={data.stats}/>}
+      {data.stats&&<Evidence stats={data.stats} highlightThreshold={highlightThreshold}/>}
       <p className="blue-attribution">차트 제공: <a href="https://www.tradingview.com/" target="_blank" rel="noopener noreferrer">TradingView Lightweight Charts™</a></p>
     </>}
   </section>;

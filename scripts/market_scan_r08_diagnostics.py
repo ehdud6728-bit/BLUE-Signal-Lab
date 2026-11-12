@@ -157,6 +157,10 @@ def scan_r08(raw: pd.DataFrame, asof: str) -> tuple[list[dict],dict]:
             r['diagnostic_status']='NO_PRICE_HISTORY'
             continue
         rich=enrich(hist)
+        # Exact verified as-of EOD turnover in KRW, NOT close*volume or intraday KIS.
+        traded_amount=hist.iloc[-1].amount
+        if pd.notna(traded_amount) and float(traded_amount)>=0:
+            r['traded_amount_krw']=int(round(float(traded_amount)))
         r.update(ma_event_diagnostics(rich))
         r.update(macd_metrics(hist))
         r['rsi_last_gc']=last_cross(rich,'rsi_gc')

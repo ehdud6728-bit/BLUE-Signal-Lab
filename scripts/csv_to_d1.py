@@ -21,8 +21,11 @@ def iso_date(s):
         return datetime.strptime(s,'%Y-%m-%d').date().isoformat()
     except ValueError: raise ValueError('Invalid ISO date: '+repr(s))
 def pattern_highlights(src):
-    """Optional R159 snapshot metadata, computed from the very same verified run.
-    Never implies that 70% in-sample was a validated prediction.
+    """Provenance-backed in-sample pattern metrics and actual historical signal dates.
+
+    No 70% cut-off is imposed here: the display threshold is configurable.
+    n>=8 remains a necessary support floor.  The dates are ONLY those of
+    matured cases emitted by chart_research_r10, never the current search date.
     """
     path=Path(src)/'chart_snapshots.jsonl'
     if not path.is_file():return {}
@@ -30,18 +33,34 @@ def pattern_highlights(src):
     for line in path.read_text(encoding='utf-8').splitlines():
         if not line.strip():continue
         item=json.loads(line)
-        best=[]
+        candidates=[]
         for setup in item.get('stats',{}).get('setups',[]):
             h=setup.get('horizons',{}).get('10',{})
-            if h.get('n',0)>=8 and isinstance(h.get('up_pct'),(int,float)) and h['up_pct']>=70:
-                best.append((h['up_pct'],h.get('median_return_pct') or 0,h.get('mean_return_pct') or 0,
-                             setup.get('label',''),h['n']))
-        if best:
-            p,med,avg,label,n=max(best)
-            found[(item['code'],item['day'])]={
-                'r159_pattern_up_10d':p,'r159_pattern_n_10d':n,
-                'r159_pattern_median_10d':med,'r159_pattern_mean_10d':avg,
-                'r159_pattern_label_10d':label[:150]}
+            n=h.get('n',0);up=h.get('up_pct')
+            if not isinstance(n,int) or n<8 or not isinstance(up,(int,float)) or not 0<=up<=100:
+                continue
+            median=h.get('median_return_pct')
+            mean=h.get('mean_return_pct')
+            candidates.append((float(up),float(median) if isinstance(median,(int,float)) else -10000,
+                               float(mean) if isinstance(mean,(int,float)) else -10000,
+                               n,str(setup.get('label','')),h.get('cases',[])))
+        if not candidates:continue
+        p,med,avg,n,label,cases=max(candidates,key=lambda x:x[:4])
+        evidence={
+            'r159_pattern_up_10d':p,'r159_pattern_n_10d':n,
+            'r159_pattern_median_10d':None if med==-10000 else med,
+            'r159_pattern_mean_10d':None if avg==-10000 else avg,
+            'r159_pattern_label_10d':label[:150]}
+        day=item.get('day','')
+        valid=[]
+        if isinstance(cases,list):
+            for case in cases[-12:]:
+                if not isinstance(case,dict):continue
+                d=case.get('signal_day')
+                if isinstance(d,str) and re.fullmatch(r'20\d{2}-\d{2}-\d{2}',d) and d<=day:
+                    valid.append(d)
+        evidence['r159_pattern_signal_days_10d_json']=json.dumps(sorted(set(valid))[-12:],ensure_ascii=False,separators=(',',':'))
+        found[(item['code'],day)]=evidence
     return found
 
 

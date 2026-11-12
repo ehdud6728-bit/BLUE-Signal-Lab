@@ -41,7 +41,7 @@ type AiResult={status:string;asof?:string;items?:AiPick[];generated_at?:string;m
 type BasketItem={id:string;source:'MANUAL'|'AI';code:string;name:string;day:string;baseline:number;
   added_at:string;signals:string[];memo:string;reason?:string;risk?:string;watch?:string;
   protected?:boolean;protected_at?:string;
-  patternUp10d?:number;patternN10d?:number;patternLabel10d?:string};
+  patternUp10d?:number;patternN10d?:number;patternLabel10d?:string;patternDays10d?:string[]};
 type Quote={code:string;market:string;trade_date_kst:string;price:number;received_at_utc:string;exchange_tick_time_verified?:boolean};
 type Quotes={status:string;items:Quote[];age_minutes?:number|null;latest_received_at_utc?:string|null};
 const cash=(v:number|null|undefined)=>typeof v==='number'&&Number.isFinite(v)?v.toLocaleString('ko-KR'):'—';
@@ -69,30 +69,40 @@ function validItem(x:any):x is BasketItem{
   (x.protected_at===undefined||typeof x.protected_at==='string')&&
    (x.patternUp10d===undefined||(typeof x.patternUp10d==='number'&&Number.isFinite(x.patternUp10d)&&x.patternUp10d>=0&&x.patternUp10d<=100))&&
    (x.patternN10d===undefined||(Number.isInteger(x.patternN10d)&&x.patternN10d>=1&&x.patternN10d<=100000))&&
-   (x.patternLabel10d===undefined||(typeof x.patternLabel10d==='string'&&x.patternLabel10d.length<=150));
+   (x.patternLabel10d===undefined||(typeof x.patternLabel10d==='string'&&x.patternLabel10d.length<=150))&&
+   (x.patternDays10d===undefined||(Array.isArray(x.patternDays10d)&&x.patternDays10d.length<=12&&
+    x.patternDays10d.every((d:unknown)=>typeof d==='string'&&validDay(d)&&d<=x.day)));
 }
 // R1591: freeze only provenance-backed research evidence from an actual search/D1 row.
-function patternEvidence(data:SearchRow|AiPick):Pick<BasketItem,'patternUp10d'|'patternN10d'|'patternLabel10d'>|Record<string,never>{
+function patternEvidence(data:SearchRow|AiPick):Pick<BasketItem,'patternUp10d'|'patternN10d'|'patternLabel10d'|'patternDays10d'>|Record<string,never>{
  const x='extras' in data?data.extras:undefined;
  const n=Number(x?.r159_pattern_n_10d),p=Number(x?.r159_pattern_up_10d);
  if(!Number.isInteger(n)||n<1||n>100000||!Number.isFinite(p)||p<0||p>100)return {};
  const rawLabel=x?.r159_pattern_label_10d;const label=typeof rawLabel==='string'?rawLabel.slice(0,150):'';
- return {patternUp10d:p,patternN10d:n,patternLabel10d:label};
+ let days:string[]|undefined;
+ try{const raw=x?.r159_pattern_signal_days_10d_json;
+  const parsed=typeof raw==='string'?JSON.parse(raw):raw;
+  if(Array.isArray(parsed))days=parsed.filter((d):d is string=>validDay(d)&&d<=data.day).slice(-12);
+ }catch{/* Old research snapshots did not contain occurrence dates. */}
+ return {patternUp10d:p,patternN10d:n,patternLabel10d:label,...(days?{patternDays10d:days}:{})};
 }
-const hotPattern=(x:BasketItem)=>typeof x.patternUp10d==='number'&&x.patternUp10d>=70&&
+const hotPattern=(x:BasketItem,threshold:number|null)=>threshold!==null&&
+ typeof x.patternUp10d==='number'&&x.patternUp10d>=threshold&&
  typeof x.patternN10d==='number'&&x.patternN10d>=8;
 function baselineReturn(item:BasketItem,quote:Quote|undefined):number|null{
  if(!quote||!Number.isFinite(quote.price)||quote.price<=0||quote.trade_date_kst<=item.day)return null;
  return (quote.price/item.baseline-1)*100;
 }
 // R151_QUICK_ADD: controlled one-tap requests from the search results list.
-export default function SmartBasket({quickAddRequest,onItemsChange,active=true,refreshKey=0}: {
+export default function SmartBasket({quickAddRequest,onItemsChange,active=true,refreshKey=0,patternHighlightMin=70}: {
  quickAddRequest?:{serial:number;item:SearchRow}|null;
  onItemsChange?:(ids:string[])=>void;
  active?:boolean;
  refreshKey?:number;
+ patternHighlightMin?:number|null;
 }){
  const [items,setItems]=useState<BasketItem[]>(readItems);
+ const isHot=(x:BasketItem)=>hotPattern(x,patternHighlightMin);
  const evidenceAttempted=useRef<Set<string>>(new Set());
  const [filter,setFilter]=useState<'ALL'|'MANUAL'|'AI'|'PROTECTED'>('ALL');
  const [cleanupDays,setCleanupDays]=useState(60);
@@ -172,7 +182,7 @@ export default function SmartBasket({quickAddRequest,onItemsChange,active=true,r
  // Existing API read endpoint; no new Worker or schema and no mass full-market fetch.
  useEffect(()=>{
   if(!active)return;let disposed=false;let cursor=0;
-  const pending=[...new Map(items.filter(x=>x.patternN10d===undefined)
+  const pending=[...new Map(items.filter(x=>x.patternN10d===undefined||(x.patternN10d>=8&&x.patternDays10d===undefined))
    .map((x):[string,BasketItem]=>[perfId(x),x])).values()].filter(x=>!evidenceAttempted.current.has(perfId(x)));
   if(!pending.length)return;
   const worker=async()=>{while(!disposed){
@@ -183,7 +193,7 @@ export default function SmartBasket({quickAddRequest,onItemsChange,active=true,r
     const d=await r.json() as {items?:SearchRow[]};
     const found=d.items?.find(x=>x.code===it.code&&x.day===it.day);if(!found||disposed)continue;
     const snapshot=patternEvidence(found);if(!('patternN10d' in snapshot))continue;
-    setItems(old=>old.map(x=>perfId(x)===key&&x.patternN10d===undefined?{...x,...snapshot}:x));
+    setItems(old=>old.map(x=>perfId(x)===key&&(x.patternN10d===undefined||x.patternDays10d===undefined)?{...x,...snapshot}:x));
    }catch{/* Historical evidence is optional. Never invent it on network errors. */}
   }};
   void Promise.all([worker(),worker(),worker()]);
@@ -409,7 +419,7 @@ export default function SmartBasket({quickAddRequest,onItemsChange,active=true,r
    <div className="basket-list">{displayGroups.map(group=><section key={group.key}
      className={'r1595-symbol-group'+(group.records.length>1&&groupSimilar?' is-multiple':'')}>
      {groupSimilar&&group.records.length>1&&<button type="button"
-       className={'r1595-group-header'+(group.records.some(hotPattern)?' hot':'')}
+       className={'r1595-group-header'+(group.records.some(isHot)?' hot':'')}
        aria-expanded={expandedCodes.includes(group.code)}
        onClick={()=>setExpandedCodes(prev=>prev.includes(group.code)?prev.filter(c=>c!==group.code):[...prev,group.code])}>
        <span><strong>{group.name} ({group.code}) · {group.records.length}개 발견 기록</strong>
@@ -438,7 +448,7 @@ export default function SmartBasket({quickAddRequest,onItemsChange,active=true,r
      const maxHigh=highest?.price??null,maxHighDay=highest?.day||null;
      const pending=!pr||['QUEUED','NOT_REGISTERED','HISTORY_PARTIAL'].includes(pr.status);
      const state=pr?statusText(pr.status):'등록 확인 중';
-    return <article className={"basket-record"+(hotPattern(it)?" r1591-basket-tomato":"")} key={it.id}>
+    return <article className={"basket-record"+(isHot(it)?" r1591-basket-tomato":"")} key={it.id}>
      <div className="basket-record-head"><div><span className={`basket-src ${it.source==='AI'?'ai':''}`}>{it.source==='AI'?'AI 선택':'직접 선택'}</span>
        <strong>{it.name}</strong> <small>{it.code}</small>{it.protected&&<span className="r158-locked">장기 관찰</span>}</div>
        <div className="r158-record-actions">
@@ -449,9 +459,13 @@ export default function SmartBasket({quickAddRequest,onItemsChange,active=true,r
           disabled={it.protected===true} aria-label={`${it.name} 제거`}
           onClick={()=>setItems(old=>old.filter(x=>x.protected||x.id!==it.id))}><Trash2 size={16}/></button>
        </div></div>
-      {hotPattern(it)&&<div className="r1591-basket-evidence" title={it.patternLabel10d||'실제 과거 일봉 패턴 검증'}>
+      {isHot(it)&&<div className="r1591-basket-evidence" title={it.patternLabel10d||'실제 과거 일봉 패턴 검증'}>
        과거 10일 상승 {it.patternUp10d!.toFixed(1)}% · 표본 {it.patternN10d}건 · 탐색적 결과
       </div>}
+      {Array.isArray(it.patternDays10d)&&it.patternDays10d.length>0&&
+       <div className="r1599-pattern-dates" title={it.patternDays10d.join(' · ')}>
+         과거 신호일 {it.patternDays10d.slice(-3).join(' · ')}{it.patternDays10d.length>3?' 외':''}
+       </div>}
      <div className="r154-origin-strip">
        <div className="r154-discovery-price"><span>발견가</span><strong>{cash(it.baseline)}원</strong><small>{it.day} · 확정 종가</small></div>
        <div className="r154-discovery-signals"><span>발견 당시 기술 신호</span>
