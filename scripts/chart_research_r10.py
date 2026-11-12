@@ -32,7 +32,10 @@ LABELS = {
  'SLOW_12_GC':'Slow(12,5,5) 골든크로스','SLOW_20_GC':'Slow(20,12,12) 골든크로스',
  'MACD_GC':'MACD 골든크로스','MACD_DC':'MACD 데드크로스',
  'HIGH20_BREAK':'직전 20일 고점 돌파',
- 'MA_UP':'중기 이동평균 상승 배열','MA_DOWN':'중기 이동평균 하락 배열',
+ 'MA_UP':'정배열 (MA20>MA40>MA60)','MA_DOWN':'역배열 (MA20<MA40<MA60)',
+ 'MA_TO_UP':'정배열 전환 (전일 미정배열 → 당일 정배열)',
+ 'MA112_CROSS':'112일 이동평균선 종가 상향 돌파',
+ 'MA224_CROSS':'224일 이동평균선 종가 상향 돌파',
  'CLOSE_ABOVE_MA20':'종가 20일선 위','CLOSE_BELOW_MA20':'종가 20일선 아래',
  'MA20_RISING':'20일선 상승 중','MA20_FALLING':'20일선 하락 중',
  'RSI_ABOVE50':'RSI 50 이상','RSI_BELOW40':'RSI 40 미만','RSI_OVER70':'RSI 70 이상',
@@ -106,6 +109,11 @@ def _feature_matrix(d):
     # Current-day state/context variables, not independent entry signals.
     f['MA_UP']=yes(d.ma20.gt(d.ma40)&d.ma40.gt(d.ma60))
     f['MA_DOWN']=yes(d.ma20.lt(d.ma40)&d.ma40.lt(d.ma60))
+    f['MA_TO_UP']=yes(f['MA_UP'] & ~np.roll(f['MA_UP'],1))
+    f['MA_TO_UP'][0]=False
+    for nline in (112,224):
+        mline=d[f'ma{nline}']
+        f[f'MA{nline}_CROSS']=yes(d.close.shift(1).le(mline.shift(1)) & d.close.gt(mline))
     f['CLOSE_ABOVE_MA20']=yes(d.close.gt(d.ma20))
     f['CLOSE_BELOW_MA20']=yes(d.close.lt(d.ma20))
     f['MA20_RISING']=yes(d.ma20.gt(d.ma20.shift(5)))
@@ -128,7 +136,8 @@ def _feature_matrix(d):
     atr_pct=atr/d.close
     f['VOLATILITY_HIGH']=yes(atr_pct.gt(atr_pct.shift(1).rolling(60,min_periods=60).median()*1.3))
     anchors=[k for k in f if k.startswith('BB') or k.startswith('ENV') or
-             k in ('RSI_GC','RSI_DC','SLOW_14_GC','SLOW_14_DC','SLOW_12_GC','SLOW_20_GC','MACD_GC','MACD_DC','HIGH20_BREAK')]
+             k in ('RSI_GC','RSI_DC','SLOW_14_GC','SLOW_14_DC','SLOW_12_GC','SLOW_20_GC','MACD_GC','MACD_DC','HIGH20_BREAK',
+                   'MA_TO_UP','MA112_CROSS','MA224_CROSS')]
     return f,anchors
 
 
@@ -175,6 +184,25 @@ def _summaries(d,indices):
     return result
 
 
+def _case_examples(d, indices, horizon, limit=12):
+    """Recently completed, cooldown-deduplicated events; share entry/exit prices with outcomes.
+    At most 12 examples per setup/horizon to stay below D1 statement size limits.
+    """
+    size=len(d)
+    candidates=indices[indices+horizon<size]
+    op=d.open.to_numpy(dtype=float);close=d.close.to_numpy(dtype=float)
+    dates=d.date
+    cases=[]
+    for pos in candidates:
+        start=float(op[pos+1]);finish=float(close[pos+horizon])
+        if not np.isfinite(start) or not np.isfinite(finish) or start<=0:continue
+        cases.append({'signal_day':str(dates.iloc[pos].date()),
+                      'entry_day':str(dates.iloc[pos+1].date()),
+                      'exit_day':str(dates.iloc[pos+horizon].date()),
+                      'return_pct':fnum(100*(finish/start-1),2)})
+    return cases[-limit:]
+
+
 def backtest(history:pd.DataFrame,asof:str):
     """Find actual SAME-DAY active event anchors and up to three contemporaneous
     context factors across all supported technical/volume/supply families.
@@ -186,7 +214,11 @@ def backtest(history:pd.DataFrame,asof:str):
                           'active_factors':[],'setups':[], 'baseline':{},'sector_lag':{'status':'NOT_AVAILABLE'}}
     d=enrich(s)
     f,anchor_names=_feature_matrix(d)
-    anchor_now=[name for name in anchor_names if bool(f[name][-1])][:MAX_ANCHORS]
+    # Include rare MA transitions/crosses before the crowded BB signal family.
+    anchor_priority=('MA_TO_UP','MA112_CROSS','MA224_CROSS')
+    anchor_now=[n for n in anchor_priority if n in anchor_names and f[n][-1]]
+    anchor_now += [name for name in anchor_names if bool(f[name][-1]) and name not in anchor_now]
+    anchor_now=anchor_now[:MAX_ANCHORS]
     # Make sure every context family gets an opportunity, instead of listing
     # nine near-identical moving-average flags. Choose stable domain priorities.
     domains=[['VOLUME_SURGE','VOLUME_QUIET'],['AMOUNT_SURGE'],
@@ -225,15 +257,27 @@ def backtest(history:pd.DataFrame,asof:str):
                 candidates.append({'code':'+'.join(filters), 'label':' + '.join(LABELS[z] for z in filters),
                     'factors':list(filters),'factor_count':len(filters),'total_signals_seen':len(selected),
                     'horizons':summary,'up_lift_vs_baseline_10d_pp':diff,
-                    'quality':'EXPLORATORY' if n>=MIN_SUPPORT else 'INSUFFICIENT_SAMPLE'})
+                    'quality':'EXPLORATORY' if n>=MIN_SUPPORT else 'INSUFFICIENT_SAMPLE',
+                     '_indices':selected})
     # Show genuinely supported setups first, but do not label a post-hoc
     # highest-return group as a proven winner. Avoid near-duplicate candidates.
-    candidates.sort(key=lambda v:(v['quality']=='EXPLORATORY',v['factor_count'],v['horizons']['10']['n']),reverse=True)
+    # R159: within the exploratory candidates, order by 10d win-rate,
+    # then median/mean return; smaller than 8 cases are always ranked behind.
+    candidates.sort(key=lambda v:(
+        v['quality']=='EXPLORATORY',
+        v['horizons']['10']['up_pct'] if v['horizons']['10']['up_pct'] is not None else -1,
+        v['horizons']['10']['median_return_pct'] if v['horizons']['10']['median_return_pct'] is not None else -10000,
+        v['horizons']['10']['mean_return_pct'] if v['horizons']['10']['mean_return_pct'] is not None else -10000,
+        v['horizons']['10']['n'], -v['factor_count']),reverse=True)
     selected=[];keys=set()
     for v in candidates:
         key=tuple(v['factors'])
         if key in keys:continue
-        keys.add(key);selected.append(v)
+        keys.add(key)
+        for horizon in HORIZONS:
+            v['horizons'][str(horizon)]['cases']=_case_examples(d,v['_indices'],horizon)
+        v.pop('_indices',None)
+        selected.append(v)
         if len(selected)>=12:break
     return {'version':'R10_MULTIFACTOR_V2','asof':asof,
       'history_start':str(d.date.iloc[0].date()),'history_end':str(d.date.iloc[-1].date()),
@@ -268,7 +312,8 @@ def chart_rows(history:pd.DataFrame,asof:str,points=180):
           'sk':fnum(row.slow_14_3_3_k,2),'sd':fnum(row.slow_14_3_3_d,2),
           'm':fnum(macd.iloc[i],3),'ms':fnum(sig.iloc[i],3),
           'env20':fnum(row.ENV20_MID,2),'env40':fnum(row.ENV40_MID,2),
-          'bb40':fnum(row.BB40_UPPER,2)})
+          'bb40':fnum(row.BB40_UPPER,2),
+           'ma112':fnum(row.ma112,2),'ma224':fnum(row.ma224,2)})
     return {'version':'R10_CHART_V1','asof':asof,'data_frequency':'EOD_DAILY',
             'price_adjusted':False,'bars':records}
 

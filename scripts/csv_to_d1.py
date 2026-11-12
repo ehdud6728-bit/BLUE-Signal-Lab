@@ -20,6 +20,31 @@ def iso_date(s):
     try:
         return datetime.strptime(s,'%Y-%m-%d').date().isoformat()
     except ValueError: raise ValueError('Invalid ISO date: '+repr(s))
+def pattern_highlights(src):
+    """Optional R159 snapshot metadata, computed from the very same verified run.
+    Never implies that 70% in-sample was a validated prediction.
+    """
+    path=Path(src)/'chart_snapshots.jsonl'
+    if not path.is_file():return {}
+    found={}
+    for line in path.read_text(encoding='utf-8').splitlines():
+        if not line.strip():continue
+        item=json.loads(line)
+        best=[]
+        for setup in item.get('stats',{}).get('setups',[]):
+            h=setup.get('horizons',{}).get('10',{})
+            if h.get('n',0)>=8 and isinstance(h.get('up_pct'),(int,float)) and h['up_pct']>=70:
+                best.append((h['up_pct'],h.get('median_return_pct') or 0,h.get('mean_return_pct') or 0,
+                             setup.get('label',''),h['n']))
+        if best:
+            p,med,avg,label,n=max(best)
+            found[(item['code'],item['day'])]={
+                'r159_pattern_up_10d':p,'r159_pattern_n_10d':n,
+                'r159_pattern_median_10d':med,'r159_pattern_mean_10d':avg,
+                'r159_pattern_label_10d':label[:150]}
+    return found
+
+
 def export(src,out,run_id,source,is_demo=False):
     src,out=Path(src),Path(out)
     with (src/'signals.csv').open(newline='',encoding='utf-8-sig') as f:rows=list(csv.DictReader(f))
@@ -32,12 +57,14 @@ def export(src,out,run_id,source,is_demo=False):
     data=['BEGIN TRANSACTION;',f'DELETE FROM signals WHERE run_id={q(run_id)};',f'DELETE FROM daily_counts WHERE run_id={q(run_id)};',f'DELETE FROM runs WHERE run_id={q(run_id)};']
     data.append('INSERT INTO runs(run_id,created_at,source,latest_price_date,notes,is_demo) VALUES('+','.join([q(run_id),q(datetime.now(timezone.utc).isoformat()),q(source),q(latest),q('R0.3 CSV import; historical signal results, not live market data'),str(int(is_demo))])+');')
     seen=set()
+    highlighted=pattern_highlights(src)
     for r in rows:
         d=iso_date(r['date']);key=(r['code'],d)
         if key in seen:raise ValueError('Duplicate code/day, refusing silent overwrite: '+str(key))
         seen.add(key)
         names=','.join(sorted(set(s.strip().upper() for s in r['signals'].split(',') if s.strip())))
         extras={k:v for k,v in r.items() if k not in FIELDS and v is not None}
+        extras.update(highlighted.get((r['code'],d),{}))
         values=[q(run_id),q(r['code']),q(d),q(names),numeric(r['close']),numeric(r['distance_to_nearest_supply_pct']),q(json.dumps(extras,ensure_ascii=False,separators=(',',':')))]
         data.append('INSERT INTO signals(run_id,code,day,signal_names,close_price,supply_distance_pct,extras_json) VALUES('+','.join(values)+');')
     seen_dates=set()

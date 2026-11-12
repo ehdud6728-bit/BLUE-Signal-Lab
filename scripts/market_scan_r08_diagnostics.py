@@ -124,6 +124,26 @@ def supply_strength(history: pd.DataFrame) -> dict:
     return base
 
 
+def ma_event_diagnostics(rich: pd.DataFrame) -> dict:
+    """R159: compare prior/current completed EOD candles only (never future bars)."""
+    if len(rich)<225:
+        return {'ma_down':False,'ma_up':False,'ma_to_up':False,
+                'ma112_cross':False,'ma224_cross':False}
+    prev,now=rich.iloc[-2],rich.iloc[-1]
+    def finite(*vals):
+        return all(pd.notna(v) and np.isfinite(float(v)) for v in vals)
+    def up(row):
+        return finite(row.ma20,row.ma40,row.ma60) and row.ma20>row.ma40>row.ma60
+    def down(row):
+        return finite(row.ma20,row.ma40,row.ma60) and row.ma20<row.ma40<row.ma60
+    def cross(n):
+        key=f'ma{n}'
+        return finite(prev.close,prev[key],now.close,now[key]) and prev.close<=prev[key] and now.close>now[key]
+    return {'ma_down':bool(down(now)),'ma_up':bool(up(now)),
+            'ma_to_up':bool(up(now) and not up(prev)),
+            'ma112_cross':bool(cross(112)),'ma224_cross':bool(cross(224))}
+
+
 def scan_r08(raw: pd.DataFrame, asof: str) -> tuple[list[dict],dict]:
     rows,audit=scan_r06(raw,asof)  # Critical: existing matching logic unchanged.
     clean=normalise(raw)
@@ -137,6 +157,7 @@ def scan_r08(raw: pd.DataFrame, asof: str) -> tuple[list[dict],dict]:
             r['diagnostic_status']='NO_PRICE_HISTORY'
             continue
         rich=enrich(hist)
+        r.update(ma_event_diagnostics(rich))
         r.update(macd_metrics(hist))
         r['rsi_last_gc']=last_cross(rich,'rsi_gc')
         for period in ('14_3_3','12_5_5','20_12_12'):
