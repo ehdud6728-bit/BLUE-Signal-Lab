@@ -512,8 +512,7 @@ function App(){
           {r1593Error&&<p className="r1593-comparison-status" role="status">가격 비교: {r1593Error}</p>}
           {r1595RequestNote&&<p className="r1595-request-status" role="status">{r1595RequestNote}</p>}
           {rows.length>0&&<p className="r1594-quote-note" role="status">{r1594QueueStatus} · 수집 가능한 시장 시간에만 KIS 가격이 갱신됩니다.</p>}
-          <div className="r15101-analysis-filters" role="group" aria-label="검색 결과 골든크로스 및 과거 패턴 필터">
-            <div className="gc-filter-panel" aria-label="골든크로스 종목 필터">
+          <div className="gc-filter-panel r15102-unified-filter" aria-label="골든크로스 및 다중 조건 과거 패턴 필터">
               <div className="gc-filter-heading"><strong><ListFilter size={15}/> 골든크로스 필터</strong><span>검색 전체 결과에 적용 · 당일 발생만</span></div>
               <div className="gc-quick-actions">
                 <button type="button" className={!gcFields.length?'active':''} disabled={busy} onClick={()=>changeGc([])}>전체 종목</button>
@@ -530,11 +529,8 @@ function App(){
                 <button type="button" className={gcLogic==='any'?'active':''} disabled={busy} onClick={()=>changeGc(gcFields,'any')}>하나라도 (OR)</button>
                 <button type="button" className={gcLogic==='all'?'active':''} disabled={busy} onClick={()=>changeGc(gcFields,'all')}>모두 (AND)</button>
               </div>}
-              <p className="gc-filter-note">선택 즉시 D1 전체 검색 결과를 다시 조회합니다. 필터는 검색 날짜·BLUE 신호 조건에 추가 적용되며, 당일 실제 GC만 찾습니다.</p>
-            </div>
-            <section className="r15101-tomato-panel" aria-label="다중 조건 과거 패턴 토마토색 기준">
-              <div className="r15101-tomato-heading"><strong><ListFilter size={15}/> 토마토색 패턴 필터</strong><span>과거 다중 조건</span></div>
-              <label htmlFor="r1599-pattern">10거래일 상승 비율</label>
+            <div className="r15102-tomato-inline" role="group" aria-label="토마토색 과거 패턴 기준">
+              <label htmlFor="r1599-pattern">토마토 기준</label>
               <select id="r1599-pattern" value={patternThreshold} onChange={e=>{
                 const v=e.target.value as typeof patternThreshold;
                 const nextMin=v==='off'?null:Number(v);
@@ -550,9 +546,8 @@ function App(){
                   const checked=e.target.checked;setOnlyPattern(checked);
                   if(total!==null)void search(1,false,gcFields,gcLogic,undefined,{enabled:checked});
                 }}/> 해당 종목만 보기</label>
-              <small>표본 8건 이상 · 토마토색 테두리는 검색 목록과 장바구니에 함께 적용됩니다.</small>
-              <small>탐색적 과거 관측이며 미래 상승 확률을 뜻하지 않습니다.</small>
-            </section>
+            </div>
+            <p className="gc-filter-note">GC는 당일 발생 기준 · 토마토는 10거래일 상승 관측 비율(표본 8건 이상)입니다. 토마토 기준은 목록·장바구니 공통이며 미래 수익을 보장하지 않습니다.</p>
           </div>
           {rows.length>0&&<label className="result-quick-search"><Search size={16}/><span className="sr-only">현재 페이지 종목명 또는 코드 찾기</span><input type="search" value={localQuery} onChange={e=>setLocalQuery(e.target.value)} placeholder="현재 페이지에서 종목명 · 코드 찾기" aria-label="현재 페이지에서 종목명 또는 코드 찾기"/></label>}
           <div className="desktop-results tablewrap"><table><thead><tr><th>날짜</th><th>종목명 / 코드</th><th>신호</th><th>검색일 종가 / 최근 확인가 / 기간 최고가</th><th>RSI / GC</th><th>Slow(14,3,3) / GC</th><th>MACD / GC</th><th>돌파선 후보</th><th>상단 매물대</th></tr></thead><tbody>

@@ -11,28 +11,24 @@
 .r1591-basket-evidence+.r1599-pattern-dates{margin:0 0 9px}
 @media(max-width:520px){.r1599-filters{padding:10px 9px}.r1599-active-filters{font-size:10px}}
 
-/* R1.5.10.1: keep Tomato pattern controls beside Golden Cross in results. */
-.r15101-analysis-filters{display:grid;grid-template-columns:minmax(0,1.35fr) minmax(0,1fr);gap:10px;align-items:stretch;margin:10px 0 14px}
-.r15101-analysis-filters>*{min-width:0}
-.r15101-analysis-filters .gc-filter-panel{min-width:0;margin:0;padding:12px;border-radius:12px;border:1px solid #dce5f5;background:#f7faff}
-.r15101-analysis-filters .gc-filter-heading{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:5px;margin-bottom:10px;font-size:12px;color:#375372}
-.r15101-analysis-filters .gc-filter-heading strong,.r15101-tomato-heading strong{display:inline-flex;align-items:center;gap:5px;font-size:12px;font-weight:800}
-.r15101-analysis-filters .gc-filter-heading span,.r15101-tomato-heading span{color:#7b8ba2;font-size:10px;line-height:1.4}
-.r15101-analysis-filters .gc-quick-actions{display:flex;gap:6px;flex-wrap:wrap;margin:0 0 8px}
-.r15101-analysis-filters .gc-quick-actions button,.r15101-analysis-filters .gc-logic button{border:1px solid #d4dfef;background:white;color:#3b5e99;border-radius:7px;padding:6px 8px;font-size:11px;font-weight:750}
-.r15101-analysis-filters .gc-quick-actions button.active,.r15101-analysis-filters .gc-logic button.active{background:#235cce;color:#fff;border-color:#235cce}
-.r15101-analysis-filters .gc-filter-options{display:flex;gap:5px;flex-wrap:wrap;margin:0 0 8px}
-.r15101-analysis-filters .gc-filter-chip{display:inline-flex;align-items:center;gap:4px;padding:5px 7px;border:1px solid #d8e4f3;background:#fff;color:#536f95;border-radius:7px;font-size:10px;line-height:1.35;font-weight:750}
-.r15101-analysis-filters .gc-filter-chip.selected{border-color:#91b4f4;background:#eaf2ff;color:#245cc4}
-.r15101-analysis-filters .gc-filter-chip input{width:13px;height:13px;flex-shrink:0;accent-color:#245fe2}
-.r15101-analysis-filters .gc-logic{display:flex;gap:5px;align-items:center;flex-wrap:wrap;margin:0 0 8px;font-size:10px}
-.r15101-analysis-filters .gc-filter-note{font-size:10px;line-height:1.5;color:#7486a3;margin:6px 0 0}
-.r15101-tomato-panel{display:flex;flex-direction:column;align-items:stretch;gap:7px;border:1px solid #efc7c0;background:#fff9f8;border-radius:12px;padding:12px}
-.r15101-tomato-heading{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:5px;margin-bottom:3px;color:#a54f44}
-.r15101-tomato-panel>label:not(.r1599-hot-only){font-size:11px;color:#684c49;font-weight:800}
-.r15101-tomato-panel select{width:100%;min-width:0;min-height:36px;border:1px solid #e6c2ba;border-radius:8px;padding:7px 9px;background:#fff;color:#463b43;font-size:12px;font-weight:700}
-.r15101-tomato-panel .r1599-hot-only{display:flex;gap:7px;align-items:center;margin:2px 0;font-size:11px;color:#665453;font-weight:800}
-.r15101-tomato-panel .r1599-hot-only input{flex-shrink:0}
-.r15101-tomato-panel small{font-size:10px;color:#96756f;line-height:1.5}
-@media(max-width:790px){.r15101-analysis-filters{grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:7px}.r15101-analysis-filters .gc-filter-panel,.r15101-tomato-panel{padding:9px 8px}.r15101-tomato-heading strong,.r15101-analysis-filters .gc-filter-heading strong{font-size:11px}.r15101-tomato-panel select{font-size:11px}.r15101-analysis-filters .gc-filter-heading span,.r15101-tomato-heading span{font-size:9px}}
-@media(max-width:370px){.r15101-analysis-filters .gc-filter-chip{padding:4px 5px;font-size:9px}.r15101-analysis-filters .gc-quick-actions button{padding:5px;font-size:10px}.r15101-tomato-panel .r1599-hot-only{font-size:10px}}
+/* R1.5.10.2: one compact GC box with the tomato select and checkbox inline. */
+.r15102-unified-filter{min-width:0;margin:10px 0 14px;padding:12px;border-radius:12px;border:1px solid #dce5f5;background:#f7faff}
+.r15102-unified-filter .gc-filter-heading{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:5px;margin-bottom:10px;font-size:12px;color:#375372}
+.r15102-unified-filter .gc-filter-heading strong{display:inline-flex;align-items:center;gap:5px;font-size:12px;font-weight:800}
+.r15102-unified-filter .gc-filter-heading span{color:#7b8ba2;font-size:10px;line-height:1.4}
+.r15102-unified-filter .gc-quick-actions{display:flex;gap:6px;flex-wrap:wrap;margin:0 0 8px}
+.r15102-unified-filter .gc-quick-actions button,.r15102-unified-filter .gc-logic button{border:1px solid #d4dfef;background:#fff;color:#3b5e99;border-radius:7px;padding:6px 9px;font-size:11px;font-weight:750}
+.r15102-unified-filter .gc-quick-actions button.active,.r15102-unified-filter .gc-logic button.active{background:#235cce;color:#fff;border-color:#235cce}
+.r15102-unified-filter .gc-filter-options{display:flex;gap:5px;flex-wrap:wrap;margin:0 0 7px}
+.r15102-unified-filter .gc-filter-chip{display:inline-flex;align-items:center;gap:4px;padding:5px 7px;border:1px solid #d8e4f3;background:#fff;color:#536f95;border-radius:7px;font-size:10px;line-height:1.35;font-weight:750}
+.r15102-unified-filter .gc-filter-chip.selected{border-color:#91b4f4;background:#eaf2ff;color:#245cc4}
+.r15102-unified-filter .gc-filter-chip input{width:13px;height:13px;flex-shrink:0;accent-color:#245fe2}
+.r15102-unified-filter .gc-logic{display:flex;gap:5px;align-items:center;flex-wrap:wrap;margin:0 0 8px;font-size:10px}
+.r15102-unified-filter .gc-filter-note{font-size:10px;line-height:1.45;color:#7486a3;margin:7px 0 0}
+.r15102-tomato-inline{display:flex;align-items:center;gap:8px;flex-wrap:wrap;border-top:1px solid #e4e9f1;padding-top:9px;margin-top:8px}
+.r15102-tomato-inline>label:not(.r1599-hot-only){color:#a54f44;font-size:11px;font-weight:850;white-space:nowrap}
+.r15102-tomato-inline select{width:auto;min-width:118px;max-width:180px;min-height:34px;border:1px solid #e6c2ba;border-radius:8px;padding:6px 8px;background:white;color:#664a48;font-size:11px;font-weight:750}
+.r15102-tomato-inline .r1599-hot-only{display:inline-flex;align-items:center;gap:5px;margin:0;color:#665453;font-size:11px;font-weight:750;white-space:nowrap}
+.r15102-tomato-inline .r1599-hot-only input{flex-shrink:0}
+@media(max-width:790px){.r15102-unified-filter{padding:10px 9px}.r15102-unified-filter .gc-filter-chip{padding:5px 6px}.r15102-tomato-inline{gap:6px}.r15102-tomato-inline select{min-width:110px}}
+@media(max-width:370px){.r15102-tomato-inline .r1599-hot-only{font-size:10px}.r15102-tomato-inline select{min-width:94px}.r15102-unified-filter .gc-filter-chip{font-size:9px}}
