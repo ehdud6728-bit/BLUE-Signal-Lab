@@ -44,7 +44,7 @@ jobs:
         with:
           python-version: '3.11'
       - name: Install Python dependencies
-        run: pip install pandas numpy pyarrow requests 'pykrx==1.2.9'
+        run: pip install pandas numpy pyarrow requests 'cryptography>=43,<48' 'pykrx==1.2.9'
       - name: Unit tests (including KRX preferred-share and non-traded candles)
         run: python -m unittest discover -s tests -v
       - name: On-demand verified EOD scan - strict KRX ticker/date parity
