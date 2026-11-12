@@ -233,7 +233,7 @@ function App(){
     }catch(e){setError(String(e));}
     finally{setRequestBusy(false);}
   }
-  async function search(p=1,scroll=true,selectedGc:GcKey[]=gcFields,selectedGcLogic:'any'|'all'=gcLogic,requestedDay?:string){
+  async function search(p=1,scroll=true,selectedGc:GcKey[]=gcFields,selectedGcLogic:'any'|'all'=gcLogic,requestedDay?:string,patternOverride?:{enabled?:boolean;threshold?:number|null}){
     const serial=++searchVersion.current;
     if(!amountValid){setError('거래대금은 0~50,000억원 사이 정수로 입력하세요.');return;}
     setBusy(true);setError('');setStatus('');
@@ -247,7 +247,10 @@ function App(){
       u.searchParams.set('signals',signals.join(','));u.searchParams.set('logic',logic);u.searchParams.set('page',String(p));
       if(selectedGc.length){u.searchParams.set('gc',selectedGc.join(','));u.searchParams.set('gc_logic',selectedGcLogic);}
       u.searchParams.set('min_amount_eok',String(amountEok));
-      if(onlyPattern&&highlightMin!==null){u.searchParams.set('only_pattern','1');u.searchParams.set('min_pattern_up',String(highlightMin));}
+      // Results-panel controls apply immediately without waiting for React state updates.
+      const effectiveOnlyPattern=patternOverride?.enabled??onlyPattern;
+      const effectiveHighlightMin=patternOverride?.threshold!==undefined?patternOverride.threshold:highlightMin;
+      if(effectiveOnlyPattern&&effectiveHighlightMin!==null){u.searchParams.set('only_pattern','1');u.searchParams.set('min_pattern_up',String(effectiveHighlightMin));}
       const r=await fetch(u.toString(),{credentials:'include',cache:'no-store'});
       const d=await r.json();
       if(!r.ok)throw new Error(d.error||`검색 오류: ${r.status}`);
@@ -460,7 +463,7 @@ function App(){
           <><label htmlFor="scan-start">시작일</label><input id="scan-start" type="date" value={start} onChange={e=>setStart(e.target.value)}/><label htmlFor="scan-end">종료일</label><input id="scan-end" type="date" value={end} onChange={e=>setEnd(e.target.value)}/></>}
           <label>기술 신호</label><div className="checks">{tags.map(t=><label className="check" key={t}><input type="checkbox" checked={signals.includes(t)} onChange={()=>flip(t)}/>{showSignal(t)}</label>)}</div>
           <label htmlFor="scan-logic">신호 조합</label><select id="scan-logic" value={logic} onChange={e=>setLogic(e.target.value)}><option value="any">하나라도 충족 (OR)</option><option value="all">모두 충족 (AND)</option></select>
-          <div className="r1599-filters" role="group" aria-label="거래대금 및 과거 다중 조건 패턴">
+          <div className="r1599-filters" role="group" aria-label="거래대금 검색 조건">
             <label htmlFor="r1599-amount">검색일 거래대금 최소 (억원)</label>
             <select id="r1599-amount" value={amountChoice} onChange={e=>setAmountChoice(e.target.value)}>
               <option value="0">전체 (제한 없음)</option><option value="100">100억원 이상</option>
@@ -469,16 +472,7 @@ function App(){
             </select>
             {amountChoice==='custom'&&<input aria-label="최소 거래대금 직접 입력 (억원)" type="number" min="0" max="50000" step="1"
               value={customAmount} onChange={e=>setCustomAmount(e.target.value)}/>}
-            <label htmlFor="r1599-pattern">토마토색 테두리 기준 (10거래일 상승 비율)</label>
-            <select id="r1599-pattern" value={patternThreshold} onChange={e=>{const v=e.target.value as typeof patternThreshold;
-              setPatternThreshold(v);if(v==='off')setOnlyPattern(false);}}>
-              <option value="off">강조 안 함</option><option value="60">60% 이상</option>
-              <option value="70">70% 이상 (기본)</option><option value="80">80% 이상</option><option value="90">90% 이상</option>
-            </select>
-            <label className="r1599-hot-only"><input type="checkbox" checked={onlyPattern} disabled={patternThreshold==='off'}
-              onChange={e=>setOnlyPattern(e.target.checked)}/> 토마토색 해당 종목만 검색</label>
-            <small>표본 8건 이상의 실제 과거 관측 기준 · 검색 목록과 장바구니에 동일 적용. 과거 성과가 미래 상승 확률은 아닙니다.</small>
-            <small>거래대금은 검색일 확정 일봉의 실제 원화 금액입니다. 이전에 저장된 기록에 금액이 없으면 기준 검색에서 제외되며 해당 일자 재분석이 필요합니다.</small>
+            <small>거래대금은 검색일 확정 일봉의 실제 원화 금액입니다. 금액이 저장되지 않은 과거 기록은 기준 검색에서 제외됩니다.</small>
           </div>
           <button className="primary search-submit" disabled={busy||requestBusy} onClick={()=>{void search(1);}}><Search size={18}/>{busy?'검색 중…':'종목 검색하기'}</button>
           <p className="small">저장된 결과를 조회합니다. 거래대금 기준은 당일 확정 일봉이며, 저장되지 않은 이전 금액은 추정하지 않습니다. 장중 현재가 아님.</p>
@@ -518,24 +512,47 @@ function App(){
           {r1593Error&&<p className="r1593-comparison-status" role="status">가격 비교: {r1593Error}</p>}
           {r1595RequestNote&&<p className="r1595-request-status" role="status">{r1595RequestNote}</p>}
           {rows.length>0&&<p className="r1594-quote-note" role="status">{r1594QueueStatus} · 수집 가능한 시장 시간에만 KIS 가격이 갱신됩니다.</p>}
-          <div className="gc-filter-panel" aria-label="골든크로스 종목 필터">
-            <div className="gc-filter-heading"><strong><ListFilter size={15}/> 골든크로스 필터</strong><span>검색 전체 결과에 적용 · 당일 발생만</span></div>
-            <div className="gc-quick-actions">
-              <button type="button" className={!gcFields.length?'active':''} disabled={busy} onClick={()=>changeGc([])}>전체 종목</button>
-              <button type="button" className={gcFields.length===ALL_GC_KEYS.length&&gcLogic==='any'?'active':''} disabled={busy} onClick={()=>changeGc([...ALL_GC_KEYS],'any')}>GC 하나라도</button>
+          <div className="r15101-analysis-filters" role="group" aria-label="검색 결과 골든크로스 및 과거 패턴 필터">
+            <div className="gc-filter-panel" aria-label="골든크로스 종목 필터">
+              <div className="gc-filter-heading"><strong><ListFilter size={15}/> 골든크로스 필터</strong><span>검색 전체 결과에 적용 · 당일 발생만</span></div>
+              <div className="gc-quick-actions">
+                <button type="button" className={!gcFields.length?'active':''} disabled={busy} onClick={()=>changeGc([])}>전체 종목</button>
+                <button type="button" className={gcFields.length===ALL_GC_KEYS.length&&gcLogic==='any'?'active':''} disabled={busy} onClick={()=>changeGc([...ALL_GC_KEYS],'any')}>GC 하나라도</button>
+              </div>
+              <div className="gc-filter-options">
+                {GC_OPTIONS.map(item=><label key={item.key} className={'gc-filter-chip '+(gcFields.includes(item.key)?'selected':'')}>
+                  <input type="checkbox" checked={gcFields.includes(item.key)} disabled={busy} onChange={()=>changeGc(gcFields.includes(item.key)?gcFields.filter(k=>k!==item.key):[...gcFields,item.key])}/>
+                  {item.label}
+                </label>)}
+              </div>
+              {gcFields.length>1&&<div className="gc-logic">
+                <span>선택 조건:</span>
+                <button type="button" className={gcLogic==='any'?'active':''} disabled={busy} onClick={()=>changeGc(gcFields,'any')}>하나라도 (OR)</button>
+                <button type="button" className={gcLogic==='all'?'active':''} disabled={busy} onClick={()=>changeGc(gcFields,'all')}>모두 (AND)</button>
+              </div>}
+              <p className="gc-filter-note">선택 즉시 D1 전체 검색 결과를 다시 조회합니다. 필터는 검색 날짜·BLUE 신호 조건에 추가 적용되며, 당일 실제 GC만 찾습니다.</p>
             </div>
-            <div className="gc-filter-options">
-              {GC_OPTIONS.map(item=><label key={item.key} className={'gc-filter-chip '+(gcFields.includes(item.key)?'selected':'')}>
-                <input type="checkbox" checked={gcFields.includes(item.key)} disabled={busy} onChange={()=>changeGc(gcFields.includes(item.key)?gcFields.filter(k=>k!==item.key):[...gcFields,item.key])}/>
-                {item.label}
-              </label>)}
-            </div>
-            {gcFields.length>1&&<div className="gc-logic">
-              <span>선택 조건:</span>
-              <button type="button" className={gcLogic==='any'?'active':''} disabled={busy} onClick={()=>changeGc(gcFields,'any')}>하나라도 (OR)</button>
-              <button type="button" className={gcLogic==='all'?'active':''} disabled={busy} onClick={()=>changeGc(gcFields,'all')}>모두 (AND)</button>
-            </div>}
-            <p className="gc-filter-note">선택 즉시 D1 전체 검색 결과를 다시 조회합니다. 필터는 검색 날짜·BLUE 신호 조건에 추가 적용되며, 당일 실제 GC만 찾습니다.</p>
+            <section className="r15101-tomato-panel" aria-label="다중 조건 과거 패턴 토마토색 기준">
+              <div className="r15101-tomato-heading"><strong><ListFilter size={15}/> 토마토색 패턴 필터</strong><span>과거 다중 조건</span></div>
+              <label htmlFor="r1599-pattern">10거래일 상승 비율</label>
+              <select id="r1599-pattern" value={patternThreshold} onChange={e=>{
+                const v=e.target.value as typeof patternThreshold;
+                const nextMin=v==='off'?null:Number(v);
+                setPatternThreshold(v);
+                if(v==='off')setOnlyPattern(false);
+                if(onlyPattern&&total!==null)void search(1,false,gcFields,gcLogic,undefined,{enabled:v!=='off',threshold:nextMin});
+              }}>
+                <option value="off">강조 안 함</option><option value="60">60% 이상</option>
+                <option value="70">70% 이상 (기본)</option><option value="80">80% 이상</option><option value="90">90% 이상</option>
+              </select>
+              <label className="r1599-hot-only"><input type="checkbox" checked={onlyPattern} disabled={patternThreshold==='off'}
+                onChange={e=>{
+                  const checked=e.target.checked;setOnlyPattern(checked);
+                  if(total!==null)void search(1,false,gcFields,gcLogic,undefined,{enabled:checked});
+                }}/> 해당 종목만 보기</label>
+              <small>표본 8건 이상 · 토마토색 테두리는 검색 목록과 장바구니에 함께 적용됩니다.</small>
+              <small>탐색적 과거 관측이며 미래 상승 확률을 뜻하지 않습니다.</small>
+            </section>
           </div>
           {rows.length>0&&<label className="result-quick-search"><Search size={16}/><span className="sr-only">현재 페이지 종목명 또는 코드 찾기</span><input type="search" value={localQuery} onChange={e=>setLocalQuery(e.target.value)} placeholder="현재 페이지에서 종목명 · 코드 찾기" aria-label="현재 페이지에서 종목명 또는 코드 찾기"/></label>}
           <div className="desktop-results tablewrap"><table><thead><tr><th>날짜</th><th>종목명 / 코드</th><th>신호</th><th>검색일 종가 / 최근 확인가 / 기간 최고가</th><th>RSI / GC</th><th>Slow(14,3,3) / GC</th><th>MACD / GC</th><th>돌파선 후보</th><th>상단 매물대</th></tr></thead><tbody>
