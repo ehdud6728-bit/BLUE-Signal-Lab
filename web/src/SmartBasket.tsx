@@ -465,6 +465,11 @@ export default function SmartBasket({quickAddRequest,onItemsChange,active=true,r
       {isHot(it)&&<div className="r1591-basket-evidence" title={it.patternLabel10d||'실제 과거 일봉 패턴 검증'}>
        과거 10일 상승 {it.patternUp10d!.toFixed(1)}% · 표본 {it.patternN10d}건 · 탐색적 결과
       </div>}
+      {isHot(it)&&it.patternLabel10d?.trim()&&<div className="r15106-basket-pattern" title={it.patternLabel10d}>
+        일치 기술 패턴: {it.patternLabel10d}
+      </div>}
+      {isHot(it)&&typeof it.patternN10d==='number'&&it.patternN10d<8&&
+        <div className="r15106-small-sample">소표본 · 신뢰도 낮음 (미래 상승 확률 아님)</div>}
       {Array.isArray(it.patternDays10d)&&it.patternDays10d.length>0&&
        <div className="r1599-pattern-dates" title={it.patternDays10d.join(' · ')}>
          과거 신호일 {it.patternDays10d.slice(-3).join(' · ')}{it.patternDays10d.length>3?' 외':''}

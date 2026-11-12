@@ -328,6 +328,21 @@ function App(){
   // Only stored EOD pattern evidence is eligible: support n>=8, higher if selected.
   const patternUp=(r:Signal)=>{const p=num(r,'r159_pattern_up_10d');const n=num(r,'r159_pattern_n_10d');
     return highlightMin!==null&&n!==null&&n>=patternSampleMin&&p!==null&&p>=highlightMin?p:null;};
+  // Single presentation predicate shared by outline, basket evidence and search filter.
+  // R1.5.10.4 /api/search chooses a SAME-DAY active historical setup at the
+  // user's selected minimum sample floor; never derive a rate from price moves.
+  const patternEvidenceBlock=(r:Signal)=>{
+    const up=patternUp(r);
+    if(up===null)return null;
+    const n=num(r,'r159_pattern_n_10d');
+    const raw=extra(r,'r159_pattern_label_10d');
+    const label=typeof raw==='string'?raw.trim().slice(0,150):'';
+    return <div className="r15106-search-pattern-evidence" role="note" aria-label="기술 패턴 과거 상승 관측 결과">
+      <span className="r1591-basket-evidence">과거 10일 상승 {up.toFixed(1)}% · 표본 {n}건 · 탐색적 결과</span>
+      {label&&<small className="r15106-matched-pattern" title={label}>일치 기술 패턴: {label}</small>}
+      {n!==null&&n<8&&<small className="r15106-small-sample">소표본 · 신뢰도 낮음 (미래 상승 확률 아님)</small>}
+    </div>;
+  };
   const patternDays=(r:Signal):string[]=>{
     const raw=extra(r,'r159_pattern_signal_days_10d_json');
     try{const v=typeof raw==='string'?JSON.parse(raw):raw;
@@ -565,7 +580,7 @@ function App(){
               <label htmlFor="r15103-min-samples">표본</label>
               <select id="r15103-min-samples" aria-label="토마토 최소 표본 수" value={patternSampleMin}
                 onChange={e=>{const nextMin=Number(e.target.value);setPatternSampleMin(nextMin);
-                  if(onlyPattern&&total!==null)void search(1,false,gcFields,gcLogic,undefined,{minSamples:nextMin});
+                  if(total!==null)void search(1,false,gcFields,gcLogic,undefined,{minSamples:nextMin});
                 }}>
                 <option value={8}>8건 (기본)</option><option value={10}>10건</option>
                 <option value={15}>15건</option><option value={20}>20건</option><option value={30}>30건</option>
@@ -583,7 +598,7 @@ function App(){
             {visibleRows.length?visibleRows.map((r,i)=><tr key={`${r.code}-${r.day}-${i}`} className={'clickable'+(patternUp(r)!==null?' r159-tomato-stock':'')} tabIndex={0} onClick={()=>openDetail(r)} onKeyDown={e=>{if(e.key==='Enter')openDetail(r);}}>
               <td>{r.day}</td><td><div className="r151-desktop-stock">
                  <div><b>{displayName(r)}</b><div className="small">{r.code} · {amountLabel(r)}</div>
-                 {patternUp(r)!==null&&<div><span className="r159-prob-chip">과거 10일 상승 {patternUp(r)!.toFixed(1)}% · {num(r,'r159_pattern_n_10d')}건</span></div>}
+                 {patternEvidenceBlock(r)}
                  {patternDays(r).length>0&&<div className="r1599-pattern-dates" title={patternDays(r).join(' · ')}>과거 신호일 {patternDays(r).slice(-3).join(' · ')}{patternDays(r).length>3?' 외':''}</div>}</div>
                  <button type="button" className={'r151-quick-add '+(inBasket(r)?'saved':'')}
                    title={inBasket(r)?'이미 담긴 종목':'장바구니에 담기'}
@@ -609,10 +624,11 @@ function App(){
                 onKeyDown={e=>{if(e.target===e.currentTarget&&(e.key==='Enter'||e.key===' ')){e.preventDefault();openDetail(r);}}}
                 aria-label={`${displayName(r)} 상세 분석 보기`}>
               <div className="stock-top"><div className="stock-identity"><strong>{displayName(r)}</strong><span>{r.code} <span className="stock-dot">·</span> {r.day}</span></div><div className="stock-price"><b>{money(r.close_price)}<small>원</small></b><span>종가</span></div><ChevronRight size={19} className="stock-chevron"/></div>
+              {patternEvidenceBlock(r)}
               <PriceCompareMini compact data={r1593Prices[comparisonKey(r)]} baseline={r.close_price} loading={r1593Busy&&!r1593Prices[comparisonKey(r)]}
                 onRequest={()=>{void requestMissingQuote(r);}} requesting={r1595Requesting===comparisonKey(r)}
                 requestDisabled={!!r1595Requesting||r1595Timers.current.size>=3}/>
-              <div className="stock-tags">{r.signals.slice(0,4).map(s=><span className="tag" key={s}>{showSignal(s)}</span>)}{r.signals.length>4&&<span className="tag tag-more">+{r.signals.length-4}</span>}{patternUp(r)!==null&&<span className="r159-prob-chip">과거 10일 상승 {patternUp(r)!.toFixed(1)}% · {num(r,'r159_pattern_n_10d')}건</span>}</div>
+              <div className="stock-tags">{r.signals.slice(0,4).map(s=><span className="tag" key={s}>{showSignal(s)}</span>)}{r.signals.length>4&&<span className="tag tag-more">+{r.signals.length-4}</span>}</div>
               <div className="r1599-mobile-meta">{amountLabel(r)}</div>
               {patternDays(r).length>0&&<div className="r1599-pattern-dates" title={patternDays(r).join(' · ')}>과거 신호일 {patternDays(r).slice(-3).join(' · ')}{patternDays(r).length>3?' 외':''}</div>}
               {techBadges(r).length>0&&<div className="r1591-mobile-tech">{techBadges(r).map(t=><span className="r1591-search-tech" key={t}>{t}</span>)}</div>}

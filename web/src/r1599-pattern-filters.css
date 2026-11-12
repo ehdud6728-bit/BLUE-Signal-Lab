@@ -40,3 +40,12 @@
 /* R1.5.10.4: outline stock card, not the separate basket-action rail. */
 .r151-mobile-row.r159-tomato-stock{border:0!important;background:transparent!important}
 .r151-mobile-row.r159-tomato-stock>.stock-card{border:2px solid #e87968!important;background:linear-gradient(180deg,#fff8f6,#fff 90px);box-shadow:0 0 0 1px rgba(232,121,104,.12)}
+
+/* R1.5.10.6: the basket-style pattern evidence belongs inside the stock card. */
+.r15106-search-pattern-evidence{display:flex;flex-direction:column;align-items:flex-start;gap:4px;max-width:100%;margin:7px 0 9px;min-width:0}
+.r15106-search-pattern-evidence .r1591-basket-evidence{margin:0;max-width:100%;white-space:normal;overflow-wrap:anywhere}
+.r15106-matched-pattern,.r15106-basket-pattern{display:block;max-width:100%;font-size:10px;font-weight:650;line-height:1.5;color:#ad6056;overflow-wrap:anywhere}
+.r15106-small-sample{font-size:10px;color:#a66328;line-height:1.45}
+.r151-mobile-row.r159-tomato-stock>.stock-card{border:2px solid #e87968!important;background:linear-gradient(180deg,#fff8f6,#fff 92px)!important}
+.desktop-results tr.r159-tomato-stock>td:first-child .r15106-search-pattern-evidence{margin:5px 0}
+@media(max-width:520px){.r15106-search-pattern-evidence{margin:8px 0}.r15106-search-pattern-evidence .r1591-basket-evidence{font-size:10px;padding:6px 8px}.r15106-matched-pattern,.r15106-basket-pattern{font-size:10px}}
