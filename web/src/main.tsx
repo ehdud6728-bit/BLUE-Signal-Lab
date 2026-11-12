@@ -18,6 +18,8 @@ import './r154-clarity.css';
 import './r155-ai-repair.css';
 // R157_UI_FILTERS
 import './r157-ui.css';
+// R1581_SCAN_RESUME: persistent scan status across tabs and reloads.
+import './r1581-scan-monitor.css';
 
 // Keep the existing production API and Cloudflare Access cookies.
 const API = (import.meta.env.VITE_API_BASE || 'https://blue-signal-lab-api-v2.ehdud6728.workers.dev').replace(/\/+$/, '');
@@ -37,6 +39,15 @@ const ALL_GC_KEYS=GC_OPTIONS.map(x=>x.key);
 type InstallPrompt = Event & {prompt:()=>Promise<void>;userChoice:Promise<{outcome:string}>};
 const tags=['BB20','BB30','BB40','ENV20','ENV40'];
 const todayKST=()=>new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Seoul',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date());
+const SCAN_WATCH_KEY='blue_r1581_pending_scan_date_v1';
+const rememberedScanDate=():string=>{
+  try{
+    const day=localStorage.getItem(SCAN_WATCH_KEY)||'';
+    if(!/^20\d{2}-\d{2}-\d{2}$/.test(day))return '';
+    const d=new Date(day+'T00:00:00Z');
+    return Number.isFinite(d.getTime())&&d.toISOString().slice(0,10)===day?day:'';
+  }catch{return '';}
+};
 const showSignal=(t:string)=>t.replace(/^(?:BLUE|BB)(?=\d)/i,'B');
 const money=(n:number|null|undefined)=>n==null?'—':n.toLocaleString('ko-KR');
 
@@ -71,7 +82,8 @@ function App(){
   const [status,setStatus]=useState('');
   const [dataStatus,setDataStatus]=useState<ScanStatus>('');
   const [requestBusy,setRequestBusy]=useState(false);
-  const [watchDate,setWatchDate]=useState('');
+  const [watchDate,setWatchDate]=useState(rememberedScanDate);
+  const [completedDate,setCompletedDate]=useState('');
   const [scanInfo,setScanInfo]=useState('');
   const [actionsUrl,setActionsUrl]=useState('');
   const [filterOpen,setFilterOpen]=useState(false);
@@ -110,7 +122,13 @@ function App(){
     setLatest(d.latest||null);
     return d.latest||null;
   }
-  useEffect(()=>{loadDates().then(d=>{if(d){setDate(d);setStart(d);setEnd(d);}}).catch(e=>setError(`검색 가능 날짜 확인 실패: ${String(e)}`));},[]);
+  useEffect(()=>{loadDates().then(d=>{if(d){setDate(watchDate||d);setStart(d);setEnd(d);}}).catch(e=>setError(`검색 가능 날짜 확인 실패: ${String(e)}`));},[]);
+
+  // R1581_SCAN_RESUME: refresh/reopen must not silently lose the server-side scan.
+  useEffect(()=>{
+    try{if(watchDate)localStorage.setItem(SCAN_WATCH_KEY,watchDate);
+      else localStorage.removeItem(SCAN_WATCH_KEY);}catch{/* storage denied; this tab still polls */}
+  },[watchDate]);
 
   // Only single-day missing results trigger the existing server-managed scan workflow.
   async function requestScan(day:string){
@@ -123,15 +141,23 @@ function App(){
       const d=await r.json();
       if(!r.ok)throw new Error(d.error||`분석 요청 실패: ${r.status}`);
       setActionsUrl(d.actions_url||'');
-      if(d.status==='READY')setScanInfo('분석이 완료된 날짜입니다. 검색 버튼을 누르면 결과를 확인할 수 있습니다.');
-      else{setScanInfo(d.deduplicated?'다른 PC에서 이미 진행 중인 분석입니다.':'서버에 분석 요청을 접수했습니다.');setWatchDate(day);}
+      if(d.status==='READY'){
+        setCompletedDate(day);setWatchDate('');
+        setScanInfo('검증된 분석 결과가 이미 준비됐습니다.');
+        if(mode==='single'&&date===day)void search(1,false,gcFields,gcLogic,day);
+      }else{
+        setCompletedDate('');
+        setScanInfo(d.deduplicated?'이미 진행 중인 분석을 이어서 확인합니다.':'서버에 분석 요청을 접수했습니다.');
+        setWatchDate(day);
+      }
     }catch(e){setError(String(e));}
     finally{setRequestBusy(false);}
   }
-  async function search(p=1,scroll=true,selectedGc:GcKey[]=gcFields,selectedGcLogic:'any'|'all'=gcLogic){
+  async function search(p=1,scroll=true,selectedGc:GcKey[]=gcFields,selectedGcLogic:'any'|'all'=gcLogic,requestedDay?:string){
     const serial=++searchVersion.current;
     setBusy(true);setError('');setStatus('');
-    const queryMode=mode,queryDate=date;
+    const queryMode=requestedDay?'single':mode,queryDate=requestedDay||date;
+    if(requestedDay){setMode('single');setDate(requestedDay);}
     try{
       const u=new URL(API+'/api/search');
       u.searchParams.set('mode',queryMode);
@@ -154,28 +180,46 @@ function App(){
     }catch(e){if(serial===searchVersion.current){setError(String(e));setRows([]);setDays([]);setTotal(null);setDataStatus('');}}
     finally{if(serial===searchVersion.current)setBusy(false);}
   }
+  // R1581_SCAN_RESUME: keep polling while navigating; persist and resume after reload.
   useEffect(()=>{
     if(!watchDate)return;
-    let cancelled=false;
+    let cancelled=false,inFlight=false;
     const poll=async()=>{
+      if(inFlight)return;
+      inFlight=true;
       try{
         const r=await fetch(API+'/api/scan/status?date='+encodeURIComponent(watchDate),{credentials:'include',cache:'no-store'});
         const d=await r.json();if(!r.ok)throw new Error(d.error||`상태 조회 오류 ${r.status}`);
         if(cancelled)return;
         if(d.actions_url)setActionsUrl(d.actions_url);
         if(d.status==='READY'){
-          setWatchDate('');setScanInfo('D1 등록 완료 · 결과를 갱신합니다.');
-          await loadDates().catch(()=>null);
-          // The selected date may have changed while waiting: do not overwrite that selection.
-          if(mode==='single'&&date===watchDate)void search(1,false);
-        }else if(d.status==='FAILED'){setWatchDate('');setScanInfo('분석 실패: '+(d.reason||'Actions 실행 기록 확인 필요'));}
-        else if(d.status==='PENDING')setScanInfo('서버에서 분석 중입니다. 다른 PC에서도 동일한 상태가 표시됩니다.');
-      }catch(e){if(!cancelled)setScanInfo('상태 확인 오류: '+String(e));}
+          setWatchDate('');setCompletedDate(watchDate);
+          setScanInfo(`${watchDate} 분석 완료 · 저장된 결과를 불러왔습니다.`);
+          // Start the result fetch before setWatchDate clears this effect.
+          // Otherwise cleanup might suppress auto-refresh while loadDates resolves.
+          if(mode==='single'&&date===watchDate)
+            void search(1,false,gcFields,gcLogic,watchDate);
+          void loadDates().catch(()=>null);
+        }else if(d.status==='FAILED'){
+          setWatchDate('');setScanInfo(`${watchDate} 분석 실패: `+(d.reason||'GitHub 실행 기록을 확인하세요.'));
+        }else if(d.status==='PENDING'){
+          setScanInfo(`${watchDate} 분석 진행 중 · 다른 화면에서도 서버 작업은 계속됩니다.`);
+        }else if(d.status==='NOT_IMPORTED'){
+          setWatchDate('');setScanInfo(`${watchDate} 분석 요청 내역이 없어 검색 버튼으로 다시 요청할 수 있습니다.`);
+        }
+      }catch(e){if(!cancelled)setScanInfo('분석 상태 확인 오류: '+String(e));}
+      finally{inFlight=false;}
     };
-    void poll();const timer=window.setInterval(()=>{void poll();},8000);
-    return()=>{cancelled=true;window.clearInterval(timer);};
-  // Intentionally only restart when the watched date changes.
-  },[watchDate]);
+    const onVisible=()=>{if(document.visibilityState==='visible')void poll();};
+    const onFocus=()=>{void poll();};
+    void poll();
+    const timer=window.setInterval(()=>{if(document.visibilityState==='visible')void poll();},8000);
+    document.addEventListener('visibilitychange',onVisible);
+    window.addEventListener('focus',onFocus);
+    return()=>{cancelled=true;window.clearInterval(timer);
+      document.removeEventListener('visibilitychange',onVisible);
+      window.removeEventListener('focus',onFocus);};
+  },[watchDate,mode,date,gcFields,gcLogic]);
 
   const extra=(r:Signal,k:string):unknown=>r.extras?.[k];
   const num=(r:Signal,k:string):number|null=>{const v=extra(r,k);if(v==null||v==='')return null;const n=Number(v);return Number.isFinite(n)?n:null;};
@@ -237,6 +281,18 @@ function App(){
         {!standalone&&<button className="install-btn" onClick={()=>{void installApp();}} aria-label="앱 설치 방법"><Download size={17}/><span>앱 설치</span></button>}
       </div>
     </header>
+    {(watchDate||completedDate||scanInfo)&&<div className="r1581-scan-monitor" role="status">
+      <RefreshCw size={16} className={watchDate?'r1581-pending':''}/>
+      <div className="r1581-scan-text">
+        <strong>{watchDate?`${watchDate} 검색 분석 중`:completedDate?`${completedDate} 분석 완료`:'검색 분석 안내'}</strong>
+        <span>{scanInfo||'서버 처리 상태를 확인합니다.'}</span>
+        {actionsUrl&&<a href={actionsUrl} rel="noopener noreferrer" target="_blank">GitHub 실행 기록</a>}
+      </div>
+      {completedDate&&<button type="button" onClick={()=>{
+        const day=completedDate;setActiveView('research');setCompletedDate('');setScanInfo('');
+        void search(1,false,gcFields,gcLogic,day);
+      }}>완료 결과 보기</button>}
+    </div>}
     {/* R153_BOTTOM_NAV_ONLY: navigation is in the bottom dock on every viewport. */}
     {installGuide&&<div className="install-guide" role="status"><button className="guide-close" onClick={()=>setInstallGuide(false)} aria-label="안내 닫기"><X size={17}/></button>
       <strong>휴대폰에 설치하는 방법</strong><p>안드로이드 Chrome: 오른쪽 위 ⋮ → <b>앱 설치</b> 또는 <b>홈 화면에 추가</b></p>
@@ -251,7 +307,7 @@ function App(){
         <div className="filter-body" id="filter-body">
           <p className="latest-label"><Database size={14}/> 저장된 최신 거래일 <strong>{latest||'확인 중'}</strong></p>
           <label>검색 방법</label><div className="switch"><button className={mode==='single'?'active':''} type="button" onClick={()=>setMode('single')}>지정 날짜</button><button className={mode==='range'?'active':''} type="button" onClick={()=>setMode('range')}>기간 검색</button></div>
-          {mode==='single'?<><label htmlFor="scan-date">검색 날짜</label><input id="scan-date" type="date" value={date} onChange={e=>{setDate(e.target.value);setWatchDate('');setDataStatus('');}}/></>:
+          {mode==='single'?<><label htmlFor="scan-date">검색 날짜</label><input id="scan-date" type="date" value={date} onChange={e=>{setDate(e.target.value);setDataStatus('');}}/></>:
           <><label htmlFor="scan-start">시작일</label><input id="scan-start" type="date" value={start} onChange={e=>setStart(e.target.value)}/><label htmlFor="scan-end">종료일</label><input id="scan-end" type="date" value={end} onChange={e=>setEnd(e.target.value)}/></>}
           <label>기술 신호</label><div className="checks">{tags.map(t=><label className="check" key={t}><input type="checkbox" checked={signals.includes(t)} onChange={()=>flip(t)}/>{showSignal(t)}</label>)}</div>
           <label htmlFor="scan-logic">신호 조합</label><select id="scan-logic" value={logic} onChange={e=>setLogic(e.target.value)}><option value="any">하나라도 충족 (OR)</option><option value="all">모두 충족 (AND)</option></select>
