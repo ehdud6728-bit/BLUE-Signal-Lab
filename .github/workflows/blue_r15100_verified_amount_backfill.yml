@@ -1,0 +1,360 @@
+name: BLUE R1.5.10.0 Verified EOD Amount Backfill (AUDIT FIRST)
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: 'audit=remote SELECT only. preview=verify MARCAP data without D1 writes. apply=write exact amount only with confirm_write=true.'
+        required: true
+        default: audit
+        type: choice
+        options:
+          - audit
+          - preview
+          - apply
+      confirm_write:
+        description: 'Must be TRUE only for apply. Never deletes prices, signals, charts, tokens or basket data.'
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: blue-r15100-d1-traded-amount-backfill
+  cancel-in-progress: false
+
+jobs:
+  audit_preview_or_gated_apply:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Guard exact BLUE repository and main
+        shell: bash
+        run: |
+          test "$GITHUB_REPOSITORY" = 'ehdud6728-bit/BLUE-Signal-Lab'
+          test "$GITHUB_REF_NAME" = 'main'
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install offline proof and D1 client dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install 'requests>=2.31,<3'
+          if [ "${{ inputs.mode }}" != 'audit' ]; then
+            python -m pip install 'pandas>=2,<4' 'numpy>=1.26,<3' 'pyarrow>=15,<25'
+          fi
+      - name: Restore pinned, reviewable, single-purpose backfill program in temporary runner folder
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > "$RUNNER_TEMP/blue_r15100_amount_backfill.py" <<'PYTHON_BLUER15100'
+          #!/usr/bin/env python3
+          """BLUE R1.5.10.0: exact EOD traded-amount backfill for existing D1 search rows.
+          
+          Usage from the manually gated GitHub Action only.  Audit = SELECT only.
+          Preview = read public historical marcap files, with no D1 changes.
+          Apply = user-confirmed UPDATE of absent traded_amount_krw ONLY.
+          
+          No orders, KIS requests, token access, historical scan re-runs or deletions.
+          """
+          from __future__ import annotations
+          import hashlib
+          import io
+          import json
+          import math
+          import os
+          import re
+          import sys
+          from collections import Counter
+          from datetime import datetime, timezone
+          from typing import Any
+          
+          BASE = 'https://api.cloudflare.com/client/v4/accounts/{account}/d1/database/{database}/query'
+          DB_ID = '272318c7-afd2-419c-91cc-dc59475ef87a'  # committed worker/wrangler.jsonc ID
+          MARCAP = 'https://raw.githubusercontent.com/FinanceData/marcap/master/data/marcap-{}.parquet'
+          MAX_ROWS = 20000
+          PAGE = 500
+          MIN_DAY = '2025-01-01'
+          MAX_DAY = '2026-12-31'
+          
+          # Align with the production /api/search most-recent verified run for each day.
+          ACTIVE = '''s.run_id IN (
+           SELECT r.run_id FROM runs r WHERE r.is_demo=0 AND r.latest_price_date=s.day
+           ORDER BY r.created_at DESC,r.run_id DESC LIMIT 1)'''
+          AMOUNT = "CAST(json_extract(CASE WHEN json_valid(s.extras_json) THEN s.extras_json ELSE '{}' END,'$.traded_amount_krw') AS REAL)"
+          ALLOWED_CODE = re.compile(r'^[0-9A-Z]{6}$')
+          
+          
+          def log(tag: str, obj: Any) -> None:
+              print('BLUE_R15100_' + tag + ' ' + json.dumps(obj, ensure_ascii=False, sort_keys=True), flush=True)
+          
+          
+          class D1:
+              def __init__(self):
+                  self.account = os.environ['CLOUDFLARE_ACCOUNT_ID']
+                  self.token = os.environ['CLOUDFLARE_API_TOKEN']
+                  if not re.fullmatch(r'[A-Za-z0-9]{32}', self.account):
+                      raise RuntimeError('INVALID_CF_ACCOUNT')
+                  if not self.token:
+                      raise RuntimeError('CF_TOKEN_MISSING')
+                  import requests
+                  self.http = requests.Session()
+                  self.http.headers.update({'Authorization': 'Bearer ' + self.token, 'Content-Type': 'application/json'})
+                  self.url = BASE.format(account=self.account, database=DB_ID)
+          
+              def post(self, body: dict) -> list:
+                  try:
+                      r = self.http.post(self.url, json=body, timeout=120)
+                      data = r.json()
+                  except Exception as exc:
+                      raise RuntimeError('D1_NETWORK_OR_RESPONSE_ERROR') from exc
+                  if r.status_code != 200 or not data.get('success'):
+                      # Never include HTTP response bodies, tokens, or SQL in logs.
+                      errors = [str(item.get('code', '?')) for item in data.get('errors', []) if isinstance(item, dict)]
+                      raise RuntimeError(f'D1_QUERY_REJECTED_HTTP_{r.status_code}_CODES_{"_".join(errors) or "NONE"}')
+                  results = data.get('result')
+                  if not isinstance(results, list) or any(not isinstance(v, dict) or not v.get('success', False) for v in results):
+                      raise RuntimeError('D1_QUERY_RESULT_FAILURE')
+                  return results
+          
+              def select(self, sql: str, params: list[str] | None = None) -> list[dict]:
+                  if not sql.lstrip().upper().startswith('SELECT '):
+                      raise RuntimeError('D1_AUDIT_REQUIRES_SELECT')
+                  rs = self.post({'sql': sql, 'params': params or []})
+                  return [row for r in rs for row in r.get('results', [])]
+          
+              def update_batch(self, batch: list[dict]) -> None:
+                  if not batch or len(batch) > 30:
+                      raise RuntimeError('BATCH_SIZE_INVALID')
+                  if any(not item['sql'].lstrip().upper().startswith('UPDATE SIGNALS') for item in batch):
+                      raise RuntimeError('D1_UPDATE_SCOPE_INVALID')
+                  self.post({'batch': batch})
+          
+          
+          def audit(db: D1) -> dict:
+              count_sql = f'''SELECT COUNT(*) AS total_rows,
+              SUM(CASE WHEN {AMOUNT}>0 THEN 1 ELSE 0 END) AS amount_present,
+              SUM(CASE WHEN {AMOUNT} IS NULL OR {AMOUNT}<=0 THEN 1 ELSE 0 END) AS amount_missing,
+              SUM(CASE WHEN {AMOUNT}>=100000000 THEN 1 ELSE 0 END) AS eligible_1eok,
+              SUM(CASE WHEN {AMOUNT}>=50000000000 THEN 1 ELSE 0 END) AS eligible_500eok
+              FROM signals s WHERE {ACTIVE} AND s.day BETWEEN '{MIN_DAY}' AND '{MAX_DAY}'
+              '''
+              count = db.select(count_sql)[0]
+              day_sql = f'''SELECT s.day,COUNT(*) AS total_rows,
+              SUM(CASE WHEN {AMOUNT}>0 THEN 1 ELSE 0 END) AS amount_present,
+              SUM(CASE WHEN {AMOUNT} IS NULL OR {AMOUNT}<=0 THEN 1 ELSE 0 END) AS amount_missing,
+              SUM(CASE WHEN {AMOUNT}>=100000000 THEN 1 ELSE 0 END) AS eligible_1eok,
+              SUM(CASE WHEN {AMOUNT}>=50000000000 THEN 1 ELSE 0 END) AS eligible_500eok
+              FROM signals s WHERE {ACTIVE} AND s.day BETWEEN '{MIN_DAY}' AND '{MAX_DAY}'
+              GROUP BY s.day ORDER BY s.day DESC LIMIT 12'''
+              rows = db.select(day_sql)
+              summary = {
+                  'recent_days_count': len(rows),
+                  'total_rows': int(count['total_rows'] or 0),
+                  'amount_present': int(count['amount_present'] or 0),
+                  'amount_missing': int(count['amount_missing'] or 0),
+                  'eligible_1eok': int(count['eligible_1eok'] or 0),
+                  'eligible_500eok': int(count['eligible_500eok'] or 0),
+                  'recent_days': rows,
+                  'note': 'most recent verified non-demo run per day; latest 12 days shown; no live market calls'
+              }
+              log('AUDIT', summary)
+              return summary
+          
+          
+          def missing_rows(db: D1) -> list[dict]:
+              sql = f'''SELECT s.run_id,s.code,s.day,s.close_price FROM signals s
+                 WHERE {ACTIVE} AND s.day BETWEEN '{MIN_DAY}' AND '{MAX_DAY}'
+                 AND ({AMOUNT} IS NULL OR {AMOUNT}<=0)
+                 ORDER BY s.day DESC,s.code,s.run_id LIMIT ? OFFSET ?'''
+              rows=[]
+              for offset in range(0, MAX_ROWS, PAGE):
+                  chunk=db.select(sql, [str(PAGE), str(offset)])
+                  rows.extend(chunk)
+                  if len(chunk)<PAGE:
+                      break
+              if len(rows)>=MAX_ROWS:
+                  raise RuntimeError('MORE_THAN_20000_MISSING_ROWS_PLEASE_SCOPE_BACKFILL')
+              return rows
+          
+          
+          def clean_code(v: Any) -> str:
+              code=str(v).strip().upper()
+              if code.endswith('.0'):
+                  code=code[:-2]
+              return code.zfill(6)
+          
+          
+          def choose_verified(row: dict, data: dict) -> tuple[str, int | None]:
+              """Exact as-of code/date + source closing price agreement; no inferred trading amount."""
+              record=data.get((str(row.get('day')), str(row.get('code'))))
+              if record is None:
+                  return 'SOURCE_UNAVAILABLE', None
+              try:
+                  close_saved=float(row['close_price'])
+                  close_source=float(record['close'])
+                  amount=float(record['amount'])
+                  if not all(map(math.isfinite,(close_saved,close_source,amount))):
+                      return 'INVALID_VALUES', None
+                  if close_saved<=0 or close_source<=0 or amount<=0:
+                      return 'INVALID_VALUES', None
+                  if abs(close_saved-close_source)>0.00001:
+                      return 'CLOSE_MISMATCH', None
+                  if abs(amount-round(amount))>.01 or amount>=2**63:
+                      return 'INVALID_AMOUNT', None
+                  return 'MATCHED',int(round(amount))
+              except (TypeError,ValueError,OverflowError,KeyError):
+                  return 'INVALID_VALUES',None
+          
+          
+          def load_source(keys: set[tuple[str,str]]) -> tuple[dict,dict]:
+              import pandas as pd
+              import requests
+              out={}
+              metadata={}
+              by_year={2025:set(),2026:set()}
+              for day,code in keys:
+                  if not (MIN_DAY<=day<=MAX_DAY) or not ALLOWED_CODE.fullmatch(code):
+                      continue
+                  by_year[int(day[:4])].add((day,code))
+              for year, needed in by_year.items():
+                  if not needed:
+                      continue
+                  url=MARCAP.format(year)
+                  r=requests.get(url, timeout=120)
+                  if not r.ok:
+                      metadata[str(year)]={'status':'SOURCE_DOWNLOAD_UNAVAILABLE','http':r.status_code}
+                      continue
+                  content=r.content
+                  sha=hashlib.sha256(content).hexdigest()
+                  try:
+                      df=pd.read_parquet(io.BytesIO(content),columns=['Date','Code','Close','Amount','Market'])
+                  except Exception as exc:
+                      raise RuntimeError('MARCAP_PARQUET_INVALID_'+str(year)) from exc
+                  df['day']=pd.to_datetime(df['Date'],errors='coerce').dt.strftime('%Y-%m-%d')
+                  df['code']=df['Code'].map(clean_code)
+                  valid_days={day for day,_ in needed}
+                  valid_codes={code for _,code in needed}
+                  df=df.loc[df['day'].isin(valid_days)&df['code'].isin(valid_codes)
+                            &df['Market'].astype(str).str.upper().isin(['KOSPI','KOSDAQ'])]
+                  if df.duplicated(['day','code']).any():
+                      raise RuntimeError('MARCAP_DUPLICATE_CODE_DAY_'+str(year))
+                  for d,c,cl,amt in zip(df.day,df.code,df.Close,df.Amount):
+                      out[(d,c)]={'close':cl,'amount':amt}
+                  metadata[str(year)]={'status':'READ','sha256':sha,'bytes':len(content),'selected_source_rows':len(df)}
+              return out,metadata
+          
+          
+          UPDATE_SQL = """UPDATE signals SET extras_json=json_set(
+            CASE WHEN json_valid(extras_json) THEN extras_json ELSE '{}' END,
+            '$.traded_amount_krw',CAST(? AS INTEGER))
+           WHERE run_id=? AND code=? AND day=? AND CAST(close_price AS REAL)=CAST(? AS REAL)
+             AND (json_extract(CASE WHEN json_valid(extras_json) THEN extras_json ELSE '{}' END,
+             '$.traded_amount_krw') IS NULL
+             OR CAST(json_extract(CASE WHEN json_valid(extras_json) THEN extras_json ELSE '{}' END,
+             '$.traded_amount_krw') AS REAL)<=0)"""
+          
+          
+          def prepare(rows: list[dict], source: dict) -> tuple[list[dict],Counter]:
+              batches=[]
+              statuses=Counter()
+              for r in rows:
+                  day=str(r.get('day',''))
+                  code=str(r.get('code',''))
+                  run_id=str(r.get('run_id',''))
+                  if not re.fullmatch(r'[A-Za-z0-9._-]{1,80}',run_id) or not ALLOWED_CODE.fullmatch(code) or not re.fullmatch(r'20\d{2}-\d{2}-\d{2}',day):
+                      statuses['INVALID_ROW_ID']+=1
+                      continue
+                  label, amount=choose_verified(r,source)
+                  statuses[label]+=1
+                  if label=='MATCHED':
+                      batches.append({'sql': UPDATE_SQL, 'params': [str(amount),run_id,code,day,str(r['close_price'])]})
+              return batches,statuses
+          
+          
+          def selftest():
+              fake={('2026-11-10','005930'):{'close':100,'amount':50000000000}}
+              rows=[{'day':'2026-11-10','code':'005930','run_id':'run1','close_price':100},
+                    {'day':'2026-11-10','code':'005930','run_id':'run2','close_price':101},
+                    {'day':'2026-11-09','code':'005930','run_id':'run3','close_price':100}]
+              result,counts=prepare(rows,fake)
+              assert len(result)==1 and counts=={'MATCHED':1,'CLOSE_MISMATCH':1,'SOURCE_UNAVAILABLE':1},counts
+              assert 'UPDATE signals SET extras_json=json_set' in result[0]['sql']
+              assert result[0]['params'][0]=='50000000000'
+              assert clean_code('88K')=='00088K'
+              log('SELFTEST_PASS',{'cases':3,'matches':1})
+          
+          
+          def main():
+              mode=os.environ.get('BACKFILL_MODE','audit')
+              confirmed=os.environ.get('CONFIRM_WRITE','false').lower()=='true'
+              if mode not in ('audit','preview','apply'):
+                  raise RuntimeError('INVALID_MODE')
+              if mode=='apply' and not confirmed:
+                  raise RuntimeError('WRITE_REQUIRES_EXPLICIT_CONFIRMATION')
+              if mode!='apply' and confirmed:
+                  raise RuntimeError('CONFIRM_WRITE_ONLY_WITH_APPLY')
+              selftest()
+              db=D1()
+              before=audit(db)
+              if mode=='audit':
+                  log('READ_ONLY_COMPLETE',{'mode':'audit','database_changed':False})
+                  return
+              missing=missing_rows(db)
+              if not missing:
+                  log('NO_MISSING_RECORDS',{'mode':mode})
+                  return
+              source,meta=load_source({(str(r['day']),str(r['code'])) for r in missing})
+              pending,stats=prepare(missing,source)
+              log('PREVIEW',{'mode':mode,'missing_rows_checked':len(missing),'eligible_exact_source_matches':len(pending),
+                             'source_metadata':meta,'skipped':dict(stats),'writes_enabled':mode=='apply'})
+              if mode=='preview':
+                  log('READ_ONLY_COMPLETE',{'mode':'preview','database_changed':False})
+                  return
+              # One audited UPDATE per exact existing row, no deletes, INSERTs or other tables.
+              for offset in range(0,len(pending),30):
+                  db.update_batch(pending[offset:offset+30])
+                  if (offset//30+1)%10==0 or offset+30>=len(pending):
+                      log('APPLY_PROGRESS',{'attempted':min(offset+30,len(pending)),'total':len(pending)})
+              after=audit(db)
+              log('APPLY_COMPLETE',{'candidate_rows':len(pending),'amount_rows_before':before['amount_present'],
+                                    'amount_rows_after':after['amount_present'],'missing_after':after['amount_missing'],
+                                    'eligible_1eok_after':after['eligible_1eok'],
+                                    'eligible_500eok_after':after['eligible_500eok'],
+                                    'source_unavailable_or_mismatch':len(missing)-len(pending),
+                                    'note':'Only exact original-source daily trading amounts, no synthetic values'})
+          
+          
+          if __name__=='__main__':
+              try:
+                  main()
+              except Exception as ex:
+                  # Error logs must never include Cloudflare tokens, SQL bodies, or API response bodies.
+                  log('FAIL',{'reason':str(ex)[:150] if isinstance(ex,RuntimeError) else type(ex).__name__})
+                  raise SystemExit(1)
+          PYTHON_BLUER15100
+          printf '%s  %s\n' '915df8e876d9014177760ee17cad9deeb4aca185fc350d58d821caf3336321d7' "$RUNNER_TEMP/blue_r15100_amount_backfill.py" | sha256sum -c -
+          python -m py_compile "$RUNNER_TEMP/blue_r15100_amount_backfill.py"
+      - name: Verify matching logic offline and inspect / update ONLY after explicit gate
+        shell: bash
+        env:
+          BACKFILL_MODE: ${{ inputs.mode }}
+          CONFIRM_WRITE: ${{ inputs.confirm_write }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          test -n "$CLOUDFLARE_API_TOKEN"
+          test -n "$CLOUDFLARE_ACCOUNT_ID"
+          test "$BACKFILL_MODE" != 'apply' || test "$CONFIRM_WRITE" = 'true'
+          test "$BACKFILL_MODE" = 'apply' || test "$CONFIRM_WRITE" != 'true'
+          python "$RUNNER_TEMP/blue_r15100_amount_backfill.py"
+      - name: State strict operation boundary
+        shell: bash
+        run: |
+          echo 'BLUE_R15100: D1 amount metadata only, exact source matching. No orders, tokens, KIS, Collector, web/API deployments.'
+          echo 'The public website uses the existing API; successful D1 backfill should make the existing amount filter work without redeployment.'
