@@ -1,0 +1,307 @@
+name: BLUE R1.5.10.3 Configurable Tomato Minimum Samples (MANUAL SAFE)
+
+on:
+  workflow_dispatch:
+    inputs:
+      apply_changes:
+        description: 'FALSE = source patch, tests and builds only. TRUE = commit the reviewed 5-file patch after all checks pass.'
+        type: boolean
+        required: true
+        default: false
+
+permissions:
+  contents: write
+
+concurrency:
+  group: blue-r15103-tomato-minimum-samples
+  cancel-in-progress: false
+
+jobs:
+  verify_and_optional_commit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Restrict repository and main branch
+        shell: bash
+        run: |
+          test "$GITHUB_REPOSITORY" = 'ehdud6728-bit/BLUE-Signal-Lab'
+          test "$GITHUB_REF_NAME" = 'main'
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Restore SHA256-verified R1.5.10.3 patch into runner temporary folder
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > "$RUNNER_TEMP/blue_r15103_patch.py" <<'PYR15103'
+          #!/usr/bin/env python3
+          """R1.5.10.3: configurable historical pattern minimum samples. Source-only patch.
+
+          No KIS, Collector, trading algorithms, D1 writes or source-data migrations.
+          Fail closed if source anchors have changed.
+          """
+          from pathlib import Path
+          import subprocess
+
+          MAIN=Path('web/src/main.tsx')
+          BASKET=Path('web/src/SmartBasket.tsx')
+          CHART=Path('web/src/StockChart.tsx')
+          API=Path('worker/src/index.ts')
+          CSS=Path('web/src/r1599-pattern-filters.css')
+
+
+          def one(data, old, new, tag):
+              count=data.count(old)
+              if count!=1:
+                  raise RuntimeError(f'BLUE_R15103_ANCHOR_MISMATCH_{tag}_{count}')
+              return data.replace(old,new,1)
+
+          main=MAIN.read_text(encoding='utf-8')
+          main=one(main,
+          """  const [onlyPattern,setOnlyPattern]=useState(()=>{
+              try{return localStorage.getItem('blue_r1599_only_pattern')==='true';}catch{return false;}
+            });""",
+          """  const [onlyPattern,setOnlyPattern]=useState(()=>{
+              try{return localStorage.getItem('blue_r1599_only_pattern')==='true';}catch{return false;}
+            });
+            // Historical pattern evidence saved in D1 has a hard support floor of 8.
+            const [patternSampleMin,setPatternSampleMin]=useState<number>(()=>{
+              try{const value=localStorage.getItem('blue_r15103_pattern_min_samples');
+                return value&&['8','10','15','20','30'].includes(value)?Number(value):8;}
+              catch{return 8;}
+            });""",'MAIN_STATE')
+          main=one(main,
+          """      localStorage.setItem('blue_r1599_pattern_threshold',patternThreshold);
+                localStorage.setItem('blue_r1599_only_pattern',String(onlyPattern));}""",
+          """      localStorage.setItem('blue_r1599_pattern_threshold',patternThreshold);
+                localStorage.setItem('blue_r1599_only_pattern',String(onlyPattern));
+                localStorage.setItem('blue_r15103_pattern_min_samples',String(patternSampleMin));}""",'MAIN_SAVE')
+          main=one(main,
+          """  },[amountChoice,customAmount,patternThreshold,onlyPattern]);""",
+          """  },[amountChoice,customAmount,patternThreshold,onlyPattern,patternSampleMin]);""",'MAIN_DEPENDENCIES')
+          main=one(main,
+          """requestedDay?:string,patternOverride?:{enabled?:boolean;threshold?:number|null}){""",
+          """requestedDay?:string,patternOverride?:{enabled?:boolean;threshold?:number|null;minSamples?:number}){""",'MAIN_SEARCH_OVERRIDE_TYPE')
+          main=one(main,
+          """      const effectiveHighlightMin=patternOverride?.threshold!==undefined?patternOverride.threshold:highlightMin;
+                if(effectiveOnlyPattern&&effectiveHighlightMin!==null){u.searchParams.set('only_pattern','1');u.searchParams.set('min_pattern_up',String(effectiveHighlightMin));}""",
+          """      const effectiveHighlightMin=patternOverride?.threshold!==undefined?patternOverride.threshold:highlightMin;
+                const effectiveMinSamples=patternOverride?.minSamples??patternSampleMin;
+                if(effectiveOnlyPattern&&effectiveHighlightMin!==null){
+                  u.searchParams.set('only_pattern','1');u.searchParams.set('min_pattern_up',String(effectiveHighlightMin));
+                  u.searchParams.set('min_pattern_n',String(effectiveMinSamples));
+                }""",'MAIN_API_QUERY')
+          main=one(main,
+          """  // The highlighted metric comes only from actual in-sample EOD pattern counts (n>=8).
+            const patternUp=(r:Signal)=>{const p=num(r,'r159_pattern_up_10d');const n=num(r,'r159_pattern_n_10d');
+              return highlightMin!==null&&n!==null&&n>=8&&p!==null&&p>=highlightMin?p:null;};""",
+          """  // Only stored EOD pattern evidence is eligible: support n>=8, higher if selected.
+            const patternUp=(r:Signal)=>{const p=num(r,'r159_pattern_up_10d');const n=num(r,'r159_pattern_n_10d');
+              return highlightMin!==null&&n!==null&&n>=patternSampleMin&&p!==null&&p>=highlightMin?p:null;};""",'MAIN_HOT_PATTERN')
+          main=one(main,
+          """refreshKey={r1594BasketRefresh} patternHighlightMin={highlightMin}/>""",
+          """refreshKey={r1594BasketRefresh} patternHighlightMin={highlightMin} patternSampleMin={patternSampleMin}/>""",'MAIN_BASKET_PROP')
+          main=one(main,
+          """highlightMin+'% 이상 · 표본 8건 이상'""",
+          """highlightMin+'% 이상 · 표본 '+patternSampleMin+'건 이상'""",'MAIN_FILTER_SUMMARY')
+          # Compact select stays inside the existing unified Golden Cross box.
+          main=one(main,
+          """              <label className="r1599-hot-only"><input type="checkbox" checked={onlyPattern} disabled={patternThreshold==='off'}
+                          onChange={e=>{
+                            const checked=e.target.checked;setOnlyPattern(checked);
+                            if(total!==null)void search(1,false,gcFields,gcLogic,undefined,{enabled:checked});
+                          }}/> 해당 종목만 보기</label>""",
+          """              <label htmlFor="r15103-min-samples">표본</label>
+                        <select id="r15103-min-samples" aria-label="토마토 최소 표본 수" value={patternSampleMin}
+                          onChange={e=>{const nextMin=Number(e.target.value);setPatternSampleMin(nextMin);
+                            if(onlyPattern&&total!==null)void search(1,false,gcFields,gcLogic,undefined,{minSamples:nextMin});
+                          }}>
+                          <option value={8}>8건 (기본)</option><option value={10}>10건</option>
+                          <option value={15}>15건</option><option value={20}>20건</option><option value={30}>30건</option>
+                        </select>
+                        <label className="r1599-hot-only"><input type="checkbox" checked={onlyPattern} disabled={patternThreshold==='off'}
+                          onChange={e=>{
+                            const checked=e.target.checked;setOnlyPattern(checked);
+                            if(total!==null)void search(1,false,gcFields,gcLogic,undefined,{enabled:checked});
+                          }}/> 해당 종목만 보기</label>""",'MAIN_SELECT_WITHIN_GC')
+          main=one(main,
+          """GC는 당일 발생 기준 · 토마토는 10거래일 상승 관측 비율(표본 8건 이상)입니다. 토마토 기준은 목록·장바구니 공통이며 미래 수익을 보장하지 않습니다.""",
+          """GC는 당일 발생 기준 · 토마토는 10거래일 상승 관측 비율과 선택한 최소 표본 수를 함께 충족해야 합니다. 원본 근거는 8건 이상만 저장되며, 과거 성과는 미래 수익을 보장하지 않습니다.""",'MAIN_NOTE')
+          main=one(main,
+          """lineCandidates={validLines(selected).map(l=>({signal:l.signal,price:l.price}))} highlightThreshold={highlightMin}/>""",
+          """lineCandidates={validLines(selected).map(l=>({signal:l.signal,price:l.price}))} highlightThreshold={highlightMin} highlightSamplesMin={patternSampleMin}/>""",'MAIN_CHART_PROP')
+
+          basket=BASKET.read_text(encoding='utf-8')
+          basket=one(basket,
+          """const hotPattern=(x:BasketItem,threshold:number|null)=>threshold!==null&&
+           typeof x.patternUp10d==='number'&&x.patternUp10d>=threshold&&
+           typeof x.patternN10d==='number'&&x.patternN10d>=8;""",
+          """const hotPattern=(x:BasketItem,threshold:number|null,minSamples:number)=>threshold!==null&&
+           typeof x.patternUp10d==='number'&&x.patternUp10d>=threshold&&
+           typeof x.patternN10d==='number'&&x.patternN10d>=minSamples;""",'BASKET_HOT_HELPER')
+          basket=one(basket,
+          """export default function SmartBasket({quickAddRequest,onItemsChange,active=true,refreshKey=0,patternHighlightMin=70}: {""",
+          """export default function SmartBasket({quickAddRequest,onItemsChange,active=true,refreshKey=0,patternHighlightMin=70,patternSampleMin=8}: {""",'BASKET_COMPONENT')
+          basket=one(basket,
+          """ patternHighlightMin?:number|null;
+          }){""",
+          """ patternHighlightMin?:number|null;
+           patternSampleMin?:number;
+          }){""",'BASKET_PROP_TYPE')
+          basket=one(basket,
+          """ const isHot=(x:BasketItem)=>hotPattern(x,patternHighlightMin);""",
+          """ const isHot=(x:BasketItem)=>hotPattern(x,patternHighlightMin,patternSampleMin);""",'BASKET_IS_HOT')
+
+          chart=CHART.read_text(encoding='utf-8')
+          chart=one(chart,
+          """highlightThreshold?:number|null};""",
+          """highlightThreshold?:number|null;highlightSamplesMin?:number};""",'CHART_PROP_TYPE')
+          chart=one(chart,
+          """function Evidence({stats,highlightThreshold}:{stats:Stats;highlightThreshold:number|null}){""",
+          """function Evidence({stats,highlightThreshold,highlightSamplesMin}:{stats:Stats;highlightThreshold:number|null;highlightSamplesMin:number}){""",'CHART_EVIDENCE_PROP')
+          chart=one(chart,
+          """const hot=highlightThreshold!==null&&x.n>=8&&x.up_pct!==null&&x.up_pct>=highlightThreshold;""",
+          """const hot=highlightThreshold!==null&&x.n>=highlightSamplesMin&&x.up_pct!==null&&x.up_pct>=highlightThreshold;""",'CHART_EVIDENCE_HOT')
+          chart=one(chart,
+          """export default function StockChart({code,day,name,supplyPrice,supplyGrade,lineCandidates,highlightThreshold=70}:Props){""",
+          """export default function StockChart({code,day,name,supplyPrice,supplyGrade,lineCandidates,highlightThreshold=70,highlightSamplesMin=8}:Props){""",'CHART_COMPONENT')
+          chart=one(chart,
+          """x.n>=8&&x.up_pct!==null&&x.up_pct>=highlightThreshold;""",
+          """x.n>=highlightSamplesMin&&x.up_pct!==null&&x.up_pct>=highlightThreshold;""",'CHART_OUTER_HOT')
+          chart=one(chart,
+          """<Evidence stats={data.stats} highlightThreshold={highlightThreshold}/>""",
+          """<Evidence stats={data.stats} highlightThreshold={highlightThreshold} highlightSamplesMin={highlightSamplesMin}/>""",'CHART_EVIDENCE_CALL')
+
+          api=API.read_text(encoding='utf-8')
+          api=one(api,
+          """        const minPattern=(u.searchParams.get('min_pattern_up')||'70').trim();
+                  if(!['0','1'].includes(onlyPattern)||!['60','70','80','90'].includes(minPattern))
+                    return respond({error:'INVALID_PATTERN_FILTER'},400);""",
+          """        const minPattern=(u.searchParams.get('min_pattern_up')||'70').trim();
+                  const minPatternN=(u.searchParams.get('min_pattern_n')||'8').trim();
+                  if(!['0','1'].includes(onlyPattern)||!['60','70','80','90'].includes(minPattern)||
+                     !['8','10','15','20','30'].includes(minPatternN))
+                    return respond({error:'INVALID_PATTERN_FILTER'},400);""",'API_MIN_N_VALIDATION')
+          api=one(api,
+          """            CAST(json_extract(extras_json,'$.r159_pattern_n_10d') AS INTEGER) ELSE 0 END)>=8`);""",
+          """            CAST(json_extract(extras_json,'$.r159_pattern_n_10d') AS INTEGER) ELSE 0 END)>=?`);
+                    args.push(Number(minPatternN));""",'API_MIN_N_SQL')
+
+          css=CSS.read_text(encoding='utf-8')
+          marker='/* R1.5.10.3 minimum pattern samples selector */'
+          if marker in css:
+              raise RuntimeError('BLUE_R15103_ALREADY_PATCHED')
+          css=css.rstrip()+"\n\n"+marker+"\n"+""".r15102-tomato-inline #r15103-min-samples{min-width:98px;max-width:135px}
+          @media(max-width:520px){.r15102-tomato-inline{column-gap:6px;row-gap:7px}.r15102-tomato-inline #r15103-min-samples{min-width:94px;max-width:120px}.r15102-tomato-inline .r1599-hot-only{font-size:10px}}
+          """
+
+          # Static invariants, including preserving the compact parent panel.
+          assert main.count('id="r15103-min-samples"')==1
+          assert 'className="gc-filter-panel r15102-unified-filter"' in main
+          assert 'r15101-tomato-panel' not in main
+          assert main.count('patternSampleMin={patternSampleMin}')==1
+          assert main.count('highlightSamplesMin={patternSampleMin}')==1
+          assert 'min_pattern_n' in main and 'min_pattern_n' in api
+          assert 'CORS_ORIGIN' not in api or 'CORS_ORIGIN' in API.read_text(encoding='utf-8')
+
+          for path,content in [(MAIN,main),(BASKET,basket),(CHART,chart),(API,api),(CSS,css)]:
+              path.write_text(content,encoding='utf-8')
+
+          expected={str(MAIN),str(BASKET),str(CHART),str(API),str(CSS)}
+          changed=set(subprocess.check_output(['git','diff','--name-only'],text=True).splitlines())
+          if changed!=expected:
+              raise RuntimeError('BLUE_R15103_UNEXPECTED_CHANGED_FILES_'+','.join(sorted(changed)))
+          print('BLUE_R15103_SCOPED_PATCH_PASS',sorted(changed),flush=True)
+          PYR15103
+          printf '%s  %s\n' 'bd74997fb93b467a4c924addb8e2864d9b46e1ca35912585662ed00b4baa85b5' "$RUNNER_TEMP/blue_r15103_patch.py" | sha256sum -c -
+          python -m py_compile "$RUNNER_TEMP/blue_r15103_patch.py"
+          echo 'BLUE_R15103_PATCH_HASH_OK'
+      - name: Apply exact-match patch to temporary checkout (no remote change)
+        shell: bash
+        run: |
+          set -euo pipefail
+          python "$RUNNER_TEMP/blue_r15103_patch.py"
+          python - <<'PYVERIFY'
+          from pathlib import Path
+          import subprocess
+          main=Path('web/src/main.tsx').read_text(encoding='utf-8')
+          basket=Path('web/src/SmartBasket.tsx').read_text(encoding='utf-8')
+          chart=Path('web/src/StockChart.tsx').read_text(encoding='utf-8')
+          api=Path('worker/src/index.ts').read_text(encoding='utf-8')
+          assert main.count('id="r15103-min-samples"')==1
+          assert 'className="gc-filter-panel r15102-unified-filter"' in main
+          assert main.count('r15101-tomato-panel')==0
+          assert 'patternSampleMin={patternSampleMin}' in main and 'highlightSamplesMin={patternSampleMin}' in main
+          assert 'n>=patternSampleMin' in main
+          assert 'hotPattern(x,patternHighlightMin,patternSampleMin)' in basket
+          assert 'x.n>=highlightSamplesMin' in chart
+          assert "u.searchParams.set('min_pattern_n',String(effectiveMinSamples))" in main
+          assert "args.push(Number(minPatternN))" in api
+          assert "['8','10','15','20','30'].includes(minPatternN)" in api
+          assert "localStorage.setItem('blue_r15103_pattern_min_samples'" in main
+          assert Path('web/src/r1599-pattern-filters.css').read_text(encoding='utf-8').count('R1.5.10.3 minimum pattern samples selector')==1
+          changed={x.strip() for x in subprocess.check_output(['git','diff','--name-only'],text=True).splitlines() if x.strip()}
+          expected={'web/src/main.tsx','web/src/SmartBasket.tsx','web/src/StockChart.tsx','web/src/r1599-pattern-filters.css','worker/src/index.ts'}
+          assert changed==expected,(changed,expected)
+          print('BLUE_R15103_SAMPLE_FILTERS_AND_SCOPE_PASS')
+          PYVERIFY
+          git diff --check
+          python - <<'PYIGNORE'
+          from pathlib import Path
+          p=Path('.git/info/exclude')
+          with p.open('a',encoding='utf-8') as f:
+              f.write('\n/web/node_modules/\n/web/dist/\n/worker/node_modules/\n*.tsbuildinfo\n__pycache__/\n*.pyc\n')
+          PYIGNORE
+      - name: Build React TypeScript frontend and Vite production bundle
+        working-directory: web
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm install --no-package-lock --no-audit --no-fund
+          npm run build
+          echo 'BLUE_R15103_WEB_BUILD_PASS'
+      - name: Build Worker API without deploying or changing D1
+        working-directory: worker
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm install --no-package-lock --no-audit --no-fund
+          npx wrangler deploy --dry-run --outdir /tmp/blue-r15103-api-dry-run
+          echo 'BLUE_R15103_API_DRY_RUN_PASS'
+      - name: Verify strict changed-file allowlist again
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PYFINAL'
+          from pathlib import Path
+          import subprocess
+          expected={'web/src/main.tsx','web/src/SmartBasket.tsx','web/src/StockChart.tsx','web/src/r1599-pattern-filters.css','worker/src/index.ts'}
+          actual={line[3:] for line in subprocess.check_output(['git','status','--porcelain','-uall'],text=True).splitlines() if line.strip()}
+          assert actual==expected,('BLUE_R15103_UNEXPECTED_BUILD_FILES',sorted(actual))
+          print('BLUE_R15103_FINAL_SCOPE_PASS',sorted(actual))
+          PYFINAL
+          git diff --check
+      - name: Commit only explicitly approved five-file update
+        if: inputs.apply_changes
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add web/src/main.tsx web/src/SmartBasket.tsx web/src/StockChart.tsx web/src/r1599-pattern-filters.css worker/src/index.ts
+          git diff --cached --check
+          git diff --cached --quiet || {
+            git commit -m 'BLUE R1.5.10.3: configurable minimum pattern sample threshold'
+            git push origin HEAD:main
+          }
+          echo 'BLUE_R15103_APPROVED_FILES_COMMITTED'
+      - name: Confirm explicit no-deployment boundary
+        shell: bash
+        run: |
+          echo 'BLUE_R15103_TESTS_PASS'
+          echo 'No live KIS request, D1 writes, trading actions or Cloudflare deployment.'
+          echo 'Web and API Worker require separately verified deployment after apply_changes=true.'
