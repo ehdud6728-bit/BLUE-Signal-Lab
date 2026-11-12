@@ -1,0 +1,168 @@
+name: BLUE R1.5.9.6 FIX3 Visible Quote Refresh and KIS Read-only Diagnosis (MANUAL SAFE)
+
+on:
+  workflow_dispatch:
+    inputs:
+      apply_changes:
+        type: boolean
+        required: true
+        default: false
+        description: 'FALSE tests only; TRUE commits only the reviewed web UI fix after all tests pass.'
+      diagnose_kis:
+        type: boolean
+        required: true
+        default: true
+        description: 'Read-only D1 queue, token expiry and Collector status. Never prints tokens or issues new ones.'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: blue-r1596-fix3-ui-diagnostics
+  cancel-in-progress: false
+
+jobs:
+  verify_and_optional_apply:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Guard owner repository and main
+        shell: bash
+        run: |
+          test "$GITHUB_REPOSITORY" = 'ehdud6728-bit/BLUE-Signal-Lab'
+          test "$GITHUB_REF_NAME" = main
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Validate actual FIX2 source anchors before changing files
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          mini=Path('web/src/PriceCompareMini.tsx').read_text(encoding='utf-8')
+          main=Path('web/src/main.tsx').read_text(encoding='utf-8')
+          assert mini.count("const showRequest=!!onRequest&&!loading&&(!hasLatest||oldQuote);")==1, 'FIX3_ANCHOR_MISSING_SHOW_REQUEST'
+          assert main.count('baseline={r.close_price} loading={r1593Busy}')==2, 'FIX3_ANCHOR_MISSING_LIST_LOADING'
+          assert main.count('baseline={selected.close_price} loading={r1593Busy}')==1, 'FIX3_ANCHOR_MISSING_DETAIL_LOADING'
+          assert main.count('const result=await requestSearchPriority([{code:r.code,day:r.day}]);')==1, 'FIX3_ANCHOR_MISSING_REQUEST'
+          assert main.count('if(data[key]?.latest_price){window.clearInterval(timer);r1595Timers.current.delete(key);}')==1, 'FIX3_ANCHOR_MISSING_EARLY_POLL_STOP'
+          print('FIX3_REAL_SOURCE_ANCHORS_OK')
+          PY
+      - name: Apply scoped web-only FIX3 patch to runner working tree
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          def replace(path, old, new, expected=1):
+              p=Path(path); text=p.read_text(encoding='utf-8'); n=text.count(old)
+              if n!=expected: raise AssertionError(f'FIX3_UNEXPECTED_ANCHORS {path}: {n} != {expected}')
+              p.write_text(text.replace(old,new),encoding='utf-8')
+          mini='web/src/PriceCompareMini.tsx'
+          main='web/src/main.tsx'
+          # Every authenticated, verified stock row has an explicit refresh action.
+          # The server's per-symbol 10-minute throttle remains authoritative.
+          replace(mini,
+            'const showRequest=!!onRequest&&!loading&&(!hasLatest||oldQuote);',
+            'const showRequest=!!onRequest;')
+          # A completed row is no longer labelled "loading" just because some other
+          # entries in the search batch are still being fetched.
+          replace(main,
+            'baseline={r.close_price} loading={r1593Busy}',
+            'baseline={r.close_price} loading={r1593Busy&&!r1593Prices[comparisonKey(r)]}',2)
+          replace(main,
+            'baseline={selected.close_price} loading={r1593Busy}',
+            'baseline={selected.close_price} loading={r1593Busy&&!r1593Prices[comparisonKey(selected)]}')
+          # Capture the request time. A stale, preexisting price cannot be treated
+          # as confirmation that the freshly requested Collector run has completed.
+          replace(main,
+            'const result=await requestSearchPriority([{code:r.code,day:r.day}]);',
+            'const requestStartedAt=new Date().toISOString();\n      const result=await requestSearchPriority([{code:r.code,day:r.day}]);')
+          replace(main,
+            'if(data[key]?.latest_price){window.clearInterval(timer);r1595Timers.current.delete(key);}',
+            "if(data[key]?.quote_status==='READY'&&data[key]?.latest_price&&\n              data[key]?.quote_checked_at&&data[key].quote_checked_at>=requestStartedAt){\n              window.clearInterval(timer);r1595Timers.current.delete(key);\n            }")
+          print('FIX3_SCOPED_PATCH_APPLIED')
+          PY
+      - name: Verify UI behavior and strict scope invariants
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          import subprocess
+          mini=Path('web/src/PriceCompareMini.tsx').read_text(encoding='utf-8')
+          main=Path('web/src/main.tsx').read_text(encoding='utf-8')
+          queue=Path('worker/src/search-quote-priority.ts').read_text(encoding='utf-8')
+          collector=Path('collector/src/search-quote-priority.mjs').read_text(encoding='utf-8')
+          changed=set(subprocess.check_output(['git','diff','--name-only'],text=True).splitlines())
+          assert changed=={'web/src/main.tsx','web/src/PriceCompareMini.tsx'}, changed
+          assert mini.count('const showRequest=!!onRequest;')==1
+          assert mini.count('className="r1596-inline-request"')==1
+          assert main.count('loading={r1593Busy&&!r1593Prices[comparisonKey(r)]}')==2
+          assert main.count('loading={r1593Busy&&!r1593Prices[comparisonKey(selected)]}')==1
+          assert "data[key]?.quote_status==='READY'" in main
+          assert 'data[key].quote_checked_at>=requestStartedAt' in main
+          assert "if(data[key]?.latest_price){window.clearInterval(timer)" not in main
+          assert 'if (!access)' in Path('worker/src/index.ts').read_text()
+          assert 'REQUEST_LIMIT=8' in queue
+          assert 'WAITING_TOKEN' in collector
+          assert 'KIS_TOKEN_CACHE_UNAVAILABLE' in collector
+          print('FIX3_SCOPE_AND_REGRESSION_ASSERTIONS_PASS')
+          PY
+          git diff --check
+      - name: Existing request and collector regressions
+        shell: bash
+        run: |
+          node --experimental-strip-types --test tests/test_r1596_request.mjs
+          node --test tests/test_r1596_collector.mjs
+          node --experimental-strip-types --test tests/test_r1594_priority.mjs
+          node --test tests/test_r1594_collector.mjs
+          node --experimental-strip-types --test tests/test_r1593_compare.mjs
+          node --experimental-strip-types --test tests/test_r1595_grouping.mjs
+      - name: Compile complete React TypeScript frontend
+        working-directory: web
+        run: |
+          npm install --no-package-lock --no-audit --no-fund
+          npm run build
+      - name: Read-only KIS status diagnosis in remote D1 (never reads ciphertext)
+        if: inputs.diagnose_kis
+        working-directory: worker
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$CLOUDFLARE_API_TOKEN"
+          test -n "$CLOUDFLARE_ACCOUNT_ID"
+          npm install --no-package-lock --no-audit --no-fund
+          echo '=== R1596 TOKEN VAULT METADATA (NO TOKEN OR SCOPE) ==='
+          npx wrangler d1 execute blue-signal-lab-db --remote --command "SELECT COUNT(*) AS token_rows, MAX(expires_at_utc) AS newest_expiry_utc, SUM(CASE WHEN expires_at_utc > strftime('%Y-%m-%dT%H:%M:%fZ','now','+5 minutes') THEN 1 ELSE 0 END) AS unexpired_rows FROM blue_kis_token_vault_v1;"
+          echo '=== R1596 PRIORITY QUEUE, SCREENSHOT EXAMPLES ==='
+          npx wrangler d1 execute blue-signal-lab-db --remote --command "SELECT code,base_day,status,trade_date,price,quote_at_utc,checked_at_utc,last_error FROM blue_search_quote_priority_r1594 WHERE code IN ('000020','000050','000227') ORDER BY code;"
+          echo '=== R1596 LAST COLLECTOR REPORTS ==='
+          npx wrangler d1 execute blue-signal-lab-db --remote --command 'SELECT started_at_utc,status,attempted,saved,rejected,reason FROM blue_kis_collector_runs_r142 ORDER BY started_at_utc DESC LIMIT 5;'
+          echo 'R1596_READ_ONLY_DIAGNOSIS_COMPLETE; no KIS API calls; no token issuance'
+      - name: Commit only user-approved UI patch after full checks pass
+        if: inputs.apply_changes
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add web/src/main.tsx web/src/PriceCompareMini.tsx
+          git diff --cached --check
+          git diff --cached --quiet || {
+            git commit -m 'BLUE R1.5.9.6 FIX3: always-visible quote refresh and per-row loading'
+            git push origin HEAD:main
+          }
+      - name: State strict deployment and security boundary
+        shell: bash
+        run: |
+          echo 'FIX3_ALL_TESTS_PASS'
+          echo 'No direct KIS network call, no token issuance, no orders, no search algorithm changes.'
+          echo 'GitHub source commit is NOT Cloudflare frontend deployment.'
+          echo 'Validate current frontend deployment separately after apply_changes=true.'
