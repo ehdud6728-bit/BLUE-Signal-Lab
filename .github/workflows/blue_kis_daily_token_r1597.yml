@@ -1,0 +1,73 @@
+name: BLUE R1.5.9.7 KIS 24h Token Steward (SAFE GATED)
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: 'check = metadata only. issue = reserve one KIS token issuance only if needed.'
+        required: true
+        type: choice
+        options: [check, issue]
+        default: check
+      enable_issuance:
+        description: 'TRUE explicitly authorizes one guarded tokenP attempt. Leave FALSE for diagnostics.'
+        required: true
+        type: boolean
+        default: false
+  # Check twice per KST trading hour; a successful tokenP attempt is limited
+  # by both a rolling 24-hour D1 ledger and a KST-day check, NOT by cron timing.
+  # 23:00 UTC Sun-Thu = 08:00 KST Mon-Fri
+  # 00-10 UTC Mon-Fri = 09:00-19:00 KST Mon-Fri
+  schedule:
+    - cron: '0,30 23 * * 0-4'
+    - cron: '0,30 0-10 * * 1-5'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: blue-kis-token-vault-single-session
+  cancel-in-progress: false
+
+jobs:
+  token_steward:
+    # Default is OFF. Scheduled requests cannot issue until manually setting
+    # repository variable BLUE_KIS_TOKEN_AUTO_ENABLED to the literal 'true'.
+    if: github.event_name == 'workflow_dispatch' || vars.BLUE_KIS_TOKEN_AUTO_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - name: Guard fixed repository
+        run: test "$GITHUB_REPOSITORY" = 'ehdud6728-bit/BLUE-Signal-Lab'
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install encrypted vault dependency
+        run: python -m pip install 'cryptography>=43,<48'
+      - name: Test token safety and original vault invariants BEFORE network
+        run: |
+          python -m unittest discover -s tests -p 'test_blue_kis_token_vault_r131.py' -v
+          python -m unittest discover -s tests -p 'test_blue_kis_daily_token_r1597.py' -v
+      - name: Check metadata or guarded issuance (no order endpoints)
+        env:
+          KIS_APP_KEY: ${{ secrets.KIS_APP_KEY }}
+          KIS_APP_SECRET: ${{ secrets.KIS_APP_SECRET }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          MODE: ${{ github.event_name == 'schedule' && 'issue' || inputs.mode }}
+          ALLOW_ISSUE: ${{ github.event_name == 'schedule' && vars.BLUE_KIS_TOKEN_AUTO_ENABLED == 'true' || inputs.enable_issuance }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$KIS_APP_KEY" && test -n "$KIS_APP_SECRET"
+          test -n "$CLOUDFLARE_API_TOKEN" && test -n "$CLOUDFLARE_ACCOUNT_ID"
+          if [[ "$MODE" == 'issue' && "$ALLOW_ISSUE" == 'true' ]]; then
+            if [[ "${{ github.event_name }}" == 'schedule' ]]; then
+              python scripts/blue_kis_daily_token_r1597.py --mode issue --scheduled
+            else
+              python scripts/blue_kis_daily_token_r1597.py --mode issue
+            fi
+          else
+            python scripts/blue_kis_daily_token_r1597.py --mode check
+          fi

@@ -80,7 +80,7 @@ jobs:
         run: |
           args=(--mode "$MODE" --source "$SOURCE" --limit "$CANDIDATE_LIMIT" --out output/kis_r13)
           if [ "$ENRICH" = 'true' ]; then args+=(--enrich); fi
-          if [ "$ALLOW_NEW_TOKEN" = 'true' ]; then args+=(--allow-new-token); fi
+          if [ "$ALLOW_NEW_TOKEN" = 'true' ]; then echo "R1597: use dedicated token steward for guarded issuance"; exit 1; fi
           python scripts/blue_kis_closing_r13.py "${args[@]}"
       - name: Upload research-only audit and quote snapshots (no secrets)
         if: always()
