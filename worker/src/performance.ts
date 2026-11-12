@@ -51,7 +51,7 @@ export async function basketWatch(req:Request,env:PerformanceEnv):Promise<Respon
       .bind(now,it.code,it.day).run();
     result.push({...it,status:existing.status});continue;
    }
-   if((active?.n||0)+result.filter(x=>x.status==='QUEUED').length>=80){result.push({...it,status:'CAPACITY_LIMIT'});continue;}
+   if((active?.n||0)+result.filter(x=>x.status==='QUEUED').length>=120){result.push({...it,status:'CAPACITY_LIMIT'});continue;}
    // The symbol and discovery price MUST exist in a non-demo, day-verified scan.
    const proof=await db.prepare(`SELECT s.close_price AS close FROM signals s
       JOIN runs r ON r.run_id=s.run_id
