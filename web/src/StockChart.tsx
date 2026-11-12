@@ -122,10 +122,10 @@ function Evidence({stats,highlightThreshold,highlightSamplesMin}:{stats:Stats;hi
     <p className="blue-chart-info">{stats.history_start}~{stats.history_end} · 당일 관측된 돌파/교차 신호 + 거래량·추세·모멘텀·매물대 조건을 자동 조합합니다. 다음 거래일 시가부터 {days}거래일째 종가까지 비교합니다.</p>
     {(stats.active_factors||[]).length>0&&<div className="blue-active-factors">{stats.active_factors!.map(a=><span key={a.code}>{a.label}</span>)}</div>}
     {base&&<p className="blue-chart-info">같은 종목의 단순 거래일 기준선 ({days}거래일): 표본 {base.n}건 · 상승 {base.up_pct==null?'—':base.up_pct+'%'} · 평균 수익률 {base.mean_return_pct==null?'—':base.mean_return_pct+'%'}. 시장·업종 벤치마크는 아닙니다.</p>}
-    <p className="r159-order-note">상승 비율 → 중앙 수익률 → 평균 수익률 순 · 표본 8건 미만은 뒤로 · 과거 사례를 눌러 날짜 확인</p>
+    <p className="r159-order-note">상승 비율 → 중앙 수익률 → 평균 수익률 순 · 선택한 최소 표본 수 우선 · 3~7건은 소표본 주의 · 과거 사례를 눌러 날짜 확인</p>
     {stats.setups.length?<div className="r159-pattern-list">{[...stats.setups].sort((a,b)=>{
       const x=a.horizons[days],y=b.horizons[days];
-      const validX=x.n>=8&&x.up_pct!==null,validY=y.n>=8&&y.up_pct!==null;
+      const validX=x.n>=highlightSamplesMin&&x.up_pct!==null,validY=y.n>=highlightSamplesMin&&y.up_pct!==null;
       return Number(validY)-Number(validX)||(y.up_pct??-1)-(x.up_pct??-1)||
         (y.median_return_pct??-10000)-(x.median_return_pct??-10000)||
         (y.mean_return_pct??-10000)-(x.mean_return_pct??-10000)||y.n-x.n;

@@ -203,12 +203,12 @@ export default {
         const minPattern=(u.searchParams.get('min_pattern_up')||'70').trim();
         const minPatternN=(u.searchParams.get('min_pattern_n')||'8').trim();
         if(!['0','1'].includes(onlyPattern)||!['60','70','80','90'].includes(minPattern)||
-           !['8','10','15','20','30'].includes(minPatternN))
+           !['3','4','5','6','7','8','10','15','20','30'].includes(minPatternN))
           return respond({error:'INVALID_PATTERN_FILTER'},400);
         // R1.5.10.4: real chart snapshots are the authoritative historical evidence.
         // Legacy signals.extras_json may predate pattern metadata. Search the SAME
         // chart setup that supplies the detail view, never infer a win percentage.
-        const sampleFloor=Number(minPatternN); // allowlisted 8/10/15/20/30 above
+        const sampleFloor=Number(minPatternN); // allowlisted 3-30 choices; default 8
         const chartSetupTable=`chart_snapshots cs,
           json_each(CASE WHEN json_valid(cs.stats_json) THEN cs.stats_json
             ELSE '{"setups":[]}' END,'$.setups') setup`;

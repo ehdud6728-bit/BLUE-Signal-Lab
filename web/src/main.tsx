@@ -95,10 +95,10 @@ function App(){
   const [onlyPattern,setOnlyPattern]=useState(()=>{
     try{return localStorage.getItem('blue_r1599_only_pattern')==='true';}catch{return false;}
   });
-  // Historical pattern evidence saved in D1 has a hard support floor of 8.
+  // R1.5.10.5: existing chart snapshots can contain 3-7 case exploratory patterns.
   const [patternSampleMin,setPatternSampleMin]=useState<number>(()=>{
     try{const value=localStorage.getItem('blue_r15103_pattern_min_samples');
-      return value&&['8','10','15','20','30'].includes(value)?Number(value):8;}
+      return value&&['3','4','5','6','7','8','10','15','20','30'].includes(value)?Number(value):8;}
     catch{return 8;}
   });
   const amountEok=amountChoice==='custom'?Number(customAmount):Number(amountChoice);
@@ -325,7 +325,7 @@ function App(){
 
   const extra=(r:Signal,k:string):unknown=>r.extras?.[k];
   const num=(r:Signal,k:string):number|null=>{const v=extra(r,k);if(v==null||v==='')return null;const n=Number(v);return Number.isFinite(n)?n:null;};
-  // Only stored EOD pattern evidence is eligible: support n>=8, higher if selected.
+  // Only verified EOD chart evidence is eligible: selected floor 3-30, default 8.
   const patternUp=(r:Signal)=>{const p=num(r,'r159_pattern_up_10d');const n=num(r,'r159_pattern_n_10d');
     return highlightMin!==null&&n!==null&&n>=patternSampleMin&&p!==null&&p>=highlightMin?p:null;};
   // Single presentation predicate shared by outline, basket evidence and search filter.
@@ -582,8 +582,11 @@ function App(){
                 onChange={e=>{const nextMin=Number(e.target.value);setPatternSampleMin(nextMin);
                   if(total!==null)void search(1,false,gcFields,gcLogic,undefined,{minSamples:nextMin});
                 }}>
-                <option value={8}>8건 (기본)</option><option value={10}>10건</option>
-                <option value={15}>15건</option><option value={20}>20건</option><option value={30}>30건</option>
+                <option value={3}>3건 (소표본)</option><option value={4}>4건 (소표본)</option>
+                <option value={5}>5건 (소표본)</option><option value={6}>6건 (소표본)</option>
+                <option value={7}>7건 (소표본)</option><option value={8}>8건 (기본)</option>
+                <option value={10}>10건</option><option value={15}>15건</option>
+                <option value={20}>20건</option><option value={30}>30건</option>
               </select>
               <label className="r1599-hot-only"><input type="checkbox" checked={onlyPattern} disabled={patternThreshold==='off'}
                 onChange={e=>{
@@ -591,7 +594,7 @@ function App(){
                   if(total!==null)void search(1,false,gcFields,gcLogic,undefined,{enabled:checked});
                 }}/> 해당 종목만 보기</label>
             </div>
-            <p className="gc-filter-note">GC는 당일 발생 기준 · 토마토는 10거래일 상승 관측 비율과 선택한 최소 표본 수를 함께 충족해야 합니다. 원본 근거는 8건 이상만 저장되며, 과거 성과는 미래 수익을 보장하지 않습니다.</p>
+            <p className="gc-filter-note">GC는 당일 발생 기준 · 토마토는 과거 10거래일 상승 관측 비율과 선택한 최소 표본 수를 함께 충족해야 합니다. 표본 3~7건은 소표본으로 통계적 신뢰도가 낮으며 미래 수익을 보장하지 않습니다.</p>
           </div>
           {rows.length>0&&<label className="result-quick-search"><Search size={16}/><span className="sr-only">현재 페이지 종목명 또는 코드 찾기</span><input type="search" value={localQuery} onChange={e=>setLocalQuery(e.target.value)} placeholder="현재 페이지에서 종목명 · 코드 찾기" aria-label="현재 페이지에서 종목명 또는 코드 찾기"/></label>}
           <div className="desktop-results tablewrap"><table><thead><tr><th>날짜</th><th>종목명 / 코드</th><th>신호</th><th>검색일 종가 / 최근 확인가 / 기간 최고가</th><th>RSI / GC</th><th>Slow(14,3,3) / GC</th><th>MACD / GC</th><th>돌파선 후보</th><th>상단 매물대</th></tr></thead><tbody>

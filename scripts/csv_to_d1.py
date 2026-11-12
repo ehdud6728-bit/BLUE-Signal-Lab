@@ -24,7 +24,8 @@ def pattern_highlights(src):
     """Provenance-backed in-sample pattern metrics and actual historical signal dates.
 
     No 70% cut-off is imposed here: the display threshold is configurable.
-    n>=8 remains a necessary support floor.  The dates are ONLY those of
+    n>=3 is the analysis minimum; n<8 must be clearly labelled low-support.
+    The dates are ONLY those of
     matured cases emitted by chart_research_r10, never the current search date.
     """
     path=Path(src)/'chart_snapshots.jsonl'
@@ -37,7 +38,7 @@ def pattern_highlights(src):
         for setup in item.get('stats',{}).get('setups',[]):
             h=setup.get('horizons',{}).get('10',{})
             n=h.get('n',0);up=h.get('up_pct')
-            if not isinstance(n,int) or n<8 or not isinstance(up,(int,float)) or not 0<=up<=100:
+            if not isinstance(n,int) or n<3 or not isinstance(up,(int,float)) or not 0<=up<=100:
                 continue
             median=h.get('median_return_pct')
             mean=h.get('mean_return_pct')

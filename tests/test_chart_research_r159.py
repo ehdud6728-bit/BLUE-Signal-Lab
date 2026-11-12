@@ -50,15 +50,20 @@ class R159(unittest.TestCase):
         self.assertGreater(chart['bars'][-1]['ma112'],0)
         self.assertGreater(chart['bars'][-1]['ma224'],0)
 
-    def test_tomato_only_at_70_and_eight_cases(self):
+    def test_pattern_highlights_from_three_real_cases(self):
         with tempfile.TemporaryDirectory() as t:
             folder=Path(t)
             setups=[{'label':'high but tiny','horizons':{'10':{'n':4,'up_pct':100,'mean_return_pct':8,'median_return_pct':7}}},
                     {'label':'qualified','horizons':{'10':{'n':10,'up_pct':70,'mean_return_pct':3,'median_return_pct':2}}}]
             (folder/'chart_snapshots.jsonl').write_text(json.dumps({'code':'005930','day':'2026-11-11','stats':{'setups':setups}})+'\n',encoding='utf-8')
             val=pattern_highlights(folder)
-            self.assertEqual(val[('005930','2026-11-11')]['r159_pattern_up_10d'],70)
+            self.assertEqual(val[('005930','2026-11-11')]['r159_pattern_up_10d'],100)
+            self.assertEqual(val[('005930','2026-11-11')]['r159_pattern_n_10d'],4)
             setups.pop()
+            (folder/'chart_snapshots.jsonl').write_text(json.dumps({'code':'005930','day':'2026-11-11','stats':{'setups':setups}})+'\n',encoding='utf-8')
+            self.assertEqual(pattern_highlights(folder)[('005930','2026-11-11')]['r159_pattern_n_10d'],4)
+            # Two cases remain below the verified analysis floor even when the user opts into 3.
+            setups[:]=[{'label':'too few','horizons':{'10':{'n':2,'up_pct':100}}}]
             (folder/'chart_snapshots.jsonl').write_text(json.dumps({'code':'005930','day':'2026-11-11','stats':{'setups':setups}})+'\n',encoding='utf-8')
             self.assertEqual(pattern_highlights(folder),{})
 
