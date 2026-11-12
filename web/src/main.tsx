@@ -343,6 +343,7 @@ function App(){
     if(!/^\d{6}$/.test(r.code)||!r.close_price||r.close_price<=0)return;
     setR1595Requesting(key);setR1595RequestNote('');
     try{
+      const requestStartedAt=new Date().toISOString();
       const result=await requestSearchPriority([{code:r.code,day:r.day}]);
       if(result.not_verified){setR1595RequestNote(`${r.name||r.code}: 검증된 발견 기록이 없어 요청할 수 없습니다.`);return;}
       setR1595RequestNote(`${r.name||r.code}: ${result.queued?'수집 요청 완료':result.throttled?'최근 요청이 있어 대기 중':'수집 접수 확인 필요'} · 장중 거래시간에 수집됩니다.`);
@@ -354,7 +355,10 @@ function App(){
         inFlight=true;
         void fetchCompared([{code:r.code,day:r.day}]).then(data=>{
           setR1593Prices(prev=>({...prev,...data}));
-          if(data[key]?.latest_price){window.clearInterval(timer);r1595Timers.current.delete(key);}
+          if(data[key]?.quote_status==='READY'&&data[key]?.latest_price&&
+              data[key]?.quote_checked_at&&data[key].quote_checked_at>=requestStartedAt){
+              window.clearInterval(timer);r1595Timers.current.delete(key);
+            }
         }).catch(()=>{}).finally(()=>{inFlight=false;});
       },12000);
       r1595Timers.current.set(key,timer);
@@ -487,7 +491,7 @@ function App(){
                  </button>
                </div></td>
               <td>{r.signals.map(s=><span className="tag" key={s}>{showSignal(s)}</span>)}{techBadges(r).map(t=><span className="r1591-search-tech" key={t}>{t}</span>)}</td><td className="r1593-price-cell"><strong>{money(r.close_price)}원</strong><small> · 검색일 종가</small>
-                <PriceCompareMini data={r1593Prices[comparisonKey(r)]} baseline={r.close_price} loading={r1593Busy}
+                <PriceCompareMini data={r1593Prices[comparisonKey(r)]} baseline={r.close_price} loading={r1593Busy&&!r1593Prices[comparisonKey(r)]}
                   onRequest={()=>{void requestMissingQuote(r);}} requesting={r1595Requesting===comparisonKey(r)}
                   requestDisabled={!!r1595Requesting||r1595Timers.current.size>=3}/>
               </td>
@@ -501,7 +505,7 @@ function App(){
                 onKeyDown={e=>{if(e.target===e.currentTarget&&(e.key==='Enter'||e.key===' ')){e.preventDefault();openDetail(r);}}}
                 aria-label={`${displayName(r)} 상세 분석 보기`}>
               <div className="stock-top"><div className="stock-identity"><strong>{displayName(r)}</strong><span>{r.code} <span className="stock-dot">·</span> {r.day}</span></div><div className="stock-price"><b>{money(r.close_price)}<small>원</small></b><span>종가</span></div><ChevronRight size={19} className="stock-chevron"/></div>
-              <PriceCompareMini compact data={r1593Prices[comparisonKey(r)]} baseline={r.close_price} loading={r1593Busy}
+              <PriceCompareMini compact data={r1593Prices[comparisonKey(r)]} baseline={r.close_price} loading={r1593Busy&&!r1593Prices[comparisonKey(r)]}
                 onRequest={()=>{void requestMissingQuote(r);}} requesting={r1595Requesting===comparisonKey(r)}
                 requestDisabled={!!r1595Requesting||r1595Timers.current.size>=3}/>
               <div className="stock-tags">{r.signals.slice(0,4).map(s=><span className="tag" key={s}>{showSignal(s)}</span>)}{r.signals.length>4&&<span className="tag tag-more">+{r.signals.length-4}</span>}{patternUp(r)!==null&&<span className="r159-prob-chip">과거 10일 상승 {patternUp(r)!.toFixed(1)}% · {num(r,'r159_pattern_n_10d')}건</span>}</div>
@@ -537,7 +541,7 @@ function App(){
       <section className="detail-sheet" role="dialog" aria-modal="true" aria-label={`${displayName(selected)} 상세 분석`}>
         <div className="detail-handle" aria-hidden="true"/><div className="detail-toolbar"><button onClick={closeDetail} className="detail-back"><ArrowLeft size={19}/> 뒤로</button><span className="detail-eod">일봉 · 연구용</span><button onClick={closeDetail} className="detail-x" aria-label="상세 닫기"><X size={21}/></button></div>
         <div className="detail-head"><div><small>{selected.code} · {selected.day}</small><h2>{displayName(selected)}</h2></div><div className="detail-close"><span>종가</span><strong>{money(selected.close_price)} <small>원</small></strong></div></div>
-        <PriceCompareMini compact data={r1593Prices[comparisonKey(selected)]} baseline={selected.close_price} loading={r1593Busy}
+        <PriceCompareMini compact data={r1593Prices[comparisonKey(selected)]} baseline={selected.close_price} loading={r1593Busy&&!r1593Prices[comparisonKey(selected)]}
           onRequest={()=>{void requestMissingQuote(selected);}} requesting={r1595Requesting===comparisonKey(selected)}
           requestDisabled={!!r1595Requesting||r1595Timers.current.size>=3}/>
         <div className="study-tags">{selected.signals.map(s=><span key={s}>{showSignal(s)}</span>)}</div>

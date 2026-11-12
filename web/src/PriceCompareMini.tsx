@@ -19,7 +19,7 @@ export default function PriceCompareMini({data,baseline,loading=false,compact=fa
  // A saved quote from a prior date is not advertised as today's price.
  // Weekend or pre-open snapshots remain clearly dated without false stale alarms.
  const oldQuote=hasLatest&&['Mon','Tue','Wed','Thu','Fri'].includes(kst.weekday)&&Number(kst.hour)>=10&&String(data!.latest_day)<today;
- const showRequest=!!onRequest&&!loading&&(!hasLatest||oldQuote);
+ const showRequest=!!onRequest;
  const queueWarning=data?.quote_status==='WAITING_TOKEN'?'KIS 토큰/인증 확인 필요':
   data?.quote_status==='RETRY'?'시세 수집 재시도 예정':null;
  return <div className={'r1593-compare'+(compact?' r1593-compare-compact':'')}>
