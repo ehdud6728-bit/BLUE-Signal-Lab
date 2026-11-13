@@ -4,6 +4,7 @@ import { handleBasketAi } from './basket';
 import {basketWatch} from './performance';
 import {comparePrices} from './price-compare';
 import {requestSearchQuotes} from './search-quote-priority';
+import {runEodCloudflareCron} from './eod-cron';
 interface Env {
   DB: D1Database;
   CORS_ORIGIN?: string;
@@ -437,5 +438,10 @@ export default {
       return respond({error:'Request failed; confirm D1 R0.7 migration and Worker deployment',
         category:err instanceof Error ? err.name : 'Unknown'},500);
     }
+  },
+  async scheduled(event:ScheduledController,env:Env,ctx:ExecutionContext):Promise<void>{
+    ctx.waitUntil(runEodCloudflareCron(event,env).catch(error=>{
+      console.warn('BLUE_EOD_CRON_FAILED',error instanceof Error?error.name:'Unknown');
+    }));
   },
 } satisfies ExportedHandler<Env>;

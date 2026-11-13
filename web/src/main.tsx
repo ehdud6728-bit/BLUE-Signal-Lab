@@ -374,7 +374,7 @@ function App(){
     if(grade==='미확인')return null;
     const tone=grade==='강'?'strong':grade==='중'?'medium':'weak';
     return <span className={'r15108-supply-grade r15108-supply-'+tone}
-      title={'120개 이전 일봉의 상대 거래량 기반 추정 매물대 · 가격 '+money(num(r,'supply_reference_price'))+'원'}>매물대 {grade}</span>;};
+      title={'120개 이전 일봉 상대 거래량 집중도(최대 구간 대비 강 75%·중 50%·약 25%) · 실제 매도 저항 강도 아님 · 가격 '+money(num(r,'supply_reference_price'))+'원'}>거래량 밀집 {grade}</span>;};
   const displayName=(r:Signal)=>r.name||String(r.extras?.name||r.extras?.Name||'종목명 미등록');
   const visibleRows=rows.filter(r=>(displayName(r)+' '+r.code).toLocaleLowerCase().includes(localQuery.trim().toLocaleLowerCase()));
   const changeGc=(next:GcKey[],mode:'any'|'all'=gcLogic)=>{
@@ -648,7 +648,7 @@ function App(){
               </td>
               <td>{fmt(r,'rsi')} <small>{crossed(r,'rsi_gc')}</small></td><td>{fmt(r,'slow_14_3_3_k')} / {fmt(r,'slow_14_3_3_d')} <small>{crossed(r,'slow_14_3_3_gc')}</small></td>
               <td>{fmt(r,'macd_12_26_9')} <small>{crossed(r,'macd_gc')}</small></td><td>{present(r,'valid_line_candidates_json')?`${validLines(r).length}개`:'미계산'}</td>
-              <td>{supplyGrade(r)==='미확인'?'매물대 미확인':`매물대 ${supplyGrade(r)} · ${money(num(r,'supply_reference_price'))}원 · ${profile(r)}`}</td>
+              <td>{supplyGrade(r)==='미확인'?'매물대 미확인':`거래량 밀집 ${supplyGrade(r)} · ${money(num(r,'supply_reference_price'))}원 · ${profile(r)}`}</td>
             </tr>):<tr><td className="empty" colSpan={9}>{total!==null?'조건에 맞는 종목이 없습니다.':'날짜와 조건을 선택해 검색하세요.'}</td></tr>}</tbody></table></div>
           <div className="mobile-results">
             {visibleRows.length?visibleRows.map((r,i)=><div className={'r151-mobile-row'+(patternUp(r)!==null?' r159-tomato-stock':'')} key={`${r.code}-${r.day}-${i}`}>

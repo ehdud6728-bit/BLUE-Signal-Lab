@@ -2,6 +2,7 @@
   "name": "blue-signal-lab-api-v2",
   "main": "src/index.ts",
   "compatibility_date": "2026-11-01",
+  "triggers": {"crons": ["40,55 7 * * MON-FRI", "20,35 11 * * MON-FRI"]},
   "d1_databases": [{"binding":"DB", "database_name":"blue-signal-lab-db", "database_id":"272318c7-afd2-419c-91cc-dc59475ef87a"}],
   "vars": {"CORS_ORIGIN":"https://blue-signal-lab.ehdud6728.workers.dev"}
 }

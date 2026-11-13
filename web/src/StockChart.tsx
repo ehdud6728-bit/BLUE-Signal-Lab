@@ -185,7 +185,7 @@ export default function StockChart({code,day,name,supplyPrice,supplyGrade,lineCa
       <IndicatorChart bars={data.chart.bars} type="rsi"/>
       <IndicatorChart bars={data.chart.bars} type="slow"/>
       <IndicatorChart bars={data.chart.bars} type="macd"/>
-      <div className="blue-chart-note">상단 매물대: {supplyPrice==null?'미확인':supplyPrice.toLocaleString('ko-KR')+'원'} · 강도: {supplyGrade||'미확인'} (일봉 120개 기반 추정). 기준선은 검증 전 후보입니다. 모든 차트는 수정주가가 아닌 원본 시세이며 미래 날짜를 포함하지 않습니다.</div>
+      <div className="blue-chart-note">상단 거래량 밀집 추정 가격: {supplyPrice==null?'미확인':supplyPrice.toLocaleString('ko-KR')+'원'} · 상대 밀집도: {supplyGrade||'미확인'} (이전 120개 일봉 기반, 실제 매도압력 아님). 기준선은 검증 전 후보입니다. 모든 차트는 수정주가가 아닌 원본 시세이며 미래 날짜를 포함하지 않습니다.</div>
       {data.stats&&<Evidence stats={data.stats} highlightThreshold={highlightThreshold} highlightSamplesMin={highlightSamplesMin}/>}
       <p className="blue-attribution">차트 제공: <a href="https://www.tradingview.com/" target="_blank" rel="noopener noreferrer">TradingView Lightweight Charts™</a></p>
     </>}
