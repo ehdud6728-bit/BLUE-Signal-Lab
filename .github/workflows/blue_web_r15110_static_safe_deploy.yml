@@ -1,0 +1,150 @@
+name: BLUE WEB R1.5.10.10 Static Assets Safe Deploy (EXPLICIT)
+
+on:
+  workflow_dispatch:
+    inputs:
+      deploy_web:
+        description: 'FALSE: build/dry-run only. TRUE: deploy frontend static assets to existing Worker.'
+        type: boolean
+        required: true
+        default: false
+      confirm_target:
+        description: 'If deploying, type exactly blue-signal-lab.'
+        type: string
+        required: false
+        default: ''
+      confirm_static_type:
+        description: 'If deploying, type exactly STATIC_ASSETS_ONLY after checking Cloudflare dashboard.'
+        type: string
+        required: false
+        default: ''
+
+permissions:
+  contents: read
+
+concurrency:
+  group: blue-web-manual-production-deploy
+  cancel-in-progress: false
+
+jobs:
+  build_and_optional_deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Guard exact BLUE repository and main
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REPOSITORY" = 'ehdud6728-bit/BLUE-Signal-Lab'
+          test "$GITHUB_REF" = 'refs/heads/main'
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install frontend dependencies
+        working-directory: web
+        shell: bash
+        run: npm install --no-package-lock --no-audit --no-fund
+      - name: Build TypeScript and Vite production site
+        working-directory: web
+        shell: bash
+        run: npm run build
+      - name: Check expected frontend and PWA artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -s web/dist/index.html
+          test -s web/dist/sw.js
+          test -s web/dist/manifest.webmanifest
+          js_file=$(find web/dist/assets -maxdepth 1 -type f -name 'index-*.js' -print -quit)
+          test -n "$js_file" && test -s "$js_file"
+          grep -q '/assets/' web/dist/index.html
+          echo 'BLUE_STATIC_WEB_BUILD_ASSETS_OK'
+      - name: Save frontend build for inspection
+        uses: actions/upload-artifact@v4
+        with:
+          name: BLUE_WEB_STATIC_DIST_${{ github.run_id }}
+          path: web/dist/
+          if-no-files-found: error
+          retention-days: 14
+      - name: Dry-run same frontend-only Wrangler deployment
+        working-directory: web
+        shell: bash
+        run: |
+          set -euo pipefail
+          npx --yes wrangler@4 deploy \
+            --name blue-signal-lab \
+            --assets ./dist \
+            --compatibility-date 2026-11-13 \
+            --dry-run \
+            --outdir /tmp/blue-web-r15110-dry-run
+          echo 'BLUE_WEB_STATIC_DRY_RUN_OK'
+      - name: Verify existing assets-only frontend Worker and explicit approval
+        if: ${{ inputs.deploy_web }}
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_WORKER_DEPLOY_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          CONFIRM_TARGET: ${{ inputs.confirm_target }}
+          CONFIRM_STATIC_TYPE: ${{ inputs.confirm_static_type }}
+        run: |
+          set -euo pipefail
+          test "$CONFIRM_TARGET" = 'blue-signal-lab' || { echo 'BLOCKED: confirm_target must be blue-signal-lab'; exit 1; }
+          test "$CONFIRM_STATIC_TYPE" = 'STATIC_ASSETS_ONLY' || { echo 'BLOCKED: confirm_static_type must be STATIC_ASSETS_ONLY'; exit 1; }
+          test -n "$CLOUDFLARE_API_TOKEN" && test -n "$CLOUDFLARE_ACCOUNT_ID" || { echo 'BLOCKED: Cloudflare credentials missing'; exit 1; }
+          curl --fail --silent --show-error --retry 2 \
+            -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+            "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/blue-signal-lab/settings" \
+            -o "$RUNNER_TEMP/blue-web-worker-settings.json"
+          python - <<'PY'
+          import json,os
+          from pathlib import Path
+          data=json.loads((Path(os.environ['RUNNER_TEMP'])/'blue-web-worker-settings.json').read_text())
+          if data.get('success') is not True or not isinstance(data.get('result'),dict):
+              raise SystemExit('BLOCKED: target Worker metadata could not be validated')
+          result=data['result']
+          bindings=result.get('bindings',[])
+          if not isinstance(bindings,list):
+              raise SystemExit('BLOCKED: unexpected Worker bindings format')
+          if any(not isinstance(b,dict) for b in bindings):
+              raise SystemExit('BLOCKED: malformed bindings')
+          unsafe=[{'type':b.get('type'),'name':b.get('name')} for b in bindings
+                  if b.get('type') not in ('assets','version_metadata')]
+          if unsafe:
+              # Never overwrite a Worker with D1, KV, secrets, service bindings, etc.
+              raise SystemExit('BLOCKED: existing Worker contains custom bindings; manual review required')
+          if len(bindings)>0 and not (result.get('assets') or any(b.get('type')=='assets' for b in bindings)):
+              raise SystemExit('BLOCKED: unexpected non-assets-only bindings')
+          if not (result.get('assets') or any(b.get('type')=='assets' for b in bindings)):
+              # Cloudflare assets-only Workers may return no asset binding in Settings API;
+              # the Cloudflare dashboard explicitly identifies the target as assets-only.
+              # Approval is provided separately by confirm_static_type input above.
+              if bindings:
+                  raise SystemExit('BLOCKED: static assets type unconfirmed')
+              print('BLUE_WEB_ASSETS_ONLY_UI_CONFIRMED_NO_BINDINGS: using explicit operator approval')
+          else:
+              print('BLUE_WEB_ASSETS_BINDING_CONFIRMED')
+          print('BLUE_WEB_EXISTING_FRONTEND_SAFE_TO_UPDATE: only blue-signal-lab, no custom bindings')
+          PY
+      - name: Deploy frontend static assets to existing Worker
+        if: ${{ inputs.deploy_web }}
+        working-directory: web
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_WORKER_DEPLOY_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          npx --yes wrangler@4 deploy \
+            --name blue-signal-lab \
+            --assets ./dist \
+            --compatibility-date 2026-11-13
+          echo "BLUE_WEB_R15110_DEPLOY_COMPLETE source_sha=$GITHUB_SHA"
+          echo 'Web: https://blue-signal-lab.ehdud6728.workers.dev'
+      - name: Verification-only result
+        if: ${{ !inputs.deploy_web }}
+        shell: bash
+        run: |
+          echo "BLUE_WEB_R15110_VERIFY_ONLY: no Cloudflare deployment"
