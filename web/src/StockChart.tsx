@@ -1,4 +1,6 @@
-import {useEffect,useRef,useState} from 'react';
+import {useEffect,useMemo,useRef,useState} from 'react';
+import {dailySupplyProfile} from './supply-profile';
+import SupplyProfilePanel from './SupplyProfilePanel';
 import {CandlestickSeries,HistogramSeries,LineSeries,createChart,createSeriesMarkers, type IChartApi, type Time} from 'lightweight-charts';
 import './stock-chart.css';
 
@@ -33,7 +35,7 @@ function mk(el:HTMLDivElement,height:number){return createChart(el,{width:Math.m
   rightPriceScale:{borderColor:'#e2e9f3'},
   crosshair:{vertLine:{color:'#b1c8ed'},horzLine:{color:'#b1c8ed'}}});}
 
-function PriceChart({bars,day,supplyPrice,lineCandidates}:{bars:Bar[];day:string;supplyPrice?:number|null;lineCandidates?:LineCandidate[]}){
+function PriceChart({bars,day,lineCandidates}:{bars:Bar[];day:string;lineCandidates?:LineCandidate[]}){
   const ref=useRef<HTMLDivElement>(null);
   // Keep the important moving averages visible, but hide the far-away BLUE40
   // band and multiple static price levels until selected. This protects the
@@ -41,6 +43,7 @@ function PriceChart({bars,day,supplyPrice,lineCandidates}:{bars:Bar[];day:string
   const [layers,setLayers]=useState({env20:true,env40:false,ma112:true,ma224:true,bb40:false,supply:false,candidates:false});
   const toggle=(k:keyof typeof layers)=>setLayers(v=>({...v,[k]:!v[k]}));
   const last=bars[bars.length-1];
+  const volumeProfile=useMemo(()=>dailySupplyProfile(bars),[bars]);
   const hasMA112=bars.some(b=>typeof b.ma112==='number'&&Number.isFinite(b.ma112)&&b.ma112>0);
   const hasMA224=bars.some(b=>typeof b.ma224==='number'&&Number.isFinite(b.ma224)&&b.ma224>0);
   const fmt=(n:number|null|undefined)=>n==null||!Number.isFinite(n)?'—':Math.round(n).toLocaleString('ko-KR')+'원';
@@ -55,7 +58,7 @@ function PriceChart({bars,day,supplyPrice,lineCandidates}:{bars:Bar[];day:string
       if(p>0) candles.createPriceLine({price:p,color,title:'',axisLabelVisible:false,
         lineWidth:1,lineStyle:2});
     };
-    if(layers.supply&&supplyPrice!=null&&supplyPrice>0)addLevel(supplyPrice,'#e5a13c');
+    if(layers.supply&&volumeProfile?.reference)addLevel(volumeProfile.reference.price,'#e5a13c');
     if(layers.candidates)candidates.forEach((x,i)=>addLevel(x.price,['#2262df','#5f87e3','#90b1f5'][i]));
     for(const [field,color,enabled] of [
       ['env20','#21a786',layers.env20],['env40','#845bd6',layers.env40],
@@ -69,7 +72,7 @@ function PriceChart({bars,day,supplyPrice,lineCandidates}:{bars:Bar[];day:string
       line.setData(points);
     }
     chart.timeScale().fitContent();return chart;
-  },[bars,day,supplyPrice,lineCandidates,layers.env20,layers.env40,layers.ma112,layers.ma224,layers.bb40,layers.supply,layers.candidates]);
+  },[bars,day,volumeProfile,lineCandidates,layers.env20,layers.env40,layers.ma112,layers.ma224,layers.bb40,layers.supply,layers.candidates]);
   return <>
     <div className="blue-chart-label">일봉 캔들 · 표시할 선 선택</div>
     <div className="blue-layer-tools" role="group" aria-label="캔들 차트 선 표시 설정">
@@ -78,7 +81,7 @@ function PriceChart({bars,day,supplyPrice,lineCandidates}:{bars:Bar[];day:string
       <button type="button" aria-pressed={layers.ma112&&hasMA112} disabled={!hasMA112} title={hasMA112?'112일선 표시 전환':'저장된 일봉에 112일선 자료 없음'} className={layers.ma112&&hasMA112?'on':''} onClick={()=>toggle('ma112')}><i style={{background:'#d65d64'}}/>112일선</button>
       <button type="button" aria-pressed={layers.ma224&&hasMA224} disabled={!hasMA224} title={hasMA224?'224일선 표시 전환':'저장된 일봉에 224일선 자료 없음'} className={layers.ma224&&hasMA224?'on':''} onClick={()=>toggle('ma224')}><i style={{background:'#af5da3'}}/>224일선</button>
       <button type="button" aria-pressed={layers.bb40} className={layers.bb40?'on':''} onClick={()=>toggle('bb40')}><i style={{background:'#f28d2f'}}/>BLUE40 상단</button>
-      {supplyPrice!=null&&supplyPrice>0&&<button type="button" aria-pressed={layers.supply} className={layers.supply?'on':''} onClick={()=>toggle('supply')}><i style={{background:'#e5a13c'}}/>추정 매물대</button>}
+      {volumeProfile?.reference&&<button type="button" aria-pressed={layers.supply} className={layers.supply?'on':''} onClick={()=>toggle('supply')}><i style={{background:'#e5a13c'}}/>추정 거래량 구간</button>}
       {candidates.length>0&&<button type="button" aria-pressed={layers.candidates} className={layers.candidates?'on':''} onClick={()=>toggle('candidates')}><i style={{background:'#2262df'}}/>돌파선 후보</button>}
     </div>
     <div ref={ref} className="blue-chart-canvas" aria-label="선택한 가격선이 표시된 실제 과거 캔들 차트"/>
@@ -88,10 +91,11 @@ function PriceChart({bars,day,supplyPrice,lineCandidates}:{bars:Bar[];day:string
       <div><i style={{background:'#d65d64'}}/><span><b>112일선</b> · 112거래일 종가 평균</span><strong>{fmt(last?.ma112)}</strong></div>
       <div><i style={{background:'#af5da3'}}/><span><b>224일선</b> · 224거래일 종가 평균</span><strong>{fmt(last?.ma224)}</strong></div>
       <div><i style={{background:'#f28d2f'}}/><span><b>BLUE40 상단</b> · 40일 평균+2σ, 26거래일 이전 값 기준의 이동 밴드</span><strong>{fmt(last?.bb40)}</strong></div>
-      {supplyPrice!=null&&supplyPrice>0&&<div><i style={{background:'#e5a13c'}}/><span><b>상단 매물대 중심</b> · 120봉 대표가격·거래량 추정 (실제 호가 매물대 아님)</span><strong>{fmt(supplyPrice)}</strong></div>}
+      {volumeProfile?.reference&&<div><i style={{background:'#e5a13c'}}/><span><b>상단 거래량 구간</b> · 이전 120일 일봉의 가격대별 균등 배분 추정</span><strong>{fmt(volumeProfile.reference.price)}</strong></div>}
       {candidates.length>0&&<div className="blue-chart-candidate-legend"><i style={{background:'#2262df'}}/><span><b>돌파 기준선 후보</b> · 당일 관측값, 추세선 유효성 미검증</span><strong>{candidates.map(x=>`${x.signal}: ${fmt(x.price)}`).join(' / ')}</strong></div>}
     </div>
-    <p className="blue-chart-hint">112·224일선은 확인된 일봉 값이 있으면 기본 표시합니다. 비활성화된 선은 해당 차트 저장본에 값이 없습니다. BLUE40 상단처럼 가격과 멀리 떨어지는 밴드는 기본적으로 숨깁니다. 112·224선 돌파 태그는 당일 상향 돌파일 때만 나타납니다.</p>
+    <SupplyProfilePanel profile={volumeProfile}/>
+    <p className="blue-chart-hint">112·224일선은 확인된 일봉 값이 있으면 기본 표시합니다. 상단 거래량 구간은 이전 120일 일봉으로 재계산하며, 과거 스캔에 저장된 구형 매물대 기준가와 다를 수 있습니다. 실제 호가·돌파확률은 아닙니다.</p>
   </>;
 }
 function IndicatorChart({bars,type}:{bars:Bar[];type:'volume'|'rsi'|'slow'|'macd'}){
@@ -157,7 +161,7 @@ function Evidence({stats,highlightThreshold,highlightSamplesMin}:{stats:Stats;hi
     <p className="blue-caution">이 결과는 당일 조건을 보고 과거 사례를 찾아본 탐색적 비교입니다. 여러 조합을 시험한 선택 편향, 짧은 표본, 20거래일 결과 중첩, 수정주가·거래비용 미반영으로 인해 미래 성과를 보장하지 않습니다. 업종 대장주 선행/후발 여부는 별도 업종과 과거 시계열이 확보되기 전에는 판정하지 않습니다.</p>
   </div>;
 }
-export default function StockChart({code,day,name,supplyPrice,supplyGrade,lineCandidates,highlightThreshold=70,highlightSamplesMin=8}:Props){
+export default function StockChart({code,day,name,lineCandidates,highlightThreshold=70,highlightSamplesMin=8}:Props){
   const [data,setData]=useState<Payload|null>(null);const [error,setError]=useState('');const [loading,setLoading]=useState(true);
   const [reloadKey,setReloadKey]=useState(0);
   useEffect(()=>{
@@ -180,12 +184,12 @@ export default function StockChart({code,day,name,supplyPrice,supplyGrade,lineCa
     {data?.chart?.bars?.length===0&&<p className="blue-chart-info">이 날짜에 표시할 확정 일봉 데이터가 없습니다.</p>}
     {data?.status==='READY'&&data.chart&&Array.isArray(data.chart.bars)&&data.chart.bars.length>0&&<>
       {data.message&&<p className="r15108-recovered-chart-note">{data.message}</p>}
-      <PriceChart bars={data.chart.bars} day={day} supplyPrice={supplyPrice} lineCandidates={lineCandidates}/>
+      <PriceChart bars={data.chart.bars} day={day} lineCandidates={lineCandidates}/>
       <IndicatorChart bars={data.chart.bars} type="volume"/>
       <IndicatorChart bars={data.chart.bars} type="rsi"/>
       <IndicatorChart bars={data.chart.bars} type="slow"/>
       <IndicatorChart bars={data.chart.bars} type="macd"/>
-      <div className="blue-chart-note">상단 거래량 밀집 추정 가격: {supplyPrice==null?'미확인':supplyPrice.toLocaleString('ko-KR')+'원'} · 상대 밀집도: {supplyGrade||'미확인'} (이전 120개 일봉 기반, 실제 매도압력 아님). 기준선은 검증 전 후보입니다. 모든 차트는 수정주가가 아닌 원본 시세이며 미래 날짜를 포함하지 않습니다.</div>
+      <div className="blue-chart-note">가격대별 누적 거래량은 저장된 확정 일봉으로 재계산한 추정치입니다. 기존 구형 매물대 수치와 다를 수 있습니다. 수정주가가 아닌 원본 가격이며 미래 일봉은 포함하지 않습니다.</div>
       {data.stats&&<Evidence stats={data.stats} highlightThreshold={highlightThreshold} highlightSamplesMin={highlightSamplesMin}/>}
       <p className="blue-attribution">차트 제공: <a href="https://www.tradingview.com/" target="_blank" rel="noopener noreferrer">TradingView Lightweight Charts™</a></p>
     </>}

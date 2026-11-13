@@ -368,13 +368,14 @@ function App(){
   const crossed=(r:Signal,k:string)=>!present(r,k)?'미계산':flag(r,k)?'당일 GC':'GC 없음';
   const lastCross=(r:Signal,k:string)=>String(extra(r,k)||'확인되지 않음');
   const validLines=(r:Signal):Line[]=>{const x=extra(r,'valid_line_candidates_json');if(typeof x!=='string')return [];try{const v=JSON.parse(x);return Array.isArray(v)?v:[];}catch{return [];}};
+  const isSupplyV2=(r:Signal)=>extra(r,'supply_strength_method')==='DAILY_HL_UNIFORM_120_V2';
   const supplyGrade=(r:Signal)=>{const grade=String(extra(r,'supply_strength_grade')||'');
-    return (num(r,'supply_reference_price')??0)>0&&['강','중','약'].includes(grade)?grade:'미확인';};
+    return isSupplyV2(r)&&(num(r,'supply_reference_price')??0)>0&&['강','중','약'].includes(grade)?grade:'미확인';};
   const supplyTag=(r:Signal)=>{const grade=supplyGrade(r);
     if(grade==='미확인')return null;
     const tone=grade==='강'?'strong':grade==='중'?'medium':'weak';
     return <span className={'r15108-supply-grade r15108-supply-'+tone}
-      title={'120개 이전 일봉 상대 거래량 집중도(최대 구간 대비 강 75%·중 50%·약 25%) · 실제 매도 저항 강도 아님 · 가격 '+money(num(r,'supply_reference_price'))+'원'}>거래량 밀집 {grade}</span>;};
+      title={'일봉 H-L 균등분배 추정 · 이 가격대 '+money(num(r,'supply_volume_est_shares'))+'주 · 전체 중 '+fmt(r,'supply_bin_share_pct',2)+'% · 최대 구간 대비 '+fmt(r,'supply_strength_relative_pct',1)+'% · 매도잔량 아님'}>상단물량 {grade}</span>;};
   const displayName=(r:Signal)=>r.name||String(r.extras?.name||r.extras?.Name||'종목명 미등록');
   const visibleRows=rows.filter(r=>(displayName(r)+' '+r.code).toLocaleLowerCase().includes(localQuery.trim().toLocaleLowerCase()));
   const changeGc=(next:GcKey[],mode:'any'|'all'=gcLogic)=>{
@@ -382,7 +383,6 @@ function App(){
     // Search in D1 across all stored result pages, not only the 100 rows currently loaded.
     if(total!==null)void search(1,false,next,mode);
   };
-  const profile=(r:Signal)=>r.supply_distance_pct==null?'미계산':r.supply_distance_pct.toFixed(2)+'%';
   const flip=(t:string)=>setSignals(a=>a.includes(t)?a.filter(s=>s!==t):[...a,t]);
   const inBasket=(r:Signal)=>basketIds.includes(`MANUAL:${r.code}:${r.day}`);
   const canBasket=(r:Signal)=>/^\d{6}$/.test(r.code)&&typeof r.close_price==='number'&&r.close_price>0;
@@ -648,7 +648,7 @@ function App(){
               </td>
               <td>{fmt(r,'rsi')} <small>{crossed(r,'rsi_gc')}</small></td><td>{fmt(r,'slow_14_3_3_k')} / {fmt(r,'slow_14_3_3_d')} <small>{crossed(r,'slow_14_3_3_gc')}</small></td>
               <td>{fmt(r,'macd_12_26_9')} <small>{crossed(r,'macd_gc')}</small></td><td>{present(r,'valid_line_candidates_json')?`${validLines(r).length}개`:'미계산'}</td>
-              <td>{supplyGrade(r)==='미확인'?'매물대 미확인':`거래량 밀집 ${supplyGrade(r)} · ${money(num(r,'supply_reference_price'))}원 · ${profile(r)}`}</td>
+              <td>{supplyGrade(r)==='미확인'?'매물대 추정 재분석 필요':`상단물량 ${supplyGrade(r)} · ${money(num(r,'supply_reference_price'))}원 · 약 ${money(num(r,'supply_volume_est_shares'))}주 · 비중 ${fmt(r,'supply_bin_share_pct',2)}%`}</td>
             </tr>):<tr><td className="empty" colSpan={9}>{total!==null?'조건에 맞는 종목이 없습니다.':'날짜와 조건을 선택해 검색하세요.'}</td></tr>}</tbody></table></div>
           <div className="mobile-results">
             {visibleRows.length?visibleRows.map((r,i)=><div className={'r151-mobile-row'+(patternUp(r)!==null?' r159-tomato-stock':'')} key={`${r.code}-${r.day}-${i}`}>
@@ -711,7 +711,7 @@ function App(){
           <div><strong>MACD (12,26,9)</strong><p className="indicator-value">{fmt(selected,'macd_12_26_9')} <small>/ {fmt(selected,'macd_signal_9')}</small></p><p className={flag(selected,'macd_gc')?'positive':''}>{crossed(selected,'macd_gc')} · 최근 GC {lastCross(selected,'macd_last_gc')}</p></div>
           <div><strong>Slow (12,5,5)</strong><p className="indicator-value">{fmt(selected,'slow_12_5_5_k')} <small>/ {fmt(selected,'slow_12_5_5_d')}</small></p><p>{crossed(selected,'slow_12_5_5_gc')} · 최근 GC {lastCross(selected,'slow_12_5_5_last_gc')}</p></div>
           <div><strong>Slow (20,12,12)</strong><p className="indicator-value">{fmt(selected,'slow_20_12_12_k')} <small>/ {fmt(selected,'slow_20_12_12_d')}</small></p><p>{crossed(selected,'slow_20_12_12_gc')} · 최근 GC {lastCross(selected,'slow_20_12_12_last_gc')}</p></div>
-          <div><strong>상단 매물대 (120봉 추정)</strong><p className="indicator-value">{profile(selected)} <small>· {supplyGrade(selected)}</small></p><p>상대 강도 {fmt(selected,'supply_strength_relative_pct')}% · 기준 {fmt(selected,'supply_reference_price',0)}원</p></div>
+          <div><strong>상단 가격대별 추정 거래량 (이전 120봉)</strong><p className="indicator-value">{supplyGrade(selected)} <small>· {isSupplyV2(selected)?money(num(selected,'supply_reference_price'))+'원':'구형 기록'}</small></p><p>{isSupplyV2(selected)?`해당 구간 추정 ${money(num(selected,'supply_volume_est_shares'))}주 · 전체 비중 ${fmt(selected,'supply_bin_share_pct',2)}% · 최대 구간 대비 ${fmt(selected,'supply_strength_relative_pct',1)}%`:'차트의 새 거래량 분포를 확인하세요. 기존 스캔 값은 재분석 전까지 구형입니다.'}</p></div>
         </div>
         <h3 className="detail-section-title"><BarChart3 size={17}/> 이동평균 배열·돌파 (확정 일봉)</h3>
          <div className="r159-tech-grid">

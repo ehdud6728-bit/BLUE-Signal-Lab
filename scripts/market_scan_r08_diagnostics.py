@@ -82,46 +82,9 @@ def valid_line_candidates(enriched: pd.DataFrame, flags: str) -> list[dict]:
 
 
 def supply_strength(history: pd.DataFrame) -> dict:
-    """Same R0.6 prior-120-bar typical-price proxy; strength is relative bin weight.
-
-    Strong >= 75% of the densest bin, medium >= 50%, weak >= 25%; an
-    *experimental relative histogram metric*, not true executed volume-at-price.
-    """
-    last = history.iloc[-1]
-    close = float(last['close'])
-    prior = history.iloc[:-1].tail(120)
-    base = {
-        'supply_strength_grade': '미확인',
-        'supply_strength_relative_pct': '',
-        'supply_bin_share_pct': '',
-        'supply_reference_price': '',
-        'supply_strength_method': 'PRIOR_120_TYPICAL_PRICE_VOLUME_BIN_V1',
-    }
-    if len(prior) < 100 or close <= 0:
-        return base
-    typical = (prior.high + prior.low + prior.close) / 3
-    width = max(close * .01, .01)
-    bn=np.floor(typical.astype(float) / width).astype('int64')
-    hist=prior.groupby(bn)['volume'].sum()
-    if hist.empty or float(hist.max()) <= 0 or float(hist.sum()) <= 0:
-        return base
-    max_volume=float(hist.max())
-    candidates=[]
-    for k,vol in hist.items():
-        level=(int(k)+.5)*width
-        if level > close and float(vol) >= max_volume*.25:
-            candidates.append((level,float(vol)))
-    if not candidates:
-        return base
-    level,volume=min(candidates,key=lambda pair:pair[0])
-    rel=volume/max_volume*100
-    base.update({
-        'supply_strength_grade':'강' if rel>=75 else ('중' if rel>=50 else '약'),
-        'supply_strength_relative_pct':round(rel,2),
-        'supply_bin_share_pct':round(volume/float(hist.sum())*100,3),
-        'supply_reference_price':round(level,2),
-    })
-    return base
+    """R15110: prior 120 daily H/L range-weighted estimated volume density."""
+    from supply_profile_r15110 import estimate_supply_profile
+    return estimate_supply_profile(history)
 
 
 def ma_event_diagnostics(rich: pd.DataFrame) -> dict:
@@ -174,6 +137,6 @@ def scan_r08(raw: pd.DataFrame, asof: str) -> tuple[list[dict],dict]:
         r['diagnostic_status']='R08_RESEARCH_EOD'
         diagnostics_count+=1
     audit['r08_diagnostics_rows']=diagnostics_count
-    audit['r08_method']='RSI WILDER+SMA9 existing; Stoch existing; MACD EMA12/26/9; signal-line price candidates; daily supply-bin relative strength'
-    audit['r08_warning']='Signal selection unchanged. Valid-line candidates and supply grades are exploratory EOD proxies, not Stock-Hunter validated lines or executed volume profile. Intraday price unavailable.'
+    audit['r08_method']='RSI WILDER+SMA9 existing; Stoch existing; MACD EMA12/26/9; signal-line price candidates; R15110 prior-120 daily H/L uniform volume allocation estimate'
+    audit['r08_warning']='Signal selection unchanged. R15110 supply volume is distributed uniformly over each daily H/L range, not observed executed-volume-at-price or resting sell orders. No breakout probability is asserted.'
     return rows,audit
