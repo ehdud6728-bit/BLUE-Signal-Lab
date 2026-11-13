@@ -180,8 +180,16 @@ def analyze_zone_reactions(raw:pd.DataFrame,asof:str) -> dict[str,Any]:
     all_horizons={str(n):_event_summary(events,h,n) for n in HORIZONS}
     same=[e for e in events if now and e['grade']==now['grade']]
     same_horizons={str(n):_event_summary(same,h,n) for n in HORIZONS}
+    from zone_pattern_forecast_r15112 import comparable_events, forecast_horizons
+    pattern_events, current_context = comparable_events(h,events,now)
+    pattern_horizons={str(n):_event_summary(pattern_events,h,n) for n in HORIZONS}
+    outlook=forecast_horizons(pattern_horizons,same_horizons,all_horizons,current_context,now)
     base.update({'status':'READY' if now is not None else 'NO_UPPER_ZONE',
         'events_seen':len(events),
         'cohorts':{'same_grade':{'label':'현재와 같은 밀집도','horizons':same_horizons},
-            'all':{'label':'전체 접근 사례','horizons':all_horizons}}})
+            'all':{'label':'전체 접근 사례','horizons':all_horizons},
+            'pattern_similar':{'label':'현재 기술패턴 유사(4조건 중 3개 이상)','horizons':pattern_horizons}},
+        'pattern_outlook':{'context':current_context,'criteria':{
+            'factors':['밀집등급','MA20 추세','RSI·MACD 모멘텀','거래량 증가'],
+            'match_min':3,'shrinkage_prior_cases':12},'horizons':outlook}})
     return base
