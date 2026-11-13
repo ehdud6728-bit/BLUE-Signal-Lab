@@ -1,0 +1,20 @@
+/* R1.5.10.7 compact, calculated stop-loss candidates: basket only. */
+.r15107-stop{border-top:1px solid #e7edf5;margin-top:7px;padding-top:5px;min-width:0}
+.r15107-stop-summary{display:flex;gap:6px;align-items:center;flex-wrap:wrap;min-height:29px;cursor:pointer;list-style:none;min-width:0}
+.r15107-stop-summary::-webkit-details-marker{display:none}
+.r15107-stop-label{font-size:12px;font-weight:800;color:#c36753;white-space:nowrap}
+.r15107-stop-number{font-size:13px;font-weight:750;color:#354a61;font-variant-numeric:tabular-nums;white-space:nowrap}
+.r15107-stop-pct{font-size:11px;font-weight:700;color:#b65a4f;font-variant-numeric:tabular-nums;white-space:nowrap}
+.r15107-stop-more{display:inline-flex;align-items:center;gap:3px;margin-left:auto;font-size:10px;font-weight:650;color:#657b96;white-space:nowrap}
+.r15107-stop-more svg{transition:transform .15s}.r15107-stop[open] .r15107-stop-more svg{transform:rotate(180deg)}
+.r15107-stop-details{display:grid;gap:6px;margin:5px 0 6px;padding:8px;background:#fbfcff;border:1px solid #e6ecf5;border-radius:8px}
+.r15107-stop-origin,.r15107-stop-note{font-size:10px;line-height:1.5;color:#74839b}
+.r15107-stop-option{display:flex;align-items:center;justify-content:space-between;gap:9px;padding:7px 8px;border:1px solid #e4eaf2;border-radius:7px;background:#fff;text-align:left;min-width:0;cursor:pointer}
+.r15107-stop-option.is-selected{border-color:#d6927b;background:#fff8f6}
+.r15107-stop-option:disabled{opacity:.65;cursor:default}
+.r15107-stop-option-name{font-size:11px;font-weight:750;color:#a66a50;min-width:0}
+.r15107-stop-option-name small{display:block;font-size:9px;color:#75869c;font-weight:500;line-height:1.5;overflow-wrap:anywhere}
+.r15107-stop-option-value{display:grid;justify-items:end;flex-shrink:0;gap:1px;font-variant-numeric:tabular-nums}
+.r15107-stop-option-value b{font-size:12px;color:#365471}
+.r15107-stop-option-value small{font-size:10px;color:#b65a4f}
+@media(max-width:390px){.r15107-stop-summary{gap:4px}.r15107-stop-label{font-size:11px}.r15107-stop-number{font-size:12px}.r15107-stop-pct{font-size:10px}}

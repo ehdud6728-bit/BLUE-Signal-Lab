@@ -9,6 +9,8 @@ import './r1595-group-price.css';
 import './smart-basket.css';
 import './r158-long-watch.css';
 import {comparisonKey,fetchCompared,sourceName,type PriceCompare} from './price-compare';
+import StopLossRow from './StopLossRow';
+import type {StopMethod} from './stop-loss';
 
 // R153_PERFORMANCE_MONITOR: KIS results are server-verified; never fabricate missing candles.
 type Performance={code:string;day:string;status:string;baseline?:number;
@@ -41,7 +43,8 @@ type AiResult={status:string;asof?:string;items?:AiPick[];generated_at?:string;m
 type BasketItem={id:string;source:'MANUAL'|'AI';code:string;name:string;day:string;baseline:number;
   added_at:string;signals:string[];memo:string;reason?:string;risk?:string;watch?:string;
   protected?:boolean;protected_at?:string;
-  patternUp10d?:number;patternN10d?:number;patternLabel10d?:string;patternDays10d?:string[]};
+  patternUp10d?:number;patternN10d?:number;patternLabel10d?:string;patternDays10d?:string[];
+  stopMethod?:StopMethod};
 type Quote={code:string;market:string;trade_date_kst:string;price:number;received_at_utc:string;exchange_tick_time_verified?:boolean};
 type Quotes={status:string;items:Quote[];age_minutes?:number|null;latest_received_at_utc?:string|null};
 const cash=(v:number|null|undefined)=>typeof v==='number'&&Number.isFinite(v)?v.toLocaleString('ko-KR'):'—';
@@ -67,6 +70,7 @@ function validItem(x:any):x is BasketItem{
   typeof x.id==='string'&&x.id===`${x.source}:${x.code}:${x.day}`&&
   (x.protected===undefined||typeof x.protected==='boolean')&&
   (x.protected_at===undefined||typeof x.protected_at==='string')&&
+   (x.stopMethod===undefined||(['SUPPORT','ATR','MA20','TRAILING'] as string[]).includes(x.stopMethod))&&
    (x.patternUp10d===undefined||(typeof x.patternUp10d==='number'&&Number.isFinite(x.patternUp10d)&&x.patternUp10d>=0&&x.patternUp10d<=100))&&
    (x.patternN10d===undefined||(Number.isInteger(x.patternN10d)&&x.patternN10d>=1&&x.patternN10d<=100000))&&
    (x.patternLabel10d===undefined||(typeof x.patternLabel10d==='string'&&x.patternLabel10d.length<=150))&&
@@ -490,6 +494,10 @@ export default function SmartBasket({quickAddRequest,onItemsChange,active=true,r
        <div><span>기준가 대비</span><b className={growth==null?'':growth>=0?'basket-rise':'basket-fall'}>{pctText(growth)}</b>
          <small>{maxHigh&&recent?`최고가 대비 ${pctText(pctChange(recent,maxHigh))}`:state}</small></div>
      </div>
+     <StopLossRow active={active} code={it.code} day={it.day} baseline={it.baseline}
+       signals={signalChips} highestObserved={maxHigh} highestDay={maxHighDay}
+       selectedMethod={it.stopMethod} refreshKey={refreshKey}
+       onSelectMethod={(method:StopMethod)=>setItems(old=>old.map(x=>x.id===it.id?{...x,stopMethod:method}:x))}/>
      <div className="r153-row-state" title={pr?.checked_at||''}>{state}{pr?.checked_at&&` · 최종 확인 ${new Date(pr.checked_at).toLocaleString('ko-KR')}`}</div>
      <details className="r152-record-more"><summary>메모 · 관찰 근거</summary>
        {it.source==='AI'&&<p className="basket-insight">AI 관찰 근거: {it.reason||'미기재'} · 위험: {it.risk||'미기재'}</p>}
