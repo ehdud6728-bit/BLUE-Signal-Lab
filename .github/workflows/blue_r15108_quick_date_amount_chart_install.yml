@@ -1,0 +1,336 @@
+name: BLUE R1.5.10.8 Quick Date Amount Chart & Supply (MANUAL)
+
+on:
+  workflow_dispatch:
+    inputs:
+      apply_changes:
+        description: 'false = only verify in runner; true = commit verified source to main. Never deploys.'
+        required: true
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+concurrency:
+  group: blue-r15108-quick-search-chart-install
+  cancel-in-progress: false
+
+jobs:
+  patch_and_test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 18
+    steps:
+      - name: Guard exact BLUE main repository
+        shell: bash
+        run: |
+          test "$GITHUB_REPOSITORY" = 'ehdud6728-bit/BLUE-Signal-Lab'
+          test "$GITHUB_REF" = 'refs/heads/main'
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+          persist-credentials: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Write safe R1.5.10.8 source patcher
+        shell: bash
+        run: |
+          cat > "$RUNNER_TEMP/blue_r15108_patch.py" <<'PY_R15108_PATCH'
+          #!/usr/bin/env python3
+          """BLUE R1.5.10.8: compact date/amount, reliable MA layers, verified chart recovery.
+          Source only; no network, secrets, D1 writes, live data, or deployment.
+          """
+          from pathlib import Path
+          import sys
+
+          BASE=Path.cwd()
+          FILES={
+              'main':'web/src/main.tsx',
+              'chart':'web/src/StockChart.tsx',
+              'worker':'worker/src/index.ts',
+              'css':'web/src/r1599-pattern-filters.css',
+          }
+
+          def replace_once(source:str,old:str,new:str,key:str)->str:
+              count=source.count(old)
+              if count!=1:
+                  raise RuntimeError(f'BLUE_R15108_ANCHOR_ERROR {key}: expected=1 actual={count}')
+              if old==new: raise RuntimeError(f'BLUE_R15108_IDENTICAL_PATCH {key}')
+              print('BLUE_R15108_ANCHOR_OK',key)
+              return source.replace(old,new,1)
+
+          main=Path(FILES['main']).read_text(encoding='utf-8')
+          main=replace_once(main,
+           '''        <div className="search-compact"><div><small>기준일</small><strong>{mode==='single'?date:`${start} ~ ${end}`}</strong></div><button onClick={()=>setFilterOpen(true)}><SlidersHorizontal size={16}/> 수정</button><button className="compact-run" disabled={busy||requestBusy} onClick={()=>{void search(1);}}><Search size={16}/> 검색</button></div>''',
+           '''        <div className="search-compact r15108-quickbar" role="group" aria-label="빠른 검색 날짜와 거래대금 변경">
+                    <div className="r15108-quick-controls">
+                      {mode==='single'?<label className="r15108-quick-field r15108-date-field">
+                        <span>기준일</span><input type="date" aria-label="빠른 검색 기준일 변경" value={date}
+                          onChange={e=>{setDate(e.target.value);setDataStatus('');}}/>
+                      </label>:<div className="r15108-range-fields" aria-label="기간 검색 날짜 변경">
+                        <label className="r15108-quick-field"><span>시작일</span><input aria-label="빠른 검색 시작일" type="date" value={start} onChange={e=>setStart(e.target.value)}/></label>
+                        <label className="r15108-quick-field"><span>종료일</span><input aria-label="빠른 검색 종료일" type="date" value={end} onChange={e=>setEnd(e.target.value)}/></label>
+                      </div>}
+                      <label className="r15108-quick-field r15108-amount-field"><span>거래대금</span>
+                        <select aria-label="빠른 검색 최소 거래대금 (억원)" value={amountChoice} onChange={e=>setAmountChoice(e.target.value)}>
+                          <option value="0">전체</option><option value="100">100억+</option><option value="300">300억+</option>
+                          <option value="500">500억+</option><option value="1000">1,000억+</option><option value="custom">직접 입력</option>
+                        </select>
+                      </label>
+                      {amountChoice==='custom'&&<label className="r15108-quick-field r15108-custom-field"><span>억 원</span>
+                        <input type="number" min="0" max="50000" step="1" value={customAmount}
+                          aria-label="빠른 검색 거래대금 직접 입력 (억원)" onChange={e=>setCustomAmount(e.target.value)}/>
+                      </label>}
+                    </div>
+                    <button type="button" className="compact-run" disabled={busy||requestBusy} onClick={()=>{void search(1);}}>
+                      <Search size={16}/>{busy?'검색 중':'검색'}
+                    </button>
+                  </div>''', 'QUICKBAR_DATE_AMOUNT')
+
+
+          # R1.5.10.8: grade is meaningful only if the historical supply level exists.
+          main=replace_once(main,
+           "  const supplyGrade=(r:Signal)=>String(extra(r,'supply_strength_grade')||'미계산');",
+           """  const supplyGrade=(r:Signal)=>{const grade=String(extra(r,'supply_strength_grade')||'');
+              return (num(r,'supply_reference_price')??0)>0&&['강','중','약'].includes(grade)?grade:'미확인';};
+            const supplyTag=(r:Signal)=>{const grade=supplyGrade(r);
+              if(grade==='미확인')return null;
+              const tone=grade==='강'?'strong':grade==='중'?'medium':'weak';
+              return <span className={'r15108-supply-grade r15108-supply-'+tone}
+                title={'120개 이전 일봉의 상대 거래량 기반 추정 매물대 · 가격 '+money(num(r,'supply_reference_price'))+'원'}>매물대 {grade}</span>;};""",
+           'SUPPLY_GRADE_VERIFIED_ONLY')
+          main=replace_once(main,
+           '<td>{r.signals.map(s=><span className="tag" key={s}>{showSignal(s)}</span>)}{techBadges(r).map(t=><span className="r1591-search-tech" key={t}>{t}</span>)}</td>',
+           '<td>{r.signals.map(s=><span className="tag" key={s}>{showSignal(s)}</span>)}{techBadges(r).map(t=><span className="r1591-search-tech" key={t}>{t}</span>)}{supplyTag(r)}</td>',
+           'SUPPLY_DESKTOP_TAG')
+          main=replace_once(main,
+           '<div className="stock-tags">{r.signals.slice(0,4).map(s=><span className="tag" key={s}>{showSignal(s)}</span>)}{r.signals.length>4&&<span className="tag tag-more">+{r.signals.length-4}</span>}</div>',
+           '<div className="stock-tags">{r.signals.slice(0,4).map(s=><span className="tag" key={s}>{showSignal(s)}</span>)}{r.signals.length>4&&<span className="tag tag-more">+{r.signals.length-4}</span>}{supplyTag(r)}</div>',
+           'SUPPLY_MOBILE_TAG')
+          main=replace_once(main,
+           '<div><small>상단 매물</small><strong>{supplyGrade(r)}</strong></div>',
+           '<div><small>매물대 기준가</small><strong>{supplyGrade(r)===\'미확인\'?\'미확인\':money(num(r,\'supply_reference_price\'))+\'원\'}</strong></div>',
+           'SUPPLY_MOBILE_REFERENCE_PRICE')
+          main=replace_once(main,
+           '<td>{profile(r)} · {supplyGrade(r)}</td>',
+           '<td>{supplyGrade(r)===\'미확인\'?\'매물대 미확인\':`매물대 ${supplyGrade(r)} · ${money(num(r,\'supply_reference_price\'))}원 · ${profile(r)}`}</td>',
+           'SUPPLY_DESKTOP_PRICE')
+
+          chart=Path(FILES['chart']).read_text(encoding='utf-8')
+          chart=replace_once(chart,
+           "  const [layers,setLayers]=useState({env20:true,env40:true,ma112:false,ma224:false,bb40:false,supply:false,candidates:false});",
+           "  const [layers,setLayers]=useState({env20:true,env40:false,ma112:true,ma224:true,bb40:false,supply:false,candidates:false});",
+           'MA112_MA224_DEFAULT_ON')
+          chart=replace_once(chart,
+           "  const last=bars[bars.length-1];\n  const fmt=(n:number|null|undefined)=>",
+           "  const last=bars[bars.length-1];\n  const hasMA112=bars.some(b=>typeof b.ma112==='number'&&Number.isFinite(b.ma112)&&b.ma112>0);\n  const hasMA224=bars.some(b=>typeof b.ma224==='number'&&Number.isFinite(b.ma224)&&b.ma224>0);\n  const fmt=(n:number|null|undefined)=>",
+           'MA_AVAILABILITY')
+          chart=replace_once(chart,
+           "      if(!enabled)continue;\n      const line=chart.addSeries(LineSeries,{color,lineWidth:2,priceLineVisible:false,lastValueVisible:false});\n      line.setData(bars.filter(b=>b[field]!=null).map(b=>({time:time(b.t),value:b[field]!})));",
+           "      if(!enabled)continue;\n      const points=bars.filter(b=>typeof b[field]==='number'&&Number.isFinite(b[field])&&(b[field] as number)>0)\n        .map(b=>({time:time(b.t),value:b[field] as number}));\n      if(!points.length)continue;\n      const line=chart.addSeries(LineSeries,{color,lineWidth:2,priceLineVisible:false,lastValueVisible:false});\n      line.setData(points);",
+           'MA_VALID_POINTS')
+          chart=replace_once(chart,
+           "      <button type=\"button\" aria-pressed={layers.ma112} className={layers.ma112?'on':''} onClick={()=>toggle('ma112')}><i style={{background:'#d65d64'}}/>112일선</button>\n      <button type=\"button\" aria-pressed={layers.ma224} className={layers.ma224?'on':''} onClick={()=>toggle('ma224')}><i style={{background:'#af5da3'}}/>224일선</button>",
+           "      <button type=\"button\" aria-pressed={layers.ma112&&hasMA112} disabled={!hasMA112} title={hasMA112?'112일선 표시 전환':'저장된 일봉에 112일선 자료 없음'} className={layers.ma112&&hasMA112?'on':''} onClick={()=>toggle('ma112')}><i style={{background:'#d65d64'}}/>112일선</button>\n      <button type=\"button\" aria-pressed={layers.ma224&&hasMA224} disabled={!hasMA224} title={hasMA224?'224일선 표시 전환':'저장된 일봉에 224일선 자료 없음'} className={layers.ma224&&hasMA224?'on':''} onClick={()=>toggle('ma224')}><i style={{background:'#af5da3'}}/>224일선</button>",
+           'MA_VISIBLE_CONTROLS')
+          chart=replace_once(chart,
+           '    <p className="blue-chart-hint">상단의 버튼으로 선을 켜고 끌 수 있습니다. BLUE40 상단처럼 현재가와 먼 선은 캔들이 작게 보이는 문제를 막기 위해 기본적으로 숨깁니다. 가격 라벨은 차트 밖의 범례에 표시합니다.</p>',
+           '    <p className="blue-chart-hint">112·224일선은 확인된 일봉 값이 있으면 기본 표시합니다. 비활성화된 선은 해당 차트 저장본에 값이 없습니다. BLUE40 상단처럼 가격과 멀리 떨어지는 밴드는 기본적으로 숨깁니다. 112·224선 돌파 태그는 당일 상향 돌파일 때만 나타납니다.</p>',
+           'MA_HINT')
+          chart=replace_once(chart,
+           '  const [data,setData]=useState<Payload|null>(null);const [error,setError]=useState(\'\');const [loading,setLoading]=useState(true);',
+           '  const [data,setData]=useState<Payload|null>(null);const [error,setError]=useState(\'\');const [loading,setLoading]=useState(true);\n  const [reloadKey,setReloadKey]=useState(0);',
+           'CHART_RETRY_STATE')
+          chart=replace_once(chart,
+           '  },[code,day]);\n  const hasR159Highlight=',
+           '  },[code,day,reloadKey]);\n  const hasR159Highlight=',
+           'CHART_RETRY_DEP')
+          chart=replace_once(chart,
+           "    {error&&<p className=\"blue-chart-error\">{error}</p>}\n    {data?.status==='READY'&&data.chart&&<>",
+           "    {error&&<div className=\"r15108-chart-error\" role=\"status\"><p className=\"blue-chart-error\">{error}</p>\n      <small>이 날짜의 검증된 일봉 차트 저장본이 없거나 API 연결이 실패했습니다. 다른 저장본에서도 해당 날짜를 확인할 수 없으면 재분석·재등록이 필요합니다.</small>\n      <button type=\"button\" onClick={()=>setReloadKey(k=>k+1)}>차트 다시 확인</button></div>}\n    {data?.chart?.bars?.length===0&&<p className=\"blue-chart-info\">이 날짜에 표시할 확정 일봉 데이터가 없습니다.</p>}\n    {data?.status==='READY'&&data.chart&&Array.isArray(data.chart.bars)&&data.chart.bars.length>0&&<>",
+           'CHART_ERROR_RETRY')
+          chart=replace_once(chart,
+           '      <PriceChart bars={data.chart.bars} day={day} supplyPrice={supplyPrice} lineCandidates={lineCandidates}/>',
+           '      {data.message&&<p className="r15108-recovered-chart-note">{data.message}</p>}\n      <PriceChart bars={data.chart.bars} day={day} supplyPrice={supplyPrice} lineCandidates={lineCandidates}/>',
+           'CHART_RECOVERY_NOTICE')
+
+          worker=Path(FILES['worker']).read_text(encoding='utf-8')
+          worker=replace_once(worker,
+           "        if(!r)return respond({status:'NOT_AVAILABLE',message:'R1.0 분석을 해당 날짜에 다시 실행해야 차트가 준비됩니다.'},404);\n        return respond({status:'READY',chart:JSON.parse(r.chart_json),stats:JSON.parse(r.stats_json),\n          snapshot_time:r.created_at});",
+           """        if(r)return respond({status:'READY',chart:JSON.parse(r.chart_json),stats:JSON.parse(r.stats_json),
+                    snapshot_time:r.created_at});
+                  // R1.5.10.8: another verified snapshot for this symbol may contain
+                  // *historical* bars for the requested day. Return only bars <= day.
+                  // Never reuse a later date's backtest stats: it would leak future data.
+                  const proof=await env.DB.prepare(`SELECT s.close_price AS close_price
+                              FROM signals s JOIN runs rr ON rr.run_id=s.run_id
+                              WHERE s.day=? AND s.code=? AND rr.is_demo=0 AND rr.latest_price_date=s.day
+                              ORDER BY rr.created_at DESC,rr.run_id DESC LIMIT 1`).bind(day,code)
+                              .first<{close_price:number|null}>();
+                            if(!proof||typeof proof.close_price!=='number'||!Number.isFinite(proof.close_price)||proof.close_price<=0)
+                              return respond({status:'NOT_AVAILABLE',message:'검증된 검색일 종가가 없어 다른 날짜의 차트를 대체하지 않습니다.'},404);
+                            const nearby=await env.DB.prepare(`SELECT c.chart_json,c.day,c.created_at
+                    FROM chart_snapshots c JOIN runs r ON r.run_id=c.run_id
+                    WHERE c.code=? AND c.day>? AND r.is_demo=0 AND r.latest_price_date=c.day
+                    ORDER BY c.day ASC,r.created_at DESC,r.run_id DESC LIMIT 30`).bind(code,day)
+                    .all<{chart_json:string;day:string;created_at:string}>();
+                  for(const saved of nearby.results||[]){
+                    try{
+                      const source=JSON.parse(saved.chart_json) as {bars?:Array<{t?:string}>,[key:string]:unknown};
+                      if(!Array.isArray(source.bars))continue;
+                      const bars=source.bars.filter(b=>b&&typeof b.t==='string'&&b.t<=day);
+                      if(bars.length<5||bars[bars.length-1]?.t!==day)continue;
+                                // Confirm exact as-of close to prevent mismatched adjustments.
+                                const last=bars[bars.length-1] as {c?:number};
+                                if(typeof last.c!=='number'||!Number.isFinite(last.c)||last.c<=0||
+                                   Math.abs(last.c-proof.close_price)>Math.max(0.01,proof.close_price*0.001))continue;
+                      return respond({status:'READY',chart:{...source,asof:day,bars},
+                        message:'동일 종목의 다른 검증된 일봉 저장본에서 기준일까지의 가격만 복원했습니다. 과거 패턴 통계는 날짜별 별도 검증이 필요합니다.',
+                        chart_source_day:saved.day,snapshot_time:saved.created_at});
+                    }catch{/* Skip corrupt older snapshots rather than invent data. */}
+                  }
+                  return respond({status:'NOT_AVAILABLE',message:'해당 날짜의 차트 저장본을 확인하지 못했습니다. 같은 종목의 다른 저장본에도 기준일 일봉이 없어 해당 날짜의 분석·차트 등록이 필요합니다.'},404);""",
+           'CHART_D1_SAFE_FALLBACK')
+
+          css=Path(FILES['css']).read_text(encoding='utf-8')
+          if '.r15108-quickbar' in css: raise RuntimeError('BLUE_R15108_CSS_ALREADY_PRESENT')
+          css+='''
+          /* R1.5.10.8: compact mobile date / EOD turnover controls, no large filter expansion. */
+          @media(max-width:790px){
+           .filter-closed .search-compact.r15108-quickbar{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:end;gap:7px;margin-top:11px}
+           .r15108-quickbar>.r15108-quick-controls{display:grid;grid-template-columns:minmax(0,1.14fr) minmax(0,.86fr);align-items:end;gap:7px;min-width:0}
+           .r15108-quick-field{display:flex!important;flex-direction:column;gap:4px;min-width:0;margin:0!important}
+           .r15108-quick-field>span{font-size:10px;color:#687d9b;font-weight:700}
+           .r15108-quick-field input,.r15108-quick-field select{display:block;box-sizing:border-box;width:100%;min-width:0;max-width:100%;height:41px;border:1px solid #ccdbee;border-radius:9px;background:#fff;color:#274b78;padding:7px 6px;font-size:11px;font-weight:750;line-height:1.3}
+           .r15108-quick-field input[type=date]{-webkit-appearance:auto;appearance:auto;max-width:100%;color-scheme:light}
+           .r15108-quickbar>.compact-run{min-height:41px;white-space:nowrap;padding:7px 8px!important;align-self:end}
+           .r15108-quickbar .r15108-range-fields{display:flex;gap:4px;min-width:0}
+           .r15108-quickbar .r15108-range-fields>.r15108-quick-field{flex:1;min-width:0}
+           .r15108-quick-controls:has(.r15108-range-fields){grid-template-columns:minmax(0,1.6fr) minmax(0,.8fr)}
+           .r15108-quick-controls:has(.r15108-custom-field){grid-template-columns:repeat(3,minmax(0,1fr))}
+           .blue-layer-tools button:disabled{opacity:.42;cursor:not-allowed}
+           .r15108-chart-error{display:grid;gap:7px;align-items:start;padding:10px;background:#fff9f5;border:1px solid #e9d6ce;border-radius:9px}
+           .r15108-chart-error small{color:#8a645a;font-size:11px;line-height:1.55}
+           .r15108-chart-error button{justify-self:start;border:1px solid #d7c2b7;border-radius:7px;background:white;color:#9c5345;padding:8px 10px;font-size:11px;font-weight:800}
+           .r15108-recovered-chart-note{font-size:11px;color:#845d4b;line-height:1.5;background:#fff8ed;border:1px solid #e9d4bf;border-radius:8px;padding:9px}
+          }
+          @media(max-width:390px){
+           .r15108-quickbar>.r15108-quick-controls{gap:5px}
+           .r15108-quick-field input,.r15108-quick-field select{padding:7px 4px;font-size:10px}
+           .r15108-quickbar>.compact-run{padding:8px 7px!important;font-size:10px!important}
+          }
+          '''
+          # Ensure error state works also on desktop.
+          css+='''
+          @media(min-width:791px){
+           .r15108-chart-error{padding:12px;background:#fff9f5;border:1px solid #e9d6ce;border-radius:9px;display:grid;gap:7px}
+           .r15108-chart-error small{font-size:12px;color:#8a645a}
+           .r15108-chart-error button{justify-self:start;border:1px solid #d7c2b7;border-radius:7px;padding:7px 10px;background:white;color:#9c5345;font-weight:800}
+           .r15108-recovered-chart-note{font-size:11px;background:#fff8ed;color:#845d4b;padding:9px;border-radius:8px}
+           .blue-layer-tools button:disabled{opacity:.42;cursor:not-allowed}
+          }
+          '''
+
+          css+='''
+          /* R1.5.10.8: show only validated historical supply grades, not predicted order-book volume. */
+          .r15108-supply-grade{display:inline-flex;align-items:center;vertical-align:middle;max-width:100%;white-space:nowrap;border-radius:6px;padding:3px 7px;margin:2px 3px 2px 0;border:1px solid #d8dce7;background:#f8faff;font-size:10px;font-weight:800;line-height:1.45}
+          .r15108-supply-strong{color:#aa5246;background:#fff3ee;border-color:#edb4a7}
+          .r15108-supply-medium{color:#8c672e;background:#fff9e8;border-color:#e6d19c}
+          .r15108-supply-weak{color:#64758c;background:#f3f6fb;border-color:#d8e0eb}
+          @media(max-width:520px){.stock-tags .r15108-supply-grade{margin:2px 0;font-size:10px}.stock-quick>div:last-child strong{font-size:11px}}
+          '''
+
+          outputs={FILES['main']:main,FILES['chart']:chart,FILES['worker']:worker,FILES['css']:css}
+          assert 'r15108-quickbar' in main and main.count('빠른 검색 기준일 변경')==1
+          assert main.count('{supplyTag(r)}')==2 and 'SUPPLY_GRADE_VERIFIED_ONLY' not in main
+          assert 'ma112:true,ma224:true' in chart
+          assert 'chart_source_day:saved.day' in worker and 'b.t<=day' in worker and 'Math.abs(last.c-proof.close_price)' in worker
+          assert 'stats:JSON.parse(r.stats_json)' in worker
+          assert 'WHERE c.code=? AND c.day>?' in worker
+          assert 'r15108-supply-grade' in css and 'r15108-supply-strong' in css
+          assert len(outputs)==4
+          for name,out in outputs.items():
+              if '--check-only' not in sys.argv:
+                  Path(name).write_text(out,encoding='utf-8')
+              print('BLUE_R15108_PATCH_'+('CHECK' if '--check-only' in sys.argv else 'WRITE'), name, len(out))
+          print('BLUE_R15108_PATCH_OK')
+          PY_R15108_PATCH
+          python -m py_compile "$RUNNER_TEMP/blue_r15108_patch.py"
+      - name: Verify all exact anchors before modifying working copy
+        shell: bash
+        run: |
+          python "$RUNNER_TEMP/blue_r15108_patch.py" --check-only
+      - name: Apply patches only to checked-out source files
+        shell: bash
+        run: |
+          python "$RUNNER_TEMP/blue_r15108_patch.py"
+      - name: Validate feature and safe chart as-of invariants
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          m=Path('web/src/main.tsx').read_text()
+          s=Path('web/src/StockChart.tsx').read_text()
+          w=Path('worker/src/index.ts').read_text()
+          c=Path('web/src/r1599-pattern-filters.css').read_text()
+          assert m.count('className="search-compact r15108-quickbar"')==1
+          assert 'aria-label="빠른 검색 기준일 변경"' in m
+          assert 'aria-label="빠른 검색 최소 거래대금 (억원)"' in m
+          assert 'ma112:true,ma224:true' in s
+          assert m.count('{supplyTag(r)}')==2 and 'r15108-supply-grade' in m
+          assert '매물대 미확인' in m
+          assert 'setReloadKey(k=>k+1)' in s
+          assert 'bars[bars.length-1]?.t!==day' in w
+          assert 'b.t<=day' in w
+          assert 'Math.abs(last.c-proof.close_price)' in w
+          assert "WHERE c.code=? AND c.day>?" in w
+          assert "stats:JSON.parse(r.stats_json)" in w
+          assert '.r15108-quickbar' in c and '.r15108-supply-strong' in c
+          print('BLUE_R15108_FEATURE_AND_NO_LOOKAHEAD_INVARIANTS_OK')
+          PY
+      - name: Existing read-only node unit tests
+        shell: bash
+        run: node --test tests/test_r1593_compare.mjs
+      - name: Build frontend TypeScript and Vite
+        working-directory: web
+        shell: bash
+        run: |
+          npm install --no-package-lock --no-audit --no-fund
+          npm run build
+      - name: Cloudflare API Worker compile dry-run only
+        working-directory: worker
+        shell: bash
+        run: |
+          npm install --no-package-lock --no-audit --no-fund
+          npx wrangler deploy --dry-run --outdir /tmp/blue-r15108-worker-dryrun
+      - name: Strict changed-file scope verification
+        shell: bash
+        run: |
+          python - <<'PY'
+          import subprocess
+          from pathlib import Path
+          changed=set(subprocess.check_output(['git','diff','--name-only','--','web/src/main.tsx','web/src/StockChart.tsx','web/src/r1599-pattern-filters.css','worker/src/index.ts'],text=True).splitlines())
+          expected={'web/src/main.tsx','web/src/StockChart.tsx','web/src/r1599-pattern-filters.css','worker/src/index.ts'}
+          assert changed==expected,(changed,expected)
+          all_dirty=set(subprocess.check_output(['git','diff','--name-only'],text=True).splitlines())
+          assert all_dirty==expected,all_dirty
+          print('BLUE_R15108_SCOPE_OK',sorted(changed))
+          PY
+      - name: Commit safe source-only update if explicitly approved
+        if: ${{ inputs.apply_changes }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -- web/src/main.tsx web/src/StockChart.tsx web/src/r1599-pattern-filters.css worker/src/index.ts
+          git commit -m 'BLUE R1.5.10.8: compact date/amount, chart and supply strength'
+          git push origin HEAD:main
+          echo 'BLUE_R15108_SOURCE_COMMITTED_NO_DEPLOY'
+      - name: Verify-only summary
+        if: ${{ !inputs.apply_changes }}
+        run: echo 'BLUE_R15108_DRY_RUN_COMPLETE; sources not committed, API not deployed, web not deployed'
