@@ -100,9 +100,39 @@ export default {
           WHERE c.day=? AND c.code=? AND r.is_demo=0 AND r.latest_price_date=c.day
           ORDER BY r.created_at DESC,r.run_id DESC LIMIT 1`).bind(day,code)
           .first<{chart_json:string;stats_json:string;created_at:string}>();
-        if(!r)return respond({status:'NOT_AVAILABLE',message:'R1.0 분석을 해당 날짜에 다시 실행해야 차트가 준비됩니다.'},404);
-        return respond({status:'READY',chart:JSON.parse(r.chart_json),stats:JSON.parse(r.stats_json),
+        if(r)return respond({status:'READY',chart:JSON.parse(r.chart_json),stats:JSON.parse(r.stats_json),
           snapshot_time:r.created_at});
+        // R1.5.10.8: another verified snapshot for this symbol may contain
+        // *historical* bars for the requested day. Return only bars <= day.
+        // Never reuse a later date's backtest stats: it would leak future data.
+        const proof=await env.DB.prepare(`SELECT s.close_price AS close_price
+                    FROM signals s JOIN runs rr ON rr.run_id=s.run_id
+                    WHERE s.day=? AND s.code=? AND rr.is_demo=0 AND rr.latest_price_date=s.day
+                    ORDER BY rr.created_at DESC,rr.run_id DESC LIMIT 1`).bind(day,code)
+                    .first<{close_price:number|null}>();
+                  if(!proof||typeof proof.close_price!=='number'||!Number.isFinite(proof.close_price)||proof.close_price<=0)
+                    return respond({status:'NOT_AVAILABLE',message:'검증된 검색일 종가가 없어 다른 날짜의 차트를 대체하지 않습니다.'},404);
+                  const nearby=await env.DB.prepare(`SELECT c.chart_json,c.day,c.created_at
+          FROM chart_snapshots c JOIN runs r ON r.run_id=c.run_id
+          WHERE c.code=? AND c.day>? AND r.is_demo=0 AND r.latest_price_date=c.day
+          ORDER BY c.day ASC,r.created_at DESC,r.run_id DESC LIMIT 30`).bind(code,day)
+          .all<{chart_json:string;day:string;created_at:string}>();
+        for(const saved of nearby.results||[]){
+          try{
+            const source=JSON.parse(saved.chart_json) as {bars?:Array<{t?:string}>,[key:string]:unknown};
+            if(!Array.isArray(source.bars))continue;
+            const bars=source.bars.filter(b=>b&&typeof b.t==='string'&&b.t<=day);
+            if(bars.length<5||bars[bars.length-1]?.t!==day)continue;
+                      // Confirm exact as-of close to prevent mismatched adjustments.
+                      const last=bars[bars.length-1] as {c?:number};
+                      if(typeof last.c!=='number'||!Number.isFinite(last.c)||last.c<=0||
+                         Math.abs(last.c-proof.close_price)>Math.max(0.01,proof.close_price*0.001))continue;
+            return respond({status:'READY',chart:{...source,asof:day,bars},
+              message:'동일 종목의 다른 검증된 일봉 저장본에서 기준일까지의 가격만 복원했습니다. 과거 패턴 통계는 날짜별 별도 검증이 필요합니다.',
+              chart_source_day:saved.day,snapshot_time:saved.created_at});
+          }catch{/* Skip corrupt older snapshots rather than invent data. */}
+        }
+        return respond({status:'NOT_AVAILABLE',message:'해당 날짜의 차트 저장본을 확인하지 못했습니다. 같은 종목의 다른 저장본에도 기준일 일봉이 없어 해당 날짜의 분석·차트 등록이 필요합니다.'},404);
       }
       // BLUE R1.5: AI picks from server-verified historical EOD; no order entry.
       if (p === '/api/basket/ai' && (request.method === 'GET' || request.method === 'POST')) {

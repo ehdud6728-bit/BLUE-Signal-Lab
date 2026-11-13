@@ -49,3 +49,43 @@
 .r151-mobile-row.r159-tomato-stock>.stock-card{border:2px solid #e87968!important;background:linear-gradient(180deg,#fff8f6,#fff 92px)!important}
 .desktop-results tr.r159-tomato-stock>td:first-child .r15106-search-pattern-evidence{margin:5px 0}
 @media(max-width:520px){.r15106-search-pattern-evidence{margin:8px 0}.r15106-search-pattern-evidence .r1591-basket-evidence{font-size:10px;padding:6px 8px}.r15106-matched-pattern,.r15106-basket-pattern{font-size:10px}}
+
+/* R1.5.10.8: compact mobile date / EOD turnover controls, no large filter expansion. */
+@media(max-width:790px){
+ .filter-closed .search-compact.r15108-quickbar{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:end;gap:7px;margin-top:11px}
+ .r15108-quickbar>.r15108-quick-controls{display:grid;grid-template-columns:minmax(0,1.14fr) minmax(0,.86fr);align-items:end;gap:7px;min-width:0}
+ .r15108-quick-field{display:flex!important;flex-direction:column;gap:4px;min-width:0;margin:0!important}
+ .r15108-quick-field>span{font-size:10px;color:#687d9b;font-weight:700}
+ .r15108-quick-field input,.r15108-quick-field select{display:block;box-sizing:border-box;width:100%;min-width:0;max-width:100%;height:41px;border:1px solid #ccdbee;border-radius:9px;background:#fff;color:#274b78;padding:7px 6px;font-size:11px;font-weight:750;line-height:1.3}
+ .r15108-quick-field input[type=date]{-webkit-appearance:auto;appearance:auto;max-width:100%;color-scheme:light}
+ .r15108-quickbar>.compact-run{min-height:41px;white-space:nowrap;padding:7px 8px!important;align-self:end}
+ .r15108-quickbar .r15108-range-fields{display:flex;gap:4px;min-width:0}
+ .r15108-quickbar .r15108-range-fields>.r15108-quick-field{flex:1;min-width:0}
+ .r15108-quick-controls:has(.r15108-range-fields){grid-template-columns:minmax(0,1.6fr) minmax(0,.8fr)}
+ .r15108-quick-controls:has(.r15108-custom-field){grid-template-columns:repeat(3,minmax(0,1fr))}
+ .blue-layer-tools button:disabled{opacity:.42;cursor:not-allowed}
+ .r15108-chart-error{display:grid;gap:7px;align-items:start;padding:10px;background:#fff9f5;border:1px solid #e9d6ce;border-radius:9px}
+ .r15108-chart-error small{color:#8a645a;font-size:11px;line-height:1.55}
+ .r15108-chart-error button{justify-self:start;border:1px solid #d7c2b7;border-radius:7px;background:white;color:#9c5345;padding:8px 10px;font-size:11px;font-weight:800}
+ .r15108-recovered-chart-note{font-size:11px;color:#845d4b;line-height:1.5;background:#fff8ed;border:1px solid #e9d4bf;border-radius:8px;padding:9px}
+}
+@media(max-width:390px){
+ .r15108-quickbar>.r15108-quick-controls{gap:5px}
+ .r15108-quick-field input,.r15108-quick-field select{padding:7px 4px;font-size:10px}
+ .r15108-quickbar>.compact-run{padding:8px 7px!important;font-size:10px!important}
+}
+
+@media(min-width:791px){
+ .r15108-chart-error{padding:12px;background:#fff9f5;border:1px solid #e9d6ce;border-radius:9px;display:grid;gap:7px}
+ .r15108-chart-error small{font-size:12px;color:#8a645a}
+ .r15108-chart-error button{justify-self:start;border:1px solid #d7c2b7;border-radius:7px;padding:7px 10px;background:white;color:#9c5345;font-weight:800}
+ .r15108-recovered-chart-note{font-size:11px;background:#fff8ed;color:#845d4b;padding:9px;border-radius:8px}
+ .blue-layer-tools button:disabled{opacity:.42;cursor:not-allowed}
+}
+
+/* R1.5.10.8: show only validated historical supply grades, not predicted order-book volume. */
+.r15108-supply-grade{display:inline-flex;align-items:center;vertical-align:middle;max-width:100%;white-space:nowrap;border-radius:6px;padding:3px 7px;margin:2px 3px 2px 0;border:1px solid #d8dce7;background:#f8faff;font-size:10px;font-weight:800;line-height:1.45}
+.r15108-supply-strong{color:#aa5246;background:#fff3ee;border-color:#edb4a7}
+.r15108-supply-medium{color:#8c672e;background:#fff9e8;border-color:#e6d19c}
+.r15108-supply-weak{color:#64758c;background:#f3f6fb;border-color:#d8e0eb}
+@media(max-width:520px){.stock-tags .r15108-supply-grade{margin:2px 0;font-size:10px}.stock-quick>div:last-child strong{font-size:11px}}

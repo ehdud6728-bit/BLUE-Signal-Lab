@@ -38,9 +38,11 @@ function PriceChart({bars,day,supplyPrice,lineCandidates}:{bars:Bar[];day:string
   // Keep the important moving averages visible, but hide the far-away BLUE40
   // band and multiple static price levels until selected. This protects the
   // candle scale on a narrow phone screen.
-  const [layers,setLayers]=useState({env20:true,env40:true,ma112:false,ma224:false,bb40:false,supply:false,candidates:false});
+  const [layers,setLayers]=useState({env20:true,env40:false,ma112:true,ma224:true,bb40:false,supply:false,candidates:false});
   const toggle=(k:keyof typeof layers)=>setLayers(v=>({...v,[k]:!v[k]}));
   const last=bars[bars.length-1];
+  const hasMA112=bars.some(b=>typeof b.ma112==='number'&&Number.isFinite(b.ma112)&&b.ma112>0);
+  const hasMA224=bars.some(b=>typeof b.ma224==='number'&&Number.isFinite(b.ma224)&&b.ma224>0);
   const fmt=(n:number|null|undefined)=>n==null||!Number.isFinite(n)?'—':Math.round(n).toLocaleString('ko-KR')+'원';
   const candidates=(lineCandidates||[]).filter(x=>Number.isFinite(x.price)&&x.price>0).slice(0,3);
   useChartResize(ref,el=>{
@@ -60,8 +62,11 @@ function PriceChart({bars,day,supplyPrice,lineCandidates}:{bars:Bar[];day:string
       ['ma112','#d65d64',layers.ma112],['ma224','#af5da3',layers.ma224],['bb40','#f28d2f',layers.bb40]
     ] as const){
       if(!enabled)continue;
+      const points=bars.filter(b=>typeof b[field]==='number'&&Number.isFinite(b[field])&&(b[field] as number)>0)
+        .map(b=>({time:time(b.t),value:b[field] as number}));
+      if(!points.length)continue;
       const line=chart.addSeries(LineSeries,{color,lineWidth:2,priceLineVisible:false,lastValueVisible:false});
-      line.setData(bars.filter(b=>b[field]!=null).map(b=>({time:time(b.t),value:b[field]!})));
+      line.setData(points);
     }
     chart.timeScale().fitContent();return chart;
   },[bars,day,supplyPrice,lineCandidates,layers.env20,layers.env40,layers.ma112,layers.ma224,layers.bb40,layers.supply,layers.candidates]);
@@ -70,8 +75,8 @@ function PriceChart({bars,day,supplyPrice,lineCandidates}:{bars:Bar[];day:string
     <div className="blue-layer-tools" role="group" aria-label="캔들 차트 선 표시 설정">
       <button type="button" aria-pressed={layers.env20} className={layers.env20?'on':''} onClick={()=>toggle('env20')}><i style={{background:'#21a786'}}/>ENV20</button>
       <button type="button" aria-pressed={layers.env40} className={layers.env40?'on':''} onClick={()=>toggle('env40')}><i style={{background:'#845bd6'}}/>ENV40</button>
-      <button type="button" aria-pressed={layers.ma112} className={layers.ma112?'on':''} onClick={()=>toggle('ma112')}><i style={{background:'#d65d64'}}/>112일선</button>
-      <button type="button" aria-pressed={layers.ma224} className={layers.ma224?'on':''} onClick={()=>toggle('ma224')}><i style={{background:'#af5da3'}}/>224일선</button>
+      <button type="button" aria-pressed={layers.ma112&&hasMA112} disabled={!hasMA112} title={hasMA112?'112일선 표시 전환':'저장된 일봉에 112일선 자료 없음'} className={layers.ma112&&hasMA112?'on':''} onClick={()=>toggle('ma112')}><i style={{background:'#d65d64'}}/>112일선</button>
+      <button type="button" aria-pressed={layers.ma224&&hasMA224} disabled={!hasMA224} title={hasMA224?'224일선 표시 전환':'저장된 일봉에 224일선 자료 없음'} className={layers.ma224&&hasMA224?'on':''} onClick={()=>toggle('ma224')}><i style={{background:'#af5da3'}}/>224일선</button>
       <button type="button" aria-pressed={layers.bb40} className={layers.bb40?'on':''} onClick={()=>toggle('bb40')}><i style={{background:'#f28d2f'}}/>BLUE40 상단</button>
       {supplyPrice!=null&&supplyPrice>0&&<button type="button" aria-pressed={layers.supply} className={layers.supply?'on':''} onClick={()=>toggle('supply')}><i style={{background:'#e5a13c'}}/>추정 매물대</button>}
       {candidates.length>0&&<button type="button" aria-pressed={layers.candidates} className={layers.candidates?'on':''} onClick={()=>toggle('candidates')}><i style={{background:'#2262df'}}/>돌파선 후보</button>}
@@ -86,7 +91,7 @@ function PriceChart({bars,day,supplyPrice,lineCandidates}:{bars:Bar[];day:string
       {supplyPrice!=null&&supplyPrice>0&&<div><i style={{background:'#e5a13c'}}/><span><b>상단 매물대 중심</b> · 120봉 대표가격·거래량 추정 (실제 호가 매물대 아님)</span><strong>{fmt(supplyPrice)}</strong></div>}
       {candidates.length>0&&<div className="blue-chart-candidate-legend"><i style={{background:'#2262df'}}/><span><b>돌파 기준선 후보</b> · 당일 관측값, 추세선 유효성 미검증</span><strong>{candidates.map(x=>`${x.signal}: ${fmt(x.price)}`).join(' / ')}</strong></div>}
     </div>
-    <p className="blue-chart-hint">상단의 버튼으로 선을 켜고 끌 수 있습니다. BLUE40 상단처럼 현재가와 먼 선은 캔들이 작게 보이는 문제를 막기 위해 기본적으로 숨깁니다. 가격 라벨은 차트 밖의 범례에 표시합니다.</p>
+    <p className="blue-chart-hint">112·224일선은 확인된 일봉 값이 있으면 기본 표시합니다. 비활성화된 선은 해당 차트 저장본에 값이 없습니다. BLUE40 상단처럼 가격과 멀리 떨어지는 밴드는 기본적으로 숨깁니다. 112·224선 돌파 태그는 당일 상향 돌파일 때만 나타납니다.</p>
   </>;
 }
 function IndicatorChart({bars,type}:{bars:Bar[];type:'volume'|'rsi'|'slow'|'macd'}){
@@ -154,6 +159,7 @@ function Evidence({stats,highlightThreshold,highlightSamplesMin}:{stats:Stats;hi
 }
 export default function StockChart({code,day,name,supplyPrice,supplyGrade,lineCandidates,highlightThreshold=70,highlightSamplesMin=8}:Props){
   const [data,setData]=useState<Payload|null>(null);const [error,setError]=useState('');const [loading,setLoading]=useState(true);
+  const [reloadKey,setReloadKey]=useState(0);
   useEffect(()=>{
     const ctrl=new AbortController();setLoading(true);setData(null);setError('');
     const url=new URL(API+'/api/chart');url.searchParams.set('code',code);url.searchParams.set('date',day);
@@ -161,15 +167,19 @@ export default function StockChart({code,day,name,supplyPrice,supplyGrade,lineCa
       const x=await r.json() as Payload;if(!r.ok)throw new Error(x.message||`차트 API ${r.status}`);return x;
     }).then(x=>setData(x)).catch(e=>{if(!ctrl.signal.aborted)setError(String(e));}).finally(()=>{if(!ctrl.signal.aborted)setLoading(false);});
     return ()=>ctrl.abort();
-  },[code,day]);
+  },[code,day,reloadKey]);
   const hasR159Highlight=!!data?.stats?.setups?.some(s=>{
     const x=s.horizons?.['10'];return highlightThreshold!==null&&!!x&&x.n>=highlightSamplesMin&&x.up_pct!==null&&x.up_pct>=highlightThreshold;
   });
   return <section className={'blue-chart-panel'+(hasR159Highlight?' r159-tomato-stock':'')}>
     <div className="blue-chart-header"><h3>{name} · 실제 과거 일봉 차트</h3><span>종가(EOD) · {day}까지</span></div>
     {loading&&<p className="blue-chart-info">실제 일봉을 불러오고 있습니다…</p>}
-    {error&&<p className="blue-chart-error">{error}</p>}
-    {data?.status==='READY'&&data.chart&&<>
+    {error&&<div className="r15108-chart-error" role="status"><p className="blue-chart-error">{error}</p>
+      <small>이 날짜의 검증된 일봉 차트 저장본이 없거나 API 연결이 실패했습니다. 다른 저장본에서도 해당 날짜를 확인할 수 없으면 재분석·재등록이 필요합니다.</small>
+      <button type="button" onClick={()=>setReloadKey(k=>k+1)}>차트 다시 확인</button></div>}
+    {data?.chart?.bars?.length===0&&<p className="blue-chart-info">이 날짜에 표시할 확정 일봉 데이터가 없습니다.</p>}
+    {data?.status==='READY'&&data.chart&&Array.isArray(data.chart.bars)&&data.chart.bars.length>0&&<>
+      {data.message&&<p className="r15108-recovered-chart-note">{data.message}</p>}
       <PriceChart bars={data.chart.bars} day={day} supplyPrice={supplyPrice} lineCandidates={lineCandidates}/>
       <IndicatorChart bars={data.chart.bars} type="volume"/>
       <IndicatorChart bars={data.chart.bars} type="rsi"/>

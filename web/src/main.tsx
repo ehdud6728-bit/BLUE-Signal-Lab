@@ -368,7 +368,13 @@ function App(){
   const crossed=(r:Signal,k:string)=>!present(r,k)?'미계산':flag(r,k)?'당일 GC':'GC 없음';
   const lastCross=(r:Signal,k:string)=>String(extra(r,k)||'확인되지 않음');
   const validLines=(r:Signal):Line[]=>{const x=extra(r,'valid_line_candidates_json');if(typeof x!=='string')return [];try{const v=JSON.parse(x);return Array.isArray(v)?v:[];}catch{return [];}};
-  const supplyGrade=(r:Signal)=>String(extra(r,'supply_strength_grade')||'미계산');
+  const supplyGrade=(r:Signal)=>{const grade=String(extra(r,'supply_strength_grade')||'');
+    return (num(r,'supply_reference_price')??0)>0&&['강','중','약'].includes(grade)?grade:'미확인';};
+  const supplyTag=(r:Signal)=>{const grade=supplyGrade(r);
+    if(grade==='미확인')return null;
+    const tone=grade==='강'?'strong':grade==='중'?'medium':'weak';
+    return <span className={'r15108-supply-grade r15108-supply-'+tone}
+      title={'120개 이전 일봉의 상대 거래량 기반 추정 매물대 · 가격 '+money(num(r,'supply_reference_price'))+'원'}>매물대 {grade}</span>;};
   const displayName=(r:Signal)=>r.name||String(r.extras?.name||r.extras?.Name||'종목명 미등록');
   const visibleRows=rows.filter(r=>(displayName(r)+' '+r.code).toLocaleLowerCase().includes(localQuery.trim().toLocaleLowerCase()));
   const changeGc=(next:GcKey[],mode:'any'|'all'=gcLogic)=>{
@@ -513,7 +519,30 @@ function App(){
           <button className="primary search-submit" disabled={busy||requestBusy} onClick={()=>{void search(1);}}><Search size={18}/>{busy?'검색 중…':'종목 검색하기'}</button>
           <p className="small">저장된 결과를 조회합니다. 거래대금 기준은 당일 확정 일봉이며, 저장되지 않은 이전 금액은 추정하지 않습니다. 장중 현재가 아님.</p>
         </div>
-        <div className="search-compact"><div><small>기준일</small><strong>{mode==='single'?date:`${start} ~ ${end}`}</strong></div><button onClick={()=>setFilterOpen(true)}><SlidersHorizontal size={16}/> 수정</button><button className="compact-run" disabled={busy||requestBusy} onClick={()=>{void search(1);}}><Search size={16}/> 검색</button></div>
+        <div className="search-compact r15108-quickbar" role="group" aria-label="빠른 검색 날짜와 거래대금 변경">
+          <div className="r15108-quick-controls">
+            {mode==='single'?<label className="r15108-quick-field r15108-date-field">
+              <span>기준일</span><input type="date" aria-label="빠른 검색 기준일 변경" value={date}
+                onChange={e=>{setDate(e.target.value);setDataStatus('');}}/>
+            </label>:<div className="r15108-range-fields" aria-label="기간 검색 날짜 변경">
+              <label className="r15108-quick-field"><span>시작일</span><input aria-label="빠른 검색 시작일" type="date" value={start} onChange={e=>setStart(e.target.value)}/></label>
+              <label className="r15108-quick-field"><span>종료일</span><input aria-label="빠른 검색 종료일" type="date" value={end} onChange={e=>setEnd(e.target.value)}/></label>
+            </div>}
+            <label className="r15108-quick-field r15108-amount-field"><span>거래대금</span>
+              <select aria-label="빠른 검색 최소 거래대금 (억원)" value={amountChoice} onChange={e=>setAmountChoice(e.target.value)}>
+                <option value="0">전체</option><option value="100">100억+</option><option value="300">300억+</option>
+                <option value="500">500억+</option><option value="1000">1,000억+</option><option value="custom">직접 입력</option>
+              </select>
+            </label>
+            {amountChoice==='custom'&&<label className="r15108-quick-field r15108-custom-field"><span>억 원</span>
+              <input type="number" min="0" max="50000" step="1" value={customAmount}
+                aria-label="빠른 검색 거래대금 직접 입력 (억원)" onChange={e=>setCustomAmount(e.target.value)}/>
+            </label>}
+          </div>
+          <button type="button" className="compact-run" disabled={busy||requestBusy} onClick={()=>{void search(1);}}>
+            <Search size={16}/>{busy?'검색 중':'검색'}
+          </button>
+        </div>
       </aside>
       <section className="content">
         <div className={'r151-basket-content '+(activeView==='basket'?'':'r151-hidden')}>
@@ -612,14 +641,14 @@ function App(){
                    {inBasket(r)?<CheckCircle2 size={16}/>:<ShoppingBasket size={16}/>}
                  </button>
                </div></td>
-              <td>{r.signals.map(s=><span className="tag" key={s}>{showSignal(s)}</span>)}{techBadges(r).map(t=><span className="r1591-search-tech" key={t}>{t}</span>)}</td><td className="r1593-price-cell"><strong>{money(r.close_price)}원</strong><small> · 검색일 종가</small>
+              <td>{r.signals.map(s=><span className="tag" key={s}>{showSignal(s)}</span>)}{techBadges(r).map(t=><span className="r1591-search-tech" key={t}>{t}</span>)}{supplyTag(r)}</td><td className="r1593-price-cell"><strong>{money(r.close_price)}원</strong><small> · 검색일 종가</small>
                 <PriceCompareMini data={r1593Prices[comparisonKey(r)]} baseline={r.close_price} loading={r1593Busy&&!r1593Prices[comparisonKey(r)]}
                   onRequest={()=>{void requestMissingQuote(r);}} requesting={r1595Requesting===comparisonKey(r)}
                   requestDisabled={!!r1595Requesting||r1595Timers.current.size>=3}/>
               </td>
               <td>{fmt(r,'rsi')} <small>{crossed(r,'rsi_gc')}</small></td><td>{fmt(r,'slow_14_3_3_k')} / {fmt(r,'slow_14_3_3_d')} <small>{crossed(r,'slow_14_3_3_gc')}</small></td>
               <td>{fmt(r,'macd_12_26_9')} <small>{crossed(r,'macd_gc')}</small></td><td>{present(r,'valid_line_candidates_json')?`${validLines(r).length}개`:'미계산'}</td>
-              <td>{profile(r)} · {supplyGrade(r)}</td>
+              <td>{supplyGrade(r)==='미확인'?'매물대 미확인':`매물대 ${supplyGrade(r)} · ${money(num(r,'supply_reference_price'))}원 · ${profile(r)}`}</td>
             </tr>):<tr><td className="empty" colSpan={9}>{total!==null?'조건에 맞는 종목이 없습니다.':'날짜와 조건을 선택해 검색하세요.'}</td></tr>}</tbody></table></div>
           <div className="mobile-results">
             {visibleRows.length?visibleRows.map((r,i)=><div className={'r151-mobile-row'+(patternUp(r)!==null?' r159-tomato-stock':'')} key={`${r.code}-${r.day}-${i}`}>
@@ -631,11 +660,11 @@ function App(){
               <PriceCompareMini compact data={r1593Prices[comparisonKey(r)]} baseline={r.close_price} loading={r1593Busy&&!r1593Prices[comparisonKey(r)]}
                 onRequest={()=>{void requestMissingQuote(r);}} requesting={r1595Requesting===comparisonKey(r)}
                 requestDisabled={!!r1595Requesting||r1595Timers.current.size>=3}/>
-              <div className="stock-tags">{r.signals.slice(0,4).map(s=><span className="tag" key={s}>{showSignal(s)}</span>)}{r.signals.length>4&&<span className="tag tag-more">+{r.signals.length-4}</span>}</div>
+              <div className="stock-tags">{r.signals.slice(0,4).map(s=><span className="tag" key={s}>{showSignal(s)}</span>)}{r.signals.length>4&&<span className="tag tag-more">+{r.signals.length-4}</span>}{supplyTag(r)}</div>
               <div className="r1599-mobile-meta">{amountLabel(r)}</div>
               {patternDays(r).length>0&&<div className="r1599-pattern-dates" title={patternDays(r).join(' · ')}>과거 신호일 {patternDays(r).slice(-3).join(' · ')}{patternDays(r).length>3?' 외':''}</div>}
               {techBadges(r).length>0&&<div className="r1591-mobile-tech">{techBadges(r).map(t=><span className="r1591-search-tech" key={t}>{t}</span>)}</div>}
-               <div className="stock-quick"><div><small>RSI</small><strong>{fmt(r,'rsi',1)}</strong></div><div><small>Slow GC</small><strong className={flag(r,'slow_14_3_3_gc')?'positive':''}>{crossed(r,'slow_14_3_3_gc')}</strong></div><div><small>MACD GC</small><strong className={flag(r,'macd_gc')?'positive':''}>{crossed(r,'macd_gc')}</strong></div><div><small>상단 매물</small><strong>{supplyGrade(r)}</strong></div></div>
+               <div className="stock-quick"><div><small>RSI</small><strong>{fmt(r,'rsi',1)}</strong></div><div><small>Slow GC</small><strong className={flag(r,'slow_14_3_3_gc')?'positive':''}>{crossed(r,'slow_14_3_3_gc')}</strong></div><div><small>MACD GC</small><strong className={flag(r,'macd_gc')?'positive':''}>{crossed(r,'macd_gc')}</strong></div><div><small>매물대 기준가</small><strong>{supplyGrade(r)==='미확인'?'미확인':money(num(r,'supply_reference_price'))+'원'}</strong></div></div>
             </div>
               <button type="button" className={'r151-mobile-add '+(inBasket(r)?'saved':'')}
                 title={inBasket(r)?'장바구니에 담김':'장바구니에 담기'}
