@@ -2,6 +2,7 @@ import {useEffect,useMemo,useRef,useState} from 'react';
 import {dailySupplyProfile} from './supply-profile';
 import SupplyProfilePanel from './SupplyProfilePanel';
 import {CandlestickSeries,HistogramSeries,LineSeries,createChart,createSeriesMarkers, type IChartApi, type Time} from 'lightweight-charts';
+import ZoneReactionPanel, {type ZoneReactionStats} from './ZoneReactionPanel';
 import './stock-chart.css';
 
 const API=(import.meta.env.VITE_API_BASE||'https://blue-signal-lab-api-v2.ehdud6728.workers.dev').replace(/\/+$/,'');
@@ -9,7 +10,7 @@ type Bar={t:string;o:number;h:number;l:number;c:number;v:number;r:number|null;rs
 type CaseRow={signal_day:string;entry_day:string;exit_day:string;return_pct:number};
 type Horizon={n:number;up_pct:number|null;down_pct:number|null;mean_return_pct:number|null;median_return_pct:number|null;mean_mae_pct:number|null;mean_mfe_pct:number|null;small_sample:boolean;holdout?:{n:number;up_pct:number;mean_return_pct:number}|null;cases?:CaseRow[]};
 type Setup={code:string;label:string;factors:string[];factor_count:number;total_signals_seen:number;horizons:Record<string,Horizon>;quality:'EXPLORATORY'|'INSUFFICIENT_SAMPLE';up_lift_vs_baseline_10d_pp:number|null};
-type Stats={version:string;asof:string;status:string;history_start:string|null;history_end:string;method?:string;limitations?:string[];active_factors?:{code:string;label:string}[];candidate_count?:number;eligible_candidate_count?:number;baseline?:Record<string,Horizon>;sector_lag?:{status:string;reason?:string};setups:Setup[]};
+type Stats={zone_reaction?:ZoneReactionStats;version:string;asof:string;status:string;history_start:string|null;history_end:string;method?:string;limitations?:string[];active_factors?:{code:string;label:string}[];candidate_count?:number;eligible_candidate_count?:number;baseline?:Record<string,Horizon>;sector_lag?:{status:string;reason?:string};setups:Setup[]};
 type Payload={status:string;chart?:{bars:Bar[];asof:string};stats?:Stats;message?:string};
 type LineCandidate={signal:string;price:number};
 type Props={code:string;day:string;name:string;supplyPrice?:number|null;supplyGrade?:string;lineCandidates?:LineCandidate[];highlightThreshold?:number|null;highlightSamplesMin?:number};
@@ -190,6 +191,7 @@ export default function StockChart({code,day,name,lineCandidates,highlightThresh
       <IndicatorChart bars={data.chart.bars} type="slow"/>
       <IndicatorChart bars={data.chart.bars} type="macd"/>
       <div className="blue-chart-note">가격대별 누적 거래량은 저장된 확정 일봉으로 재계산한 추정치입니다. 기존 구형 매물대 수치와 다를 수 있습니다. 수정주가가 아닌 원본 가격이며 미래 일봉은 포함하지 않습니다.</div>
+      <ZoneReactionPanel data={data.stats?.zone_reaction??null}/>
       {data.stats&&<Evidence stats={data.stats} highlightThreshold={highlightThreshold} highlightSamplesMin={highlightSamplesMin}/>}
       <p className="blue-attribution">차트 제공: <a href="https://www.tradingview.com/" target="_blank" rel="noopener noreferrer">TradingView Lightweight Charts™</a></p>
     </>}

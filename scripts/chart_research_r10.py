@@ -14,6 +14,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 from market_scan import normalise, enrich
+from zone_reaction_r15111 import analyze_zone_reactions
 
 HORIZONS = (5, 10, 20)
 COOLDOWN = 10
@@ -330,7 +331,9 @@ def generate(raw:pd.DataFrame,matched:list[dict],asof:str,dest:str):
         for item in matched:
             code=item['code'];h=groups.get(code)
             if h is None or h.empty or h.date.iloc[-1]!=target:continue
-            data={'code':code,'day':asof,'chart':chart_rows(h,asof),'stats':backtest(h,asof)}
+            stats=backtest(h,asof)
+            stats['zone_reaction']=analyze_zone_reactions(h,asof)
+            data={'code':code,'day':asof,'chart':chart_rows(h,asof),'stats':stats}
             out.write(json.dumps(data,ensure_ascii=False,separators=(',',':'),allow_nan=False)+'\n')
             n+=1
     return n
