@@ -1,0 +1,217 @@
+name: BLUE R1.5.10.13 Basket Supply Snapshot & Memo FIX1 (MANUAL SAFE)
+
+on:
+  workflow_dispatch:
+    inputs:
+      apply_changes:
+        description: 'FALSE: check, build and test only. TRUE: commit source. Never deploy or write to D1.'
+        type: boolean
+        required: true
+        default: false
+
+permissions:
+  contents: write
+
+concurrency:
+  group: blue-r15113-basket-supply-install
+  cancel-in-progress: false
+
+jobs:
+  source_only:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Guard exact repository and main branch
+        run: |
+          test "$GITHUB_REPOSITORY" = 'ehdud6728-bit/BLUE-Signal-Lab'
+          test "$GITHUB_REF" = 'refs/heads/main'
+
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Ignore temporary Python caches and web build files for scope checks
+        run: |
+          printf '\n__pycache__/\n*.pyc\nweb/dist/\nweb/node_modules/\n' >> .git/info/exclude
+
+      - name: Extract SHA256-verified offline source bundle
+        shell: bash
+        run: |
+          python - <<'PY_EXTRACT'
+          import base64,hashlib,io,os,tarfile
+          from pathlib import Path
+          expected='11e90f9fcb576fa38b8e6868eaf92c8ee4d3a4d74db35b44936c699b6b275d57'
+          encoded='''          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
+          fP0vK6zsOQB4AAA='''
+          payload=base64.b64decode(''.join(encoded.split()))
+          actual=hashlib.sha256(payload).hexdigest()
+          if actual!=expected:raise SystemExit('BLUE_R15113_BUNDLE_HASH_MISMATCH')
+          expected_files={'patcher.py','basket-supply-record.ts','BasketSupplyRecordRow.tsx','basket-supply-record.css'}
+          dest=Path(os.environ['RUNNER_TEMP'])/'blue_r15113';dest.mkdir(exist_ok=True)
+          with tarfile.open(fileobj=io.BytesIO(payload),mode='r:gz') as tar:
+              got={x.name for x in tar.getmembers()}
+              if got!=expected_files or any(not x.isfile() for x in tar.getmembers()):raise SystemExit('UNEXPECTED_BUNDLE_CONTENTS')
+              for item in tar.getmembers():
+                  (dest/item.name).write_bytes(tar.extractfile(item).read())
+          print('BLUE_R15113_BUNDLE_VERIFIED',actual)
+          PY_EXTRACT
+
+      - name: Validate exact basket source anchors before patching
+        run: python "$RUNNER_TEMP/blue_r15113/patcher.py" --bundle "$RUNNER_TEMP/blue_r15113"
+
+      - name: Apply changes only to temporary CI checkout
+        run: python "$RUNNER_TEMP/blue_r15113/patcher.py" --bundle "$RUNNER_TEMP/blue_r15113" --apply
+
+      - name: Parse new TypeScript and React modules
+        working-directory: web
+        run: |
+          npm install --no-package-lock --no-audit --no-fund
+          node - <<'JS'
+          const ts=require('typescript'),fs=require('fs');
+          for(const file of ['src/basket-supply-record.ts','src/BasketSupplyRecordRow.tsx']){
+            const out=ts.transpileModule(fs.readFileSync(file,'utf8'),{fileName:file,reportDiagnostics:true,compilerOptions:{jsx:ts.JsxEmit.ReactJSX,module:ts.ModuleKind.ESNext}});
+            if((out.diagnostics||[]).some(x=>x.category===ts.DiagnosticCategory.Error))process.exit(1);
+            console.log('BLUE_R15113_TS_PARSE_OK',file);
+          }
+          JS
+
+      - name: Build TypeScript React PWA including basket and existing app
+        working-directory: web
+        run: npm run build
+
+      - name: Validate exact changed file scope
+        run: |
+          # Ignore only the disposable TypeScript build-info file created by tsc -b.
+          rm -f web/tsconfig.tsbuildinfo
+          python - <<'PY_SCOPE'
+          import subprocess
+          modified=set(subprocess.check_output(['git','diff','--name-only'],text=True).splitlines())
+          new=set(subprocess.check_output(['git','ls-files','--others','--exclude-standard'],text=True).splitlines())
+          expected={'web/src/SmartBasket.tsx','web/src/basket-supply-record.ts',
+                    'web/src/BasketSupplyRecordRow.tsx','web/src/basket-supply-record.css'}
+          if modified|new!=expected:raise SystemExit(f'UNEXPECTED_SOURCE_SCOPE modified={modified} new={new}')
+          print('BLUE_R15113_SCOPE_OK',sorted(expected))
+          PY_SCOPE
+
+      - name: Commit source only when explicitly approved (no Cloudflare/D1 writes)
+        if: ${{ inputs.apply_changes }}
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -- web/src/SmartBasket.tsx web/src/basket-supply-record.ts web/src/BasketSupplyRecordRow.tsx web/src/basket-supply-record.css
+          git commit -m 'BLUE R1.5.10.13: freeze basket as-of supply evidence and expandable memo'
+          git push origin HEAD:main
+          echo 'BLUE_R15113_SOURCE_COMMITTED_NO_DEPLOY_NO_D1_WRITE'
+
+      - name: Verify-only result
+        if: ${{ !inputs.apply_changes }}
+        run: |
+          echo 'BLUE_R15113_VERIFIED_ONLY: no source commit, no Cloudflare deploy, no D1 writes'
