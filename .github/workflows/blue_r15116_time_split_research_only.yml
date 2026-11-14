@@ -1,0 +1,216 @@
+name: BLUE R1.5.10.16 Time-Split Strategy & Supply Audit (RESEARCH ONLY)
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm_research_only:
+        description: 'Type RESEARCH_ONLY exactly. Frozen R1.5.10.15 FULL_MARKET artifact. NO D1 / deployment.'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: blue-r15116-frozen-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  frozen_strategy_research:
+    name: source_pinned_time_split_audit
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      PYTHONDONTWRITEBYTECODE: '1'
+    steps:
+      - name: Strict repository, branch, workflow and research-only guard
+        env:
+          APPROVAL: ${{ inputs.confirm_research_only }}
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REPOSITORY" = 'ehdud6728-bit/BLUE-Signal-Lab'
+          test "$GITHUB_REF" = 'refs/heads/main'
+          test "$GITHUB_EVENT_NAME" = 'workflow_dispatch'
+          test "$APPROVAL" = 'RESEARCH_ONLY'
+          echo 'BLUE_R15116_RESEARCH_ONLY_GUARD_OK'
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Download exactly the approved R1.5.10.15 FULL_MARKET artifact (read only)
+        uses: actions/download-artifact@v4
+        with:
+          name: BLUE_R15115_VERIFIED_EOD_43602094227
+          repository: ehdud6728-bit/BLUE-Signal-Lab
+          run-id: 43602094227
+          github-token: ${{ github.token }}
+          path: ${{ runner.temp }}/blue_r15116_input
+
+      - name: Restore SHA256-pinned analysis bundle into runner TEMP only
+        env:
+          RESEARCH_BUNDLE_SHA256: f6bdaf7f07988bc51e817e57872fa32b30f8e9c02db1662ee39d08a7870be27e
+        run: |
+          set -euo pipefail
+          cat <<'BLUE_R15116_BUNDLE' | base64 --decode > "$RUNNER_TEMP/blue_r15116.tar.gz"
+          H4sIAAAAAAAC/+08/ZPbxnX++f6KTTIOABXEkbwP6ShDM9QdZd34dLweKUUqy8GAxPIOORCAAfBOtEcZN1UznsSdpFM7UVrLo8zE
+          SdNxp0r9Uf/g/tL+Nzrqf+h7uwtgQfJOp8bJuBPu3ByJxe57b9++fR+7bxnRmNpR/9AIx6/8sUoZyvrqKvuEMvW5crmyspbW8fpK
+          uVJdfYWUX/kTlFGc2BGgf+XPs3znW8ujOFruuf4y9Y9JOE4OA39l6dvf/vb1ndsNsl8x1oxK2ais18ggCt6ifokeUz/RiR+UPPeY
+          lk4iN6ExiYQcEbVarq6XKpVSZUUzlpY2Az8eDaFBBmktb8tAETtK3IHdT0jge2OD7AZkaEdHFHD0ouCIRjqp722TICJbFWL3+zSO
+          jaX2ISWIiPSDYWhHbhz4xI2J7RN6P/SCyE6CaEwSd0hJHHouozchYRTEIe0nQDc5tj3XsRM38A0c7RKMbkgsazBKRhG1LOIOwyAC
+          4nzoyJrFS2lVdAAoY8q79APPQ5DQIO2zGYz8hEb8PeCgjA7xEp9TSId2fOi5vfTx+zAK3im0E3yR9tmDx7RRPM4I8UfDcEzsmPhh
+          WhXavgMV8Bc6S0v1VvMGMYmST4my1Li719hsN7ag/u0lAkVJp8Ni0xEb/fhYqSkba6urzmXnSrm/vn5l48pgpbdq2z3HWak6V1bs
+          sr1aHvR7/V7lcvnKRn9t43J/cLna710BVCvVnlPdUHQOvdW8vb/ZsOq3t7bbBo4QYF9e2ejT1Y2Nlcra5ep6dVAeVFbX1zZ6Nl1f
+          7dONfmWw3l+vrFTXB9UBQO5RenkAz7S8tlZev0IrAPvBUqu9X283Xt9utMyOUr/VvL3bttbK5UbzDUVXGrt3qmVrtWzt3d7ZuV7f
+          xDrRBl5JtYzItMhNWrf39nbuQbfr9VZjZ3u3YQHAVruxp3SXbjTq7dv7DWvzdrtlCi7aQ5x1K0JZqZaVmtop+aHh+gO9qq/qV3T+
+          0NU7ymtmFcBWS6vwf7V0Bf5fu6J0NcGv48CD9fKHw3FcUGx+n1pDGwgP+4kMqqyv6ZWyXi0XwJUBRLm0Bv/XShV8qJRLVfy8Bv8z
+          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
+          WZRFWZRFWZRF+QaU/wXGDSSRAHgAAA==
+          BLUE_R15116_BUNDLE
+          echo "${RESEARCH_BUNDLE_SHA256}  $RUNNER_TEMP/blue_r15116.tar.gz" | sha256sum -c -
+          python - <<'PY_RESTORE'
+          import os,tarfile
+          from pathlib import Path
+          src=Path(os.environ['RUNNER_TEMP'])/'blue_r15116.tar.gz'
+          out=Path(os.environ['RUNNER_TEMP'])/'blue_r15116'
+          out.mkdir(exist_ok=False)
+          with tarfile.open(src,'r:gz') as archive:
+              members=archive.getmembers()
+              if {m.name for m in members}!={'research.py','test_research.py'} or not all(m.isfile() for m in members):
+                  raise SystemExit('BLUE_R15116_UNEXPECTED_SOURCE_BUNDLE_CONTENTS')
+              for item in members:
+                  (out/item.name).write_bytes(archive.extractfile(item).read())
+          print('BLUE_R15116_RESEARCH_SOURCE_PIN_VERIFIED')
+          PY_RESTORE
+
+      - name: Install pinned offline data-analysis dependencies
+        run: |
+          python -m pip install --disable-pip-version-check 'pandas==2.3.3' 'numpy==2.4.6'
+
+      - name: Test fixed feature bins, matching restrictions and outcome guards
+        run: |
+          set -euo pipefail
+          python -B -m unittest discover -s "$RUNNER_TEMP/blue_r15116" -p 'test_research.py' -v
+
+      - name: Analyze pinned full-market events without fetching prices or modifying apps
+        run: |
+          set -euo pipefail
+          python -B "$RUNNER_TEMP/blue_r15116/research.py" \
+            --data-dir "$RUNNER_TEMP/blue_r15116_input" \
+            --out output/r15116_frozen_research
+
+      - name: Verify source provenance, outputs and no live-system writes
+        run: |
+          set -euo pipefail
+          python - <<'PY_AUDIT'
+          import json
+          from pathlib import Path
+          out=Path('output/r15116_frozen_research')
+          files={'same_date_market_baseline.csv','fixed_feature_bins_10d.csv',
+                 'train_holdout_candidates.csv','year_market_10d.csv',
+                 'AUDIT.json','README.txt'}
+          if not all((out/x).is_file() and (out/x).stat().st_size>0 for x in files):
+              raise SystemExit('BLUE_R15116_RESULTS_MISSING')
+          audit=json.loads((out/'AUDIT.json').read_text(encoding='utf-8'))
+          if not all((audit['source_artifact_run_id']==43602094227,
+                      audit['source_events']==124418,
+                      audit['source_analyzed_symbols']==2789,
+                      audit['source_integrity_verified'],
+                      audit['lookahead_guard_passed'],
+                      audit['read_only'],audit['no_d1_write'],audit['no_worker_deploy'],
+                      audit['prospectively_validated'] is False,
+                      audit['calibrated_prediction_probability'] is False,
+                      audit['breakout_vs_pullback_separable'] is False)):
+              raise SystemExit('BLUE_R15116_UNSAFE_OR_UNSUPPORTED_RESEARCH_CLAIM')
+          if audit['same_date_market_match_counts']['10']['matched_signal_events']<1000:
+              raise SystemExit('BLUE_R15116_UNEXPECTED_MATCHED_COVERAGE')
+          print('BLUE_R15116_INDEPENDENT_RESEARCH_AUDIT_OK',
+                audit['source_events'],audit['same_date_market_match_counts']['10'])
+          PY_AUDIT
+
+      - name: Upload research-only results, 14-day retention
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: BLUE_R15116_TRAIN_HOLDOUT_${{ github.run_id }}
+          path: output/r15116_frozen_research/
+          if-no-files-found: warn
+          retention-days: 14
