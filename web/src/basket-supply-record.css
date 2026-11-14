@@ -1,0 +1,32 @@
+/* BLUE R1.5.10.13 — compact discovery-day supply note */
+.r15113-supply-record{border:1px solid #e4dccc;border-radius:9px;background:#fffdfa;margin:9px 0;min-width:0}
+.r15113-supply-summary{display:flex;align-items:center;flex-wrap:wrap;gap:6px;padding:9px 10px;cursor:pointer;list-style:none}
+.r15113-supply-summary::-webkit-details-marker{display:none}
+.r15113-supply-label{font-size:11px;font-weight:750;color:#ab6850;white-space:nowrap}
+.r15113-supply-summary strong{font-size:12px;color:#2c405b;flex:1;min-width:92px;overflow-wrap:anywhere}
+.r15113-supply-grade{border-radius:6px;background:#f5f6fa;color:#67778e;padding:3px 7px;font-size:10px;font-weight:750}
+.r15113-supply-grade.strong{color:#b35d4d;background:#fff0ec}.r15113-supply-grade.medium{color:#996c30;background:#fff6e6}
+.r15113-supply-toggle{display:inline-flex;align-items:center;gap:2px;font-size:10px;color:#667a96;white-space:nowrap}
+.r15113-supply-record[open] .r15113-supply-toggle svg{transform:rotate(180deg)}
+.r15113-supply-body{border-top:1px solid #eee9e3;padding:10px}
+.r15113-supply-meta{font-size:10px;line-height:1.6;color:#7b8794;margin:0 0 9px}
+.r15113-supply-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:7px}
+.r15113-supply-grid>div{border:1px solid #eee9e3;background:#fff;border-radius:7px;padding:7px;min-width:0}
+.r15113-supply-grid span{display:block;font-size:10px;color:#8790a0;margin-bottom:4px}
+.r15113-supply-grid b{font-size:11px;line-height:1.5;color:#314058;overflow-wrap:anywhere}
+.r15113-supply-bins,.r15113-supply-outlooks{margin-top:11px;border-top:1px solid #eee9e3;padding-top:10px}
+.r15113-supply-bins>b,.r15113-supply-outlooks>b{display:block;font-size:11px;color:#516077;margin-bottom:8px}
+.r15113-supply-bin{display:grid;grid-template-columns:80px minmax(0,1fr) 110px;align-items:center;gap:7px;font-size:10px;color:#6a7b90;padding:4px 0}
+.r15113-supply-bin>div{height:7px;border-radius:9px;background:#eceef2;overflow:hidden}
+.r15113-supply-bin i{display:block;height:100%;border-radius:9px;background:#c99454}
+.r15113-supply-bin small{text-align:right;font-size:10px;color:#75849a}
+.r15113-outlook-row{display:flex;flex-wrap:wrap;align-items:center;gap:7px;border-bottom:1px solid #f1f0ed;padding:8px 0;font-size:10px;color:#5b6c83}
+.r15113-outlook-row strong{color:#35577e;font-size:11px}
+.r15113-outlook-row span:nth-of-type(1){color:#247b70}.r15113-outlook-row span:nth-of-type(2){color:#b66d53}
+.r15113-outlook-row small{flex-basis:100%;color:#8290a3;font-size:10px}
+.r15113-supply-empty{font-size:11px;line-height:1.65;color:#758399}
+.r15113-supply-retry{background:#edf3fb;color:#285b9c;border:1px solid #c6d6ea;border-radius:7px;font-size:11px;padding:7px 10px;cursor:pointer;margin:7px 0}
+.r15113-supply-note{display:block;margin-top:10px;font-size:11px;color:#69778b;font-weight:600}
+.r15113-supply-note textarea{font:inherit;font-size:12px;font-weight:400;display:block;width:100%;resize:vertical;box-sizing:border-box;margin-top:5px;border:1px solid #dce5ef;border-radius:7px;padding:9px;background:#fff;color:#283e57}
+.r15113-supply-foot{display:block;margin-top:9px;color:#8b96a4;font-size:10px;line-height:1.6}
+@media(max-width:440px){.r15113-supply-bin{grid-template-columns:70px minmax(0,1fr) 86px;gap:5px}.r15113-supply-grid{gap:5px}}

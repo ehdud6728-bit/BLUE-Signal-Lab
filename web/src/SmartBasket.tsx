@@ -11,6 +11,8 @@ import './r158-long-watch.css';
 import {comparisonKey,fetchCompared,sourceName,type PriceCompare} from './price-compare';
 import StopLossRow from './StopLossRow';
 import type {StopMethod} from './stop-loss';
+import BasketSupplyRecordRow from './BasketSupplyRecordRow';
+import {readSupplyAtDiscovery,supplyFromSearchExtras,validSupplyRecord,type BasketSupplyRecord} from './basket-supply-record';
 
 // R153_PERFORMANCE_MONITOR: KIS results are server-verified; never fabricate missing candles.
 type Performance={code:string;day:string;status:string;baseline?:number;
@@ -44,7 +46,7 @@ type BasketItem={id:string;source:'MANUAL'|'AI';code:string;name:string;day:stri
   added_at:string;signals:string[];memo:string;reason?:string;risk?:string;watch?:string;
   protected?:boolean;protected_at?:string;
   patternUp10d?:number;patternN10d?:number;patternLabel10d?:string;patternDays10d?:string[];
-  stopMethod?:StopMethod};
+  stopMethod?:StopMethod; supplyRecord?:BasketSupplyRecord; supplyMemo?:string};
 type Quote={code:string;market:string;trade_date_kst:string;price:number;received_at_utc:string;exchange_tick_time_verified?:boolean};
 type Quotes={status:string;items:Quote[];age_minutes?:number|null;latest_received_at_utc?:string|null};
 const cash=(v:number|null|undefined)=>typeof v==='number'&&Number.isFinite(v)?v.toLocaleString('ko-KR'):'—';
@@ -75,7 +77,9 @@ function validItem(x:any):x is BasketItem{
    (x.patternN10d===undefined||(Number.isInteger(x.patternN10d)&&x.patternN10d>=1&&x.patternN10d<=100000))&&
    (x.patternLabel10d===undefined||(typeof x.patternLabel10d==='string'&&x.patternLabel10d.length<=150))&&
    (x.patternDays10d===undefined||(Array.isArray(x.patternDays10d)&&x.patternDays10d.length<=12&&
-    x.patternDays10d.every((d:unknown)=>typeof d==='string'&&validDay(d)&&d<=x.day)));
+    x.patternDays10d.every((d:unknown)=>typeof d==='string'&&validDay(d)&&d<=x.day)))&&
+   (x.supplyRecord===undefined||(validSupplyRecord(x.supplyRecord)&&x.supplyRecord.asof===x.day))&&
+   (x.supplyMemo===undefined||(typeof x.supplyMemo==='string'&&x.supplyMemo.length<=400));
 }
 // R1591: freeze only provenance-backed research evidence from an actual search/D1 row.
 function patternEvidence(data:SearchRow|AiPick):Pick<BasketItem,'patternUp10d'|'patternN10d'|'patternLabel10d'|'patternDays10d'>|Record<string,never>{
@@ -107,6 +111,8 @@ export default function SmartBasket({quickAddRequest,onItemsChange,active=true,r
  patternSampleMin?:number;
 }){
  const [items,setItems]=useState<BasketItem[]>(readItems);
+ const [supplyBusy,setSupplyBusy]=useState<string[]>([]);
+ const supplyLoading=useRef<Set<string>>(new Set());
  const isHot=(x:BasketItem)=>hotPattern(x,patternHighlightMin,patternSampleMin);
  const evidenceAttempted=useRef<Set<string>>(new Set());
  const [filter,setFilter]=useState<'ALL'|'MANUAL'|'AI'|'PROTECTED'>('ALL');
@@ -231,6 +237,16 @@ export default function SmartBasket({quickAddRequest,onItemsChange,active=true,r
   void load();const id=window.setInterval(()=>void load(),60000);
   return()=>{mounted=false;window.clearInterval(id);};
  },[refreshKey]);
+ // As-of snapshot is captured once on adding. A successful record is never silently replaced.
+ async function captureSupply(id:string,code:string,day:string,baseline:number){
+  if(supplyLoading.current.has(id))return;
+  supplyLoading.current.add(id);setSupplyBusy(list=>list.includes(id)?list:[...list,id]);
+  try{
+   const snapshot=await readSupplyAtDiscovery(code,day,baseline);
+   if(snapshot)setItems(old=>old.map(it=>it.id===id&&it.supplyRecord?.status!=='READY'?{...it,supplyRecord:snapshot}:it));
+  }catch{/* Chart unavailable, Access blocked or data missing: preserve search-time fallback. */}
+  finally{supplyLoading.current.delete(id);setSupplyBusy(list=>list.filter(x=>x!==id));}
+ }
  function add(data:SearchRow|AiPick,source:'MANUAL'|'AI'){
   if(!validCode(data.code)||!validDay(data.day)||!Number.isFinite(data.close_price)||!data.close_price||data.close_price<=0){
    setError('확정 종가와 거래일이 있는 종목만 담을 수 있습니다.');return;
@@ -239,9 +255,12 @@ export default function SmartBasket({quickAddRequest,onItemsChange,active=true,r
   if(items.some(it=>it.id===id)){setMessage('이미 담긴 종목입니다.');return;}
   if(items.filter(x=>!x.protected).length>=MAX_REGULAR){setError('일반 관찰함은 100건까지 가능합니다. 오래 보려는 종목은 장기 관찰로 보호하세요.');return;}
   const p=source==='AI'?data as AiPick:null;
+  const initialSupply=source==='MANUAL'?supplyFromSearchExtras((data as SearchRow).extras,data.day):undefined;
   setItems(prev=>[{id,source,code:data.code,name:data.name||data.code,day:data.day,
     baseline:data.close_price as number,added_at:new Date().toISOString(),signals:data.signals||[],memo:'',
-    reason:p?.reason,risk:p?.risk,watch:p?.watch,...patternEvidence(data)},...prev]);
+    reason:p?.reason,risk:p?.risk,watch:p?.watch,...patternEvidence(data),
+    ...(initialSupply?{supplyRecord:initialSupply}:{}),supplyMemo:''},...prev]);
+  void captureSupply(id,data.code,data.day,data.close_price as number);
   setError('');setMessage(`${data.name||data.code} 관찰함에 추가했습니다.`);
  }
  async function generateAi(){if(aiBusy)return;setAiBusy(true);setError('');setMessage('');
@@ -262,10 +281,12 @@ export default function SmartBasket({quickAddRequest,onItemsChange,active=true,r
       const additions=unique.filter(p=>!existing.has(`AI:${p.code}:${p.day}`)).slice(0,room).map(p=>({
        id:`AI:${p.code}:${p.day}`,source:'AI' as const,code:p.code,name:p.name||p.code,
        day:p.day,baseline:p.close_price,added_at:new Date().toISOString(),signals:p.signals||[],
-       memo:'',reason:p.reason,risk:p.risk,watch:p.watch
+       memo:'',reason:p.reason,risk:p.risk,watch:p.watch,supplyMemo:''
       }));
       return additions.length?[...additions,...old]:old;
      });
+     const capacity=Math.max(0,MAX_REGULAR-items.filter(x=>!x.protected).length);
+     for(const p of unique.slice(0,capacity)){void captureSupply(`AI:${p.code}:${p.day}`,p.code,p.day,p.close_price);}
      setShowAi(false);setFilter('AI');setDayFilter('ALL');setRank('RECENT');setQuery('');
      setMessage(picked.length?`AI 후보 ${picked.length}종목 확인 · 신규 ${Math.min(unique.length,Math.max(0,MAX_REGULAR-items.filter(x=>!x.protected).length))}종목 자동 등록 · 기존 후보는 중복 제외`:
        'AI가 이번 기준일의 관찰 후보를 보류했습니다.');
@@ -281,7 +302,7 @@ export default function SmartBasket({quickAddRequest,onItemsChange,active=true,r
   a.download='BLUE_R15_관찰함_'+new Date().toISOString().slice(0,10)+'.json';a.click();
   window.setTimeout(()=>URL.revokeObjectURL(url),3000);
  }
- async function importBackup(file:File|undefined){if(!file)return;if(file.size>200000){setError('백업 파일은 200KB 이하만 가능합니다.');return;}
+ async function importBackup(file:File|undefined){if(!file)return;if(file.size>900000){setError('백업 파일은 900KB 이하만 가능합니다.');return;}
   try{const obj=JSON.parse(await file.text());if(obj.version!==1||!Array.isArray(obj.items))throw Error('지원하지 않는 파일입니다.');
    if(obj.items.length>MAX_REGULAR+MAX_PROTECTED||obj.items.some((x:unknown)=>!validItem(x)))throw Error('관찰함 데이터 형식이 맞지 않습니다.');
    const all=new Map(items.map(x=>[x.id,x]));
@@ -498,6 +519,10 @@ export default function SmartBasket({quickAddRequest,onItemsChange,active=true,r
        signals={signalChips} highestObserved={maxHigh} highestDay={maxHighDay}
        selectedMethod={it.stopMethod} refreshKey={refreshKey}
        onSelectMethod={(method:StopMethod)=>setItems(old=>old.map(x=>x.id===it.id?{...x,stopMethod:method}:x))}/>
+     <BasketSupplyRecordRow record={it.supplyRecord} day={it.day} baseline={it.baseline}
+       note={it.supplyMemo||''} loading={supplyBusy.includes(it.id)}
+       onFetch={()=>void captureSupply(it.id,it.code,it.day,it.baseline)}
+       onNoteChange={value=>setItems(old=>old.map(x=>x.id===it.id?{...x,supplyMemo:value}:x))}/>
      <div className="r153-row-state" title={pr?.checked_at||''}>{state}{pr?.checked_at&&` · 최종 확인 ${new Date(pr.checked_at).toLocaleString('ko-KR')}`}</div>
      <details className="r152-record-more"><summary>메모 · 관찰 근거</summary>
        {it.source==='AI'&&<p className="basket-insight">AI 관찰 근거: {it.reason||'미기재'} · 위험: {it.risk||'미기재'}</p>}
