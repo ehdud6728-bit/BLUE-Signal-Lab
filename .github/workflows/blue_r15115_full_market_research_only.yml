@@ -84,7 +84,7 @@ jobs:
           test -f tests/test_strategy_lab_r15114.py
           test -f tests/test_supply_profile_r15110.py
 
-      - name: Restore immutable SHA256-pinned original strategy runner to temporary folder
+      - name: Restore SHA256-pinned original strategy source to temporary folder
         env:
           ORIGINAL_COMMIT: 2408de5bd899b6768e528de09956b5b005ee0eb6
           ORIGINAL_WORKFLOW: .github/workflows/blue_r15115_full_market_research_only.yml
@@ -128,10 +128,65 @@ jobs:
           print('BLUE_R15115_ORIGINAL_RESEARCH_SOURCE_SHA256_OK', actual)
           PY_RESTORE
 
+      - name: Apply two guarded date-type fixes to SHA256-verified TEMP runner (no repo writes)
+        run: |
+          set -euo pipefail
+          python -B - <<'PY_DATE_FIX'
+          import hashlib
+          import os
+          from pathlib import Path
+
+          runner = Path(os.environ['RUNNER_TEMP']) / 'blue_r15115' / 'run_full_market.py'
+          original = runner.read_text(encoding='utf-8')
+          repairs = {
+              'hist=all_hist.loc[all_hist.date.dt.date.le(pd.Timestamp(target))].copy()':
+                  'hist=all_hist.loc[all_hist.date.le(pd.Timestamp(target))].copy()',
+              'current=hist.loc[hist.date.dt.date.eq(pd.Timestamp(target))]':
+                  'current=hist.loc[hist.date.eq(pd.Timestamp(target))]',
+          }
+          patched = original
+          for before, after in repairs.items():
+              if patched.count(before) != 1:
+                  raise SystemExit('R15115_DATE_PATCH_SOURCE_ANCHOR_MISMATCH')
+              patched = patched.replace(before, after)
+          if patched == original or any(before in patched for before in repairs):
+              raise SystemExit('R15115_DATE_PATCH_NOT_APPLIED')
+          compile(patched, str(runner), 'exec')
+          runner.write_text(patched, encoding='utf-8')
+          print('BLUE_R15115_TEMP_DATE_TYPES_FIXED',
+                'source_sha256', hashlib.sha256(original.encode()).hexdigest(),
+                'patched_sha256', hashlib.sha256(patched.encode()).hexdigest(),
+                'replacements', len(repairs), flush=True)
+          PY_DATE_FIX
+
       - name: Install research Python dependencies
         run: |
           set -euo pipefail
           python -m pip install --disable-pip-version-check pandas numpy pyarrow requests 'pykrx==1.2.9'
+
+      - name: Regression-test both session-date comparisons against pandas datetime64
+        run: |
+          set -euo pipefail
+          python -B - <<'PY_DATE_REGRESSION'
+          import os
+          from pathlib import Path
+          import pandas as pd
+
+          runner = (Path(os.environ['RUNNER_TEMP']) / 'blue_r15115' / 'run_full_market.py')
+          src = runner.read_text(encoding='utf-8')
+          assert 'all_hist.date.le(pd.Timestamp(target))' in src
+          assert 'hist.date.eq(pd.Timestamp(target))' in src
+          assert 'all_hist.date.dt.date.le(' not in src
+          assert 'hist.date.dt.date.eq(' not in src
+          example = pd.DataFrame({'date': pd.to_datetime([
+              '2026-11-12', '2026-11-13', '2026-11-16'])})
+          target = pd.Timestamp('2026-11-13')
+          hist = example.loc[example.date.le(target)].copy()
+          current = hist.loc[hist.date.eq(target)]
+          assert hist['date'].dt.strftime('%Y-%m-%d').tolist() == ['2026-11-12','2026-11-13']
+          assert current['date'].dt.strftime('%Y-%m-%d').tolist() == ['2026-11-13']
+          print('BLUE_R15115_DATE_CUTOFF_REGRESSION_OK', flush=True)
+          PY_DATE_REGRESSION
 
       - name: Unit-test existing research, historical guards and supply analysis
         run: |
