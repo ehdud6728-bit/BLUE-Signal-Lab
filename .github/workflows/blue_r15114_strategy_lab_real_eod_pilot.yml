@@ -1,0 +1,237 @@
+name: BLUE R1.5.10.14 Strategy Lab - Real KRX EOD Pilot (READ ONLY)
+
+on:
+  workflow_dispatch:
+    inputs:
+      asof_date:
+        description: 'Exact completed KRX EOD date (YYYY-MM-DD); no silent latest fallback.'
+        type: string
+        required: true
+        default: '2026-11-13'
+      sample_count:
+        description: 'Deterministically selected eligible 6-digit stocks (research pilot, not entire market).'
+        type: choice
+        required: true
+        default: '40'
+        options:
+          - '20'
+          - '40'
+          - '80'
+      confirm_research_only:
+        description: 'Type RESEARCH_ONLY - no database writes, live search edits or deployment.'
+        type: string
+        required: true
+        default: RESEARCH_ONLY
+
+permissions:
+  contents: read
+
+concurrency:
+  group: blue-strategy-real-eod-pilot-${{ inputs.asof_date }}
+  cancel-in-progress: false
+
+jobs:
+  verified_eod_pilot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      PYTHONDONTWRITEBYTECODE: '1'
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Guard repository, branch, date and research-only approval
+        env:
+          ASOF: ${{ inputs.asof_date }}
+          APPROVAL: ${{ inputs.confirm_research_only }}
+          SAMPLE: ${{ inputs.sample_count }}
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REPOSITORY" = 'ehdud6728-bit/BLUE-Signal-Lab'
+          test "$GITHUB_REF" = 'refs/heads/main'
+          test "$APPROVAL" = 'RESEARCH_ONLY'
+          [[ "$ASOF" =~ ^20[0-9]{2}-[0-9]{2}-[0-9]{2}$ ]]
+          [[ "$SAMPLE" == '20' || "$SAMPLE" == '40' || "$SAMPLE" == '80' ]]
+
+      - name: Checkout verified existing research source
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Check R1.5.10.14 source and read-only dependency boundary
+        run: |
+          set -euo pipefail
+          test -f research/strategy_lab_r15114/daily.py
+          test -f research/strategy_lab_r15114/run.py
+          test -f scripts/market_scan_r11.py
+          test -f scripts/supply_profile_r15110.py
+          test -f tests/test_strategy_lab_r15114.py
+          python - <<'PY'
+          from pathlib import Path
+          path=Path('research/strategy_lab_r15114/daily.py')
+          text=path.read_text(encoding='utf-8')
+          assert 'def run_daily_study(' in text
+          assert 'AMOUNT_ENV_SUPPLY' in text
+          assert 'ENV20_40_PULLBACK' in text
+          print('BLUE_REAL_EOD_SOURCE_PRESENT')
+          PY
+
+      - name: Install offline Python research dependencies
+        run: |
+          python -m pip install --disable-pip-version-check pandas numpy pyarrow requests 'pykrx==1.2.9'
+
+      - name: Run independent strategy-lab regression tests
+        run: |
+          set -euo pipefail
+          export PYTHONDONTWRITEBYTECODE=1
+          python -B -m unittest discover -s tests -p 'test_strategy_lab_r15114.py' -v
+          python -B -m unittest discover -s tests -p 'test_supply_profile_r15110.py' -v
+
+      - name: Real historic EOD study - strict target-day proof, deterministic selection
+        env:
+          ASOF: ${{ inputs.asof_date }}
+          SAMPLE_COUNT: ${{ inputs.sample_count }}
+          KRX_AUTH_KEY: ${{ secrets.KRX_AUTH_KEY }}
+          KRX_ID: ${{ secrets.KRX_DATA_ID || secrets.KRX_ID }}
+          KRX_PW: ${{ secrets.KRX_DATA_PW || secrets.KRX_PW }}
+          KRX_DATA_ID: ${{ secrets.KRX_DATA_ID || secrets.KRX_ID }}
+          KRX_DATA_PW: ${{ secrets.KRX_DATA_PW || secrets.KRX_PW }}
+        run: |
+          set -euo pipefail
+          mkdir -p output/strategy_lab_r15114_pilot
+          python - <<'PY'
+          import csv
+          import hashlib
+          import json
+          import os
+          from datetime import date,datetime,timezone
+          from pathlib import Path
+          import pandas as pd
+          import sys
+          sys.path.insert(0,'scripts')
+          from market_scan import load_marcap, normalise
+          from market_scan_r11 import ensure_eod_request,selected_provider,upgraded_history
+          from research.strategy_lab_r15114.daily import run_daily_study
+
+          target=date.fromisoformat(os.environ['ASOF'])
+          ensure_eod_request(target,datetime.now(timezone.utc))
+          sample_count=int(os.environ['SAMPLE_COUNT'])
+          raw,hashes=load_marcap([2024,2025,2026])
+          key=os.environ.get('KRX_AUTH_KEY','').strip()
+          has_account=bool(os.environ.get('KRX_DATA_ID') and os.environ.get('KRX_DATA_PW'))
+          # Force independent exact-date KRX market and sample-ticker/index checks,
+          # even if the community marcap archive already has the target date.
+          provider=selected_provider('auto',key,has_account)
+          upgraded,proved_days,source=upgraded_history(
+              raw,target,True,provider,key,max_days=45)
+          if target.isoformat() not in proved_days:
+              raise SystemExit('TARGET_KRX_DAY_NOT_INDEPENDENTLY_PROVED')
+          hist=normalise(upgraded)
+          hist=hist.loc[hist.date.dt.date.le(target)].copy()
+          target_rows=hist.loc[hist.date.dt.date.eq(target)].copy()
+          if len(target_rows)<1700:
+              raise SystemExit('TARGET_UNIVERSE_INCOMPLETE')
+          target_rows=target_rows[target_rows.code.str.fullmatch(r'[0-9]{6}')]
+          eligible=[]
+          for code,g in hist.loc[hist.code.str.fullmatch(r'[0-9]{6}')].groupby('code',sort=False):
+              if g.date.iloc[-1].date()!=target:continue
+              if len(g)<160:continue
+              if (g.amount<0).any() or (g.volume<0).any():continue
+              eligible.append(code)
+          # Symbol selection uses stable SHA256 of code ONLY, never returns,
+          # trading outcomes or today's intraday volume. Still survivorship-biased.
+          eligible.sort(key=lambda c:(hashlib.sha256(c.encode()).hexdigest(),c))
+          codes=eligible[:sample_count]
+          if len(codes)!=sample_count:
+              raise SystemExit(f'INSUFFICIENT_ELIGIBLE_SYMBOLS {len(codes)}/{sample_count}')
+          study_input=hist.loc[hist.code.isin(codes),
+              ['code','date','open','high','low','close','volume','amount']].copy()
+          if study_input.date.max().date()!=target:
+              raise SystemExit('ASOF_NOT_REPRESENTED_IN_SAMPLE')
+          result=run_daily_study(study_input,target.isoformat())
+          out=Path('output/strategy_lab_r15114_pilot')
+          (out/'strategy_study.json').write_text(
+              json.dumps(result,ensure_ascii=False,indent=2,allow_nan=False),encoding='utf-8')
+          rows=[]
+          for strategy,v in result['pooled'].items():
+              for horizon,stats in v['horizons'].items():
+                  rows.append({'strategy':strategy,'label':v['label'],
+                      'horizon_days':horizon,**stats})
+          with (out/'strategy_comparison.csv').open('w',encoding='utf-8-sig',newline='') as f:
+              writer=csv.DictWriter(f,fieldnames=list(rows[0]))
+              writer.writeheader();writer.writerows(rows)
+          audit={
+              'asof':target.isoformat(),'run_mode':'READ_ONLY_RESEARCH_PILOT',
+              'target_day_source':source,
+              'target_day_exact_KRX_verified':True,
+              'historical_source':'FinanceData/marcap yearly parquet (historical bars not individually KRX-proven)',
+              'historical_parquet_sha256':hashes,
+              'source_years':[2024,2025,2026],
+              'sample_selection':'first N SHA256(code)-sorted eligible numeric six-digit symbols; not return-based',
+              'selection_may_have_survivorship_bias':True,
+              'sample_count':len(codes),'eligible_code_count':len(eligible),
+              'target_market_rows':len(target_rows),
+              'sample_codes':codes,
+              'first_input_date':str(study_input.date.min().date()),
+              'last_input_date':str(study_input.date.max().date()),
+              'no_database_writes':True,'no_web_deploy':True,
+              'limitations':['small deterministic pilot, not all-stock backtest',
+                  'historical dates from marcap not individually KRX proved',
+                  'EOD daily 500eok proxy is NOT the original intraday 500eok candle',
+                  'raw unadjusted prices / delistings / corporate actions / sector and market factors not controlled',
+                  'multiple strategy hypotheses and overlaps; no established forecast advantage']
+          }
+          (out/'SOURCE_AUDIT.json').write_text(
+              json.dumps(audit,ensure_ascii=False,indent=2),encoding='utf-8')
+          print('BLUE_REAL_EOD_PILOT_COMPLETE',
+              'date',target,'selected',len(codes),
+              'events',len(result['events']),'source',source)
+          for r in rows:
+              if r['horizon_days']=='10':
+                  print('STRATEGY_10D',r['strategy'],'n',r['n_completed'],
+                      'up_freq_pct',r['win_freq_pct'],
+                      'median_return_pct',r['median_return_pct'])
+          PY
+
+      - name: Validate research-only source and output boundary
+        run: |
+          set -euo pipefail
+          test -s output/strategy_lab_r15114_pilot/strategy_study.json
+          test -s output/strategy_lab_r15114_pilot/strategy_comparison.csv
+          test -s output/strategy_lab_r15114_pilot/SOURCE_AUDIT.json
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          root=Path('output/strategy_lab_r15114_pilot')
+          audit=json.loads((root/'SOURCE_AUDIT.json').read_text(encoding='utf-8'))
+          study=json.loads((root/'strategy_study.json').read_text(encoding='utf-8'))
+          assert audit['target_day_exact_KRX_verified']
+          assert audit['asof']==study['asof']
+          assert set(study['pooled'])=={
+              'AMOUNT_500EOK','ENV20_40_PULLBACK','AMOUNT_ENV_PULLBACK',
+              'AMOUNT_ENV_SUPPLY','BASELINE_20_STEP'}
+          assert len(audit['sample_codes'])==audit['sample_count']
+          assert all(e['day']<=audit['asof'] for e in study['events'])
+          print('BLUE_R15114_REAL_EOD_RESEARCH_AUDIT_OK')
+          PY
+          python - <<'PY_SCOPE'
+          import subprocess
+          changed=subprocess.check_output(['git','diff','--name-only'],text=True).splitlines()
+          others=subprocess.check_output(['git','ls-files','--others','--exclude-standard'],text=True).splitlines()
+          outside=[p for p in others if not p.startswith('output/strategy_lab_r15114_pilot/')]
+          if changed or outside:
+              raise SystemExit(f'BLOCKED: source paths changed={changed} untracked={outside}')
+          print('BLUE_R15114_READ_ONLY_REPO_SCOPE_OK')
+          PY_SCOPE
+
+      - name: Upload results as downloadable research artifact only
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: BLUE_R15114_REAL_KRX_EOD_PILOT_${{ github.run_id }}
+          path: output/strategy_lab_r15114_pilot/
+          if-no-files-found: warn
+          retention-days: 14
