@@ -1,0 +1,214 @@
+# Standalone upload: GitHub -> .github/workflows/ -> Add file -> Upload files.
+# Run from Actions with confirm_research_only=RESEARCH_ONLY.
+# R15118 intentionally leaves production app and earlier strategy lab intact.
+name: BLUE R1.5.10.18 ENV6 Separate EOD Study (RESEARCH ONLY)
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm_research_only:
+        description: 'Type RESEARCH_ONLY. Historical reports only; no live app or orders.'
+        type: string
+        required: true
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: blue-r15118-env6-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  env6_separate_study:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Enforce independent research-only operation
+        env:
+          CONFIRM: ${{ inputs.confirm_research_only }}
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REPOSITORY" = 'ehdud6728-bit/BLUE-Signal-Lab'
+          test "$GITHUB_EVENT_NAME" = 'workflow_dispatch'
+          test "$CONFIRM" = 'RESEARCH_ONLY'
+          echo 'R15118_NO_LIVE_NO_SEARCH_NO_WATCH_NO_DEPLOY'
+
+      - name: Restore SHA256-pinned ENV6 research sources from this one YML
+        env:
+          PINNED_SHA256: 759035523a7e06ceb6a5a36a7ebd1b8fdc780a25ca6411dda1cf180ffb76c9b4
+        run: |
+          set -euo pipefail
+          cat <<'R15118_SOURCE_BUNDLE' | base64 --decode > "$RUNNER_TEMP/r15118_study_source.tar.gz"
+          H4sIAAAAAAAC/+07a2/bVpb97F9xh0VrqpUZ6mHZcUcFFFtptHUkQ7bTZrzGBUVSEicUyZKUHw0CZGc9Rdtk0BaY
+          tOlOMsgs2tl2UGAyfSwyQPcPRfJ/2HPuvXxJ8qM76HxZE4klkveexz2Pe865R0E4NA4V7/CFn/FS4aqUy+wTronP
+          UmFpcSl6Jp4vLarlF4j6wj/hGgah5gPKF/5/Xi/+4tIw8C91LOeS6ewR7zDsu05pTpKkdkFZVAqqUlgmC6Tru++a
+          DulbQej6lq7ZxDcDU/P1fp406zfqbaIRz3eNoR5arkMCq+dotjI3t9U3ieV4w5BYAQnhZs/0ra5lGqRdWCwUlsii
+          qpruLVJvrS2Ye6YTEs0Pra6mhwpphKSvsVlzgTYwFwztkGxerxVVojkGaV1bX82TDkA2XDMgzdYW0V0n1CwHCLFc
+          nw2Hbzq87Lo+Aej+4VxwOOi4tkKALt+ExyZxNKQYGNLdvuuHARkGJjDzig5IbHOh4xqHRPfdIHgFGTw4zBPHBSrn
+          AFnX8gfACSBacAE6wwjPgpB0fFO75Q6BifWXr84HBBfK2mNjLRvgMdjw2Lbd/TlcliAESkPTJ+G+y+DofVO/xRjV
+          iGH5ph6SK+vb9ZK6MHAN04Znge6bnuboh0QbGlaooMzmQE4DQml3GA59k1JiDTxgCuAA0YzRYG4ueub3PM0PzOge
+          1rpvW53o9teB63BwnhbiiwjWBtzGQJzhwAMCAuJ40SOgyYAH8M8z5uYazY3tLdrebpIqKZcql0uXi6XlkjpX22xd
+          hUdSUS1WFgqFhUJJmrtS26zT2vXWdnMLXi2qFJxB9H+u3rxBN+rtRmsN3hX5/fYGPKEbqzi8oqhz11rtxq9azU24
+          lRfzpKDmYWRurv72Rn11q75Gr9U2r9Xx7e05AteLpOEEph+CXLQuLr5GbJfrtmYsuA5ICheFry9xu0yBhSX4QydR
+          VQZNYvpLUS/soenoJi2ohqIHe9IKsGnondLSYqHS7ZQLeqdYLlTUbrGsdzqVy5pWMZbL8La0bFYqarGoFzpauVsu
+          GLpRWlrWLy+Wi1Ke41hvXqVsydTlBXWJtmtv0bVaY/0mvVJrb0bIuuZSuQywNb20pOvq0nJXXVYLlcvFpUKpYGol
+          zVjuLHWKHVNdMvTlYsnU9WKpc3lpGYYumouXAdmdubk5w+xycz2kgTv0wZDkrmsbpr/CdCBHFl4HNdTDFUYarhSo
+          NKztHXaPNueA2eaJeeCB+sIig2lOiEKxQnMQyDkOAi9DCzUUH8dELjEYOQUlQjuHIdCQS8ZaPROMrRqprhL0teJi
+          RUYYOaVvHvABqRlWN6HmF1UBIEGOl69Z4ABuaCDDuu+7vtyVNhrNJpDMVXnzWg1w0OsNcEVbq9dWyG2k8A65zYHd
+          kRJsfEl28P0uibCxt1yjqszIFNvVjEBOOJZq22uNLQXfSYLz0DwIZdAp17CcXlUaht2FZSnHMQFPMvcAPTOUJZBY
+          YOFMZFDiXpaCe6VoMOhC6NXG28DN5lZrg94oSBnmQWYpUFrgdjkctNZTBnL1oD4iW6RgGnwW2LtaVC+Xi8WlycnM
+          hyYAGJNocDBx+q3jUqNA931QltTqzoaEY03PdgFSSqumhCptN2HTalxtwEqINdre2Nxq12vXKVt+gcg3wZE6QpLC
+          Jjqua4OZ23KwAi5O2QQTMQNmDfEdx7yH+NAkAkULwkPPlMHN5xT4AzLfN305FiAywUcrVmA58o4U+kNTyoMta3Zg
+          Srs5BfYK+TSOutKV2hq90mqt12tNeqMGkt4E5QwUpp5ZdgQq8x2Z48kJznRbCwKwd2ZBjLk1+HLVRxMU/MUPOCmw
+          56yKSYQ5zK6p4dYTELcDrnVP69iwm4bMc/KgALdL2BF12w1MBbcsZsloHgBZ0V3vUCyLY5qGiS9uS6D3bDFgCPvk
+          WzX1YK1dAx9w0NT1TCd127d6feE4kyt6yQjAwdrAHYLfvuXv4x0EQUWVsgXC287Qtq1gBhQ+jgUGNHSBJzYaZlHN
+          OaSwX8NesBg9K6liTMo1ojeM9qtErJxpZeghq/LtrtQHr0BvO3dA4QaebYLjAqBdydf2KRcm9fQQB0yRGF9dyYNY
+          x/R906AQvnlTE6dH9C3+6k6soQMLhOz0yEo1EswCCcDgYIdz7eHACU7XTXCXm43mG4mRrbbWt6/DTn07cHEDlgX8
+          XKSp0faByyQnYvi/LvyMxXllZ+bqTktnN709xd489gLiUUI2PORUn6aVp+vhFLUZvczQA9iQHDDN0KUQjoFN6DJ/
+          DFsvLn9QlZhEpGS/MBRj6NkQx+PS72TtC32NcyhPOVpDSShU7FBORWsnzdjJLMGuYpuyeiL0FIenD0QqlV4o46Yk
+          Bp3q6htN8IaNNXq13fpVvUkhW2lu0Y3WxvZ6bavRaoplAWKBggodeuBWJLZfp0kirxC5QF4l2bDzEsSYanp+WeUA
+          aLt+td6uN1frtNVcvzkTXkEpqxnUTBWo1oFkQkxI6wiyzEAIGrNkY57CrYJNhZHCZsjLCRwUA4puGsxJ18tnEZGl
+          Yt/Sb4EN/hoirIiMlNbDDv0TUE/jts3TcPc0b2oF5SzrPw3/T2KfeSCWmsU+iItw0jWJzGPNhIDV9EGVYdMMIJHD
+          r4TlW0lmqfchxRB53woZehA5mNoAU2mNJ6NKGj04O04Ad3kJ+sgLpkMAQ2z5Pd8derRra71ANmZs+Rjg7wDefBLc
+          7K6kAd2OF1GqUcjm6603aW19XUrFRvIWBBl58ImGeVA1FPaZS3ycdCWad2V7fb2xeQ3mxuqbGrYavcdQFuzoemNt
+          vdGs09V2a3MzPYeJbWqfSEFaS0Oq0NX1FrqyK60b9VlgMoaZglLPQrnSWruZomXCKlPzrk6O52H59dZafZ0uzprM
+          KJnWsBTMNzjMtxqrb4Lr+RfIsdCzxaBSdpmaJAh/o7bBmZ+1/skiTNgXhxPlicFwMNB8611zphJNx40QIQ5tzIB2
+          dtk9U0MMlTP6mOypPNTj2+pWu9ZoYhZcwj9sr7/WWl9rQXKGqXF6e8SpttYxbYhxACTO55imE0+8PNcb2qxMwmzH
+          dvUdjG9SwSbGzPxbDlYGYe5mICDC/uzQLrrA/VsY1ibIGKLkNo5L+um4ZHc3HRxnMlZmiMFUEMAQ7UzHiv07Uio0
+          0F0TcjdINA3f9RxtBnyMCD0Wic+Gf0p0yVCd6WWj6/wkoXxs05EF67PWBPVL0YBwx5BvzyRBpBHoqZhEQY+YcsAD
+          oTMgB9Bp16HgPgJ43J/NixS6IewQrP6Dw5CyRJw5gDNgSZEB75wTQOxbDsUtANcNhgEdQDcEFxh3RAJ+nUBQNDA1
+          RwaYxRxLHIkJ+SFpuo55AmAcn5JJDFsAjeGVzg3PsM6CiCN+CkyHMl2isNo9CzdbVKRoJYX65U7jLzNxFm0CSIrb
+          mdCA2jTKMwlnW7WBxT6su6233qKbtesb63WJ8/1LUihyGFK7vgWuHotfjRsiJpyGeSeTpae9pswVOkrUbadLA/Md
+          VmaUsT6bKsmFENmbO+nJ+Qyo3Thzr7EqFIQUNtGMX2u4p2C9OipPv0YcN13xh30bMwbwcL2hGQT7rn8rk8ADElbH
+          0YM9RhP4mGzFagFCKfDWBpZCqiKrX8HSt+Cbh/axn8Gb0BpgzIZfc0mlQMGkkcfRgcyzFiyUQT5KWXAho+OoYtSR
+          pDxYYkFnbpis7qFWKpeXVEnUVURikeREEdDTUhAjxFJOl5EovXRz4aXBwksGzEHwSY0WHsDmKLOCWOHUPAVru5ut
+          7TbkDCJlOSU1GWhFleUQauXc6Uc8J8k7wHfviRSUj+FhbtC3uqFcyGWGzUqPxIOpCXEMS1MBVCY9STDzuH4CRe7c
+          u8bLMdWzg3MRv1vGASC2HBzDlGRHiBF3dEPZAikGoTbwsrLL7e6oIrUHbw4Ly8GkYL5KCslrtiwWbufxaB4f8GOh
+          +G0yfzdSUFAlmU0SyoX1nxwv4kYEFVTpLP1p1t/eohAgrWGxZa12M65TC1V6kWxHWQRPKyDA78LuHfDUY78vanXD
+          AJhBzxby0zqIaOCx5ZNrW5s8LeGpBwtKeUJbhXDI1ULBxJUrkHWwRJkjjjKTod4XxRM5PRzTwxx5vZoCyOfpWiA8
+          QuILd1I5h3AikT0ndRVMgVZIWpipyDddlljhwlHwZqJKE73Cm+nZ3GyiMeyO16ciK4leJY9SQNLWygIosYvEU06w
+          5RQINBnLHQYTlCSWNWvsDPomTC9LZIViiThjwStCfpzvEy09neI55kE4KZICE1f0JlrxRB9mTI855aMmmYwyZJpJ
+          h3nRbCWlWmdOYXrK4rXUfXoWmAfth0E0KzrvRfa2N+ttkNlGq43nXM3WFr1Z36JXW+3r2+s1Gp06pLUxdZYbAwA7
+          ozc2o7MJbqsxEAS6UWs3tm5OwruzmwkhIKZFA0pFDZ7thpM5Wp4A6d4wTAURGPNwXyNOdSGCxal4QMzMOb5VYC1k
+          qdbrReXFyfGKd4jf2IGwzY+/mK9Jj9BCHQ8Pxdw2pKma07OBbgbxH3TcWp50AMJAO5DVPEJbIMUixIADy5Ex2oPQ
+          Ep+CI1/mE7zEUWsrnd3TIouu1csTDQkE3mCj7yBLAZhGL4BkuCoXSnlSERsRjnI8RfOBN5Nh9nJJhmvlIVTdR0fr
+          YXIKLn0/k5/qru3i/iK9aJRLnVKHhZgwiBsBuk68QScmIs4Xi4WlSkdLDvi0A2XPthwImTguPITiX5i1cQxV9jdP
+          7P1qQSnk0pM1w6BMUnIsIFm2FpRSia9lhD+fkJWDpVUqlTNTQJSN1gnkeOJCBAwBLOYyxIlFA4qYMh9AeMtCmzxP
+          26oSKw8BSQZyS2TWM5KTIhiwMKXlTnlRmgEm5QRTwGSA/WrlpRzhbjMBZJY1U0UvBqtVBDIjgNoBW2jZOlgA5WNr
+          Hh7aZlVaWEjN7iwWK8WKFGOqDXtEXSLobrHMXOFnZHEviTQT/KuFDIKVFPyKWi52JuAXVLaDxyVFJ+rHSaCjrodW
+          CMKVMBmQ+c4KIhg6kCUMAzw7r7fWXosCCN6PYvEWHIwdEAGSlIDs+ZYha7bX16pKMYPokNEmS2+23xLDQ0u/JawV
+          WWNWculSQc1MO8BRgXyws7KC33ZRdjNichGQM0uOR/qiE6ZaTgRmmz2sE3RdSODRbi/H1q2EYBshtbVDEIGcPA60
+          PRM+Ze45IanxrGqhJKhEX8CEh44gytkGGtjIhHPV0NVEjThKze8NBxBybeBddDqseczwNPFOBh1iDVUgV5ZHbbBM
+          y4dk0PJNI+WaZkzkxJ490+9hNQkAMLoQRNR2ARA4xYHCgUVPlcEtw/Ih7/OxCFLlFV/zALJH6t5KwY7bRCY6SxhI
+          xpiI2tnziawyGYRtEif225zibs6dkYLquft0YA5c/7B6FQ/h03SJIzNMZfgDnljiyf67XQsyyorYhsGJw5j4XJ0P
+          Tt5hmouMuWmObPiweWmWd8dxpkT9nNEyO7UWFMalWMSQm0ARQt7gUKwvwgOOhE84nIHlNLd9MgEQZuSjuD1TqMiK
+          7+xWpiQDmGAimkrVZQpTGRd7QRQl8W6Qc3BzKgs8UmK8nIJ19VqtvaV4TjQxauxJZShRQ86K6MZZ5jM36xDB1bbq
+          ECpu1mvt1WvYjJMO2C3HgaCaLRdrqVkhcS8dnhZjb84Ka8zBOiWzKqxQsi9pMHEdEgnABCLqvIxLy+jNCYaL2MSI
+          gcSi2nEI78ZMTU+nBcLyhk4oinRM1Xj2E7VlrJCkZS+bUoi8xsMqL4OQOVSdypGScVI2FWJx8GbjjWZtXcrOKkIg
+          z7d/nMWbRrE95TXiYB8oKaovYSGnDB8dzTHSs6N+UJHOsPMjcN+WY8WLuFFvEti1IFpDSeYJOz8i7FTkNRIlWmL3
+          hk1zT7Ns7INJY0EFOxFBDIID/mU1AcriAuwK1Yc+elox5PX4HgekEbGjJZGwgnO2Qp5ixN1PK5E6sAqOaSxccW1Y
+          tx4sEjthxAIEKwYkYUMmkeb1VqxNIlwewINKDR29j2GuwWN9jgNbZ9lpAmw6ugaBvz+lWaKTrKzi8YHnMaBrLRZa
+          NJogeyYyBpIFeZfKcZwXkH0r7KOpos1j2R+Xg4c3+hSeW46771DbGliiLRYQ7UipYieuseM6C7AIATYMWnusQwIY
+          AA/qBBrvc9bdIAwm9huJdaTBdu/fMsN9yxDBXKBrzmt4tmtYouHYFZ3KUQ80tzgIbyYB8hdonTYEDAjeG/o9k3c+
+          Df09a8/1QXweVwzXBxlgHZXTGLAJ2Brtg2RNYxK4iOL4UTMkIgOwdxASbGIgRJCsa++ZRmQ3sJFZg6SHG9Ny3q3M
+          K3upBU46+lYIDwYybXyZh7xfTzxK2QisOeVN5nQf8w4aa1VmMG+qivaGTPMkQ8a7J1mrpTEceAHvlsQtNMAmaS3Q
+          LSvaVi2mNtVi7pynVlM9mRla2vXa2vU6fbOlhAdhlpyEzVSf/ei7o9FHR2T00W9Hf/4fMv7s6fMfviHy82dPx3/6
+          nqw3btQv8a3i0ltY0oPhd59/i+PeGz++n/tXR0qdTbMUqCr65cdffDK+98346EmeiHQGs5n47aMjUnmJjP/930b3
+          voJByiQknAB2lxt9+PuIRGbQZTJ++uz5d0/G//H1+PH3o6+fEvggo/8+Gh89Hj9+SI4fHB0fPX3+9C4ZPzga3ft8
+          dO/90b0vsuDHT47G335Pxvcejf/4JU5nQ+9HXun5t3fHf348+vgRmR8//pE8/9vT0R8fju7fff7sfTSb8ac/jP/w
+          MaIF6ufxc/TtF8cfPht/9vH46BEZ/f3o+Q8fH3/6/vjDH2Yif/zj6OlDgZxwUmAq8ok3gHD8n78F+hkLsMqfAnf3
+          /s6ef/rJ6PsPyOgvz47f+wGX7vjTL+Hb8+9+HP3XffL8u6Pxb54eP/h6JtLPHo4ffAFojn9/RJYvLQH6L8ZPHhEk
+          5vsPxo9+HP3p0RQFoy9/JMcffXP84KvjB4+YtNhjgXn00f3j+/fZmM8fjB8/OwHzMqRRUdY2/s03KLY/foyCQt9+
+          /MkjXIfP7xKhb6O/fDX63TPBCxfs+0DQ+O8Pjx88HP31LpDJ0D15ABw8OX74jIvu4QS37z8cP/5h9OUTWBoyfu/j
+          8ZP3QahPcaGAx+M/HB1/+gF5/v3d8bM/kdHvEA+ojNCm0V+fgbTJ+OhvOBlwAZhYRVLalNjqbHMEL+tkHMBt2Le0
+          cBjwkEKEXyyiaL3JegzTJ7k8tDnBHaQ28qgOGpVHWdw6s4DKE1J192SoqdJivGkzD3VnltvKYYppdQml2IlIKalW
+          iUQpJpyUiiMDnn3OTf3+JzQhQwt+3h+Bnf77L7VcWCpkf/9VUBdLhYvff/0zLlFyHUL0iapw9i9+sj/vYcOZ+kSD
+          o1w3n8n9QEHZC1IHg9jE8Vv4y4wIrYJ3q2AwouCJ9RJmhHJg2piBQTwHZp0nolIJtoTNwqnTsBlH5jvZto95TNHn
+          V8g8L2jN58k8lozwSZKG4tNMww++TncXzWdtdj51kgRDYzrnU8dI8JyTPZ8+OIKngo0JiEmXLQxZXEz/CApApFpI
+          4XVBVRV1Yr5o3ErgQ3aQ0DXVFjcvPMsklIm2xXgYfxW1FM6e/cort7vz073V0eCkxVpezBfUfFHN3ZkBYLrHHQBg
+          7eyc80/tev+HQIn2+HPBwBOZWKeZt+XZb2AdUCugEJxTzx4GFICEh0zd0+3dmeIRvFO4VYCDzJMC/r6toC7nctGG
+          Es9jQ2Ga6Yc1ewBJSv2doRaduGbOyBFCRVFzP2HqCQeTCKqsngAKo3WZbYtTzY25yfVhzYqYOkTrw7fOqA5+/jVS
+          4zUqnr5GU9Sl+iVzM/lhenxehtD6WPskKxFwljTMxVKTzs/VcszV5dO5OoPG86zDRM/nFGcY41BsIKIdzaf4w5CA
+          mgca5u6Y2fK5k6zFpV3cV2RKu5YNQUtOEbXjneIu5E7zvKjAf1O2NI9PziwYzqd/5yfqsqwEPdXoCdQGWPqGZNmY
+          rFKma7SnrhGfHklgdqiXOxFOSjoTgE49kj4ZILdTbCNB7lhPKfsy86x0PjmEn8/ldmPc6d6TM1LgDIjpAHQ+CkDn
+          +dLHW/1JkejFdXFdXBfXxXVxXVwX18V1cV1cF9fFdXFdXD/X9b9hxvyRAFAAAA==
+          R15118_SOURCE_BUNDLE
+          echo "$PINNED_SHA256  $RUNNER_TEMP/r15118_study_source.tar.gz" | sha256sum -c -
+          python - <<'PY_RESTORE'
+          import os, tarfile
+          from pathlib import Path
+          src = Path(os.environ['RUNNER_TEMP']) / 'r15118_study_source.tar.gz'
+          dst = Path(os.environ['RUNNER_TEMP']) / 'blue_r15118_src'
+          dst.mkdir()
+          with tarfile.open(src, 'r:gz') as f:
+              members = f.getmembers()
+              if {x.name for x in members} != {'study.py', 'test_study.py'} or not all(x.isfile() for x in members):
+                  raise SystemExit('R15118_BUNDLE_FILESET_MISMATCH')
+              for x in members:
+                  (dst / x.name).write_bytes(f.extractfile(x).read())
+          print('R15118_RESEARCH_SOURCE_SHA256_VERIFIED')
+          PY_RESTORE
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Download frozen R15117 historical EOD findings
+        uses: actions/download-artifact@v4
+        with:
+          name: BLUE_R15117_ENV_BLUE_STOPS_43693923830
+          repository: ehdud6728-bit/BLUE-Signal-Lab
+          run-id: 43693923830
+          github-token: ${{ github.token }}
+          path: ${{ runner.temp }}/blue_r15118_input
+
+      - name: Install pinned read-only analysis dependencies
+        run: |
+          python -m pip install --disable-pip-version-check \
+            'numpy==2.3.5' 'pandas==2.3.3' 'matplotlib==3.10.7'
+
+      - name: Run classifier unit tests
+        run: |
+          python -B -m unittest discover -s "$RUNNER_TEMP/blue_r15118_src" -p test_study.py -v
+
+      - name: Compute independent ENV(20,6%) cohorts and actual LNF case
+        run: |
+          python -B "$RUNNER_TEMP/blue_r15118_src/study.py" \
+            --input "$RUNNER_TEMP/blue_r15118_input" \
+            --output output/r15118_env6_separate
+
+      - name: Verify indicators are clearly distinguished from BLUE30 proxy
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          import pandas as pd
+          p = Path('output/r15118_env6_separate')
+          expected = ['event_level_ENV6_500eok.csv',
+                      'train_holdout_ENV6_summary.csv',
+                      'LNF_2026_08_07_ENV6_vs_BLUE30_audit.csv',
+                      'LNF_2026_08_07_ENV6_CHART.png', 'README_KO.txt', 'AUDIT.json']
+          if any(not (p/x).is_file() or (p/x).stat().st_size < 50 for x in expected):
+              raise SystemExit('R15118_MISSING_REPORT')
+          info = json.loads((p/'AUDIT.json').read_text())
+          case = pd.read_csv(p/'LNF_2026_08_07_ENV6_vs_BLUE30_audit.csv').iloc[0]
+          if not (info['read_only'] and info['no_d1_write'] and info['no_deploy']
+                  and info['live_search_watch_unchanged']
+                  and info['env_upper_percent'] == 6.0
+                  and info['BLUE_signal_parity'].startswith('UNVERIFIED:')
+                  and case['env6_true_close_cross']
+                  and not case['upstream_blue30_model_touched']):
+              raise SystemExit('R15118_UNVERIFIED_SIGNALS')
+          print('R15118_ENV6_TRUE_CROSS_BLUE30_MODEL_DISCREPANCY_OK')
+          PY
+
+      - name: Upload read-only research result ZIP (14 days)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: BLUE_R15118_ENV6_SEPARATE_${{ github.run_id }}
+          path: output/r15118_env6_separate/
+          if-no-files-found: warn
+          retention-days: 14
