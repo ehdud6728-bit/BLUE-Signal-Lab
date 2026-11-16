@@ -48,6 +48,9 @@ const ALL_GC_KEYS=GC_OPTIONS.map(x=>x.key);
 type InstallPrompt = Event & {prompt:()=>Promise<void>;userChoice:Promise<{outcome:string}>};
 const tags=['BB20','BB30','BB40','ENV20','ENV40'];
 const todayKST=()=>new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Seoul',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date());
+const eodRequestReadyKST=()=>new Intl.DateTimeFormat('en-GB',{
+  timeZone:'Asia/Seoul',hour:'2-digit',minute:'2-digit',hourCycle:'h23'
+}).format(new Date()) >= '15:40';
 const SCAN_WATCH_KEY='blue_r1581_pending_scan_date_v1';
 const rememberedScanDate=():string=>{
   try{
@@ -80,8 +83,8 @@ function App(){
   const [gcLogic,setGcLogic]=useState<'any'|'all'>('any');
   // R1599 shared options: search outlines, detail chart and basket use same threshold.
   const [amountChoice,setAmountChoice]=useState(()=>{
-    try{const v=localStorage.getItem('blue_r1599_amount_choice');return ['0','100','300','500','1000','custom'].includes(v||'')?v!:'500';}
-    catch{return '500';}
+    try{const v=localStorage.getItem('blue_r1599_amount_choice');return ['0','100','300','500','1000','custom'].includes(v||'')?v!:'0';}
+    catch{return '0';}
   });
   const [customAmount,setCustomAmount]=useState(()=>{
     try{return localStorage.getItem('blue_r1599_custom_amount')||'500';}
@@ -275,8 +278,14 @@ function App(){
       if(scroll){setFilterOpen(false);requestAnimationFrame(()=>resultRef.current?.scrollIntoView({behavior:'smooth',block:'start'}));}
       if(d.data_status==='NOT_IMPORTED'){
         if(queryMode==='single'){
-          if(queryDate>=todayKST()){setStatus('오늘 및 미래 날짜는 확정 일봉이 준비되지 않았습니다. 장중 현재가를 제공하지 않습니다.');}
-          else{setStatus('저장된 결과가 없어 해당 날짜의 분석을 요청합니다.');await requestScan(queryDate);}
+          if(queryDate>todayKST()){
+            setStatus('미래 날짜의 주가 데이터는 아직 존재하지 않습니다.');
+          }else if(queryDate===todayKST()&&!eodRequestReadyKST()){
+            setStatus('장중 전체시장 잠정 검색은 아직 지원되지 않습니다. 15:40 이후 확정 일봉 검증을 요청할 수 있습니다.');
+          }else{
+            setStatus('해당 날짜의 확정 일봉이 아직 저장되지 않았습니다. 서버에 수집 및 분석을 요청합니다.');
+            await requestScan(queryDate);
+          }
         }else setStatus('기간 중 저장된 날짜만 조회했습니다. 미분석 날짜의 일괄 실행은 지원하지 않습니다.');
       }
     }catch(e){if(serial===searchVersion.current){setError(String(e));setRows([]);setDays([]);setTotal(null);setDataStatus('');}}
@@ -509,7 +518,7 @@ function App(){
               if(next!=='custom'&&total!==null)void search(1,false,gcFields,gcLogic,undefined,{amountEok:Number(next)});
             }}>
               <option value="0">전체 (제한 없음)</option><option value="100">100억원 이상</option>
-              <option value="300">300억원 이상</option><option value="500">500억원 이상 (기본)</option>
+              <option value="300">300억원 이상</option><option value="500">500억원 이상</option>
               <option value="1000">1,000억원 이상</option><option value="custom">직접 입력</option>
             </select>
             {amountChoice==='custom'&&<input aria-label="최소 거래대금 직접 입력 (억원)" type="number" min="0" max="50000" step="1"
@@ -568,7 +577,14 @@ function App(){
           <div className="metric"><span>최신 저장일</span><strong className="smallnum">{latest?.slice(5)||'—'}</strong><small>종가 데이터</small></div>
         </div>
         {error&&<div className="notice error" role="alert"><AlertCircle size={17}/>{error}</div>}
-        {status&&<div className="notice"><AlertCircle size={17}/>{status}</div>}
+        {status&&<div className="notice"><AlertCircle size={17}/><div>{status}
+          {mode==='single'&&date===todayKST()&&latest&&latest<date&&<div>
+            <button type="button" className="filter-toggle" disabled={busy||requestBusy}
+              onClick={()=>{void search(1,false,gcFields,gcLogic,latest);}}>
+              최근 확정 거래일({latest})로 검색
+            </button>
+          </div>}
+        </div></div>}
         {scanInfo&&<div className="notice" role="status"><RefreshCw size={17}/><div>{scanInfo}{actionsUrl&&<div><a href={actionsUrl} target="_blank" rel="noreferrer">GitHub 실행 결과 확인</a></div>}</div></div>}
         <section className="panel result" ref={resultRef} id="results-panel">
           <div className="result-heading"><h2><BarChart3 size={18}/> 검색된 종목 <small>{total===null?'검색 전':total+'건'}</small></h2><span className="eod-pill"><Clock3 size={13}/> EOD</span></div>

@@ -35,6 +35,11 @@ function todayKST(): string {
     timeZone: 'Asia/Seoul', year: 'numeric', month: '2-digit', day: '2-digit'
   }).format(new Date());
 }
+function clockKST(): string {
+  return new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'Asia/Seoul', hour: '2-digit', minute: '2-digit', hourCycle: 'h23'
+  }).format(new Date());
+}
 function normalizedSignals(s: string | null): string[] {
   return (s || '').split(',').map(x => x.trim().toUpperCase())
     .filter(Boolean).map(x => x.startsWith('BLUE') ? x.replace(/^BLUE/, 'BB') : x);
@@ -52,8 +57,11 @@ function availableSQL(): string {
     WHERE d.day=? AND r.latest_price_date=d.day AND r.is_demo=0 LIMIT 1`;
 }
 function scanDateOK(day: string): boolean {
-  // This workflow currently imports FinanceData marcap 2025 and 2026 only.
-  return validDate(day) && day >= '2025-01-01' && day <= '2026-12-31' && day <= todayKST();
+  // Verified KRX EOD is not a live quote. The provider's same-day data may
+  // become available at or after 15:40 KST, never during the regular session.
+  const today=todayKST();
+  return validDate(day) && day >= '2025-01-01' && day <= '2026-12-31'
+    && (day<today || (day===today && clockKST()>='15:40'));
 }
 
 export default {
@@ -386,7 +394,7 @@ export default {
         catch { return respond({error:'JSON body expected'},400); }
         const day = body.date;
         if (typeof day !== 'string' || !scanDateOK(day)) {
-          return respond({error:'Date invalid, future, or outside 2025–2026 data source'},400);
+          return respond({error:'확정 일봉은 당일 15:40(KST) 이후 또는 과거 거래일에만 요청할 수 있습니다.'},400);
         }
         if (await env.DB.prepare(availableSQL()).bind(day).first()) return respond({date:day,status:'READY'});
         const cutoff = new Date(Date.now() - inFlightMs).toISOString();

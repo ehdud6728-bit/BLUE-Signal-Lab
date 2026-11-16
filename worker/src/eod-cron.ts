@@ -8,6 +8,10 @@ interface CronEnv {
 }
 
 const GITHUB_DISPATCH='https://api.github.com/repos/ehdud6728-bit/BLUE-Signal-Lab/actions/workflows/blue_market_scan_research_only.yml/dispatches';
+// A successful GitHub dispatch (HTTP 204) does not mean KRX EOD was imported.
+// The provider can be temporarily inconsistent after the close. Permit the
+// scheduled 16:55 / 20:35 attempts when the previous dispatch is stale.
+const RETRY_DISPATCH_AFTER_MS=14*60*1000;
 const SCHEMA=`CREATE TABLE IF NOT EXISTS blue_eod_schedule_r15109 (
   day TEXT NOT NULL, phase TEXT NOT NULL, status TEXT NOT NULL,
   updated_at TEXT NOT NULL, dispatch_http INTEGER,
@@ -35,16 +39,19 @@ async function requestVerifiedEod(env:CronEnv,day:string,phase:'KRX_EOD'|'KRX_RE
      WHERE d.day=? AND r.latest_price_date=d.day AND r.is_demo=0 LIMIT 1`).bind(day).first();
   if(ready){await note(env,day,phase,'READY','Verified KRX EOD already stored');return;}
   const earlier=await env.DB.prepare('SELECT status,updated_at FROM blue_eod_schedule_r15109 WHERE day=? AND phase=?').bind(day,phase).first<{status:string;updated_at:string}>();
-  // Avoid duplicate dispatches while the GitHub runner may still be queued.
-  if(earlier&&['DISPATCHED','CLAIMED'].includes(earlier.status))return;
+  // Avoid immediate duplicate dispatches, but do not leave a date stuck in
+  // DISPATCHED forever after a failed GitHub run.
+  const staleCutoff=new Date(Date.now()-RETRY_DISPATCH_AFTER_MS).toISOString();
+  if(earlier&&['DISPATCHED','CLAIMED'].includes(earlier.status)&&earlier.updated_at>=staleCutoff)return;
   if(!env.GITHUB_TOKEN){await note(env,day,phase,'BLOCKED','GITHUB_TOKEN not configured on API Worker');return;}
   // Claim the date+phase before making the GitHub request. A failed dispatch can retry.
   const timestamp=new Date().toISOString();
   const claim=await env.DB.prepare(`INSERT INTO blue_eod_schedule_r15109(day,phase,status,updated_at,message)
       VALUES(?,?,'CLAIMED',?,'GitHub dispatch in progress')
       ON CONFLICT(day,phase) DO UPDATE SET status='CLAIMED',updated_at=excluded.updated_at,
-       message=excluded.message WHERE status IN ('ERROR','BLOCKED')`)
-     .bind(day,phase,timestamp).run();
+       message=excluded.message WHERE status IN ('ERROR','BLOCKED')
+         OR (status IN ('DISPATCHED','CLAIMED') AND updated_at<?)`)
+     .bind(day,phase,timestamp,staleCutoff).run();
   if(!claim.meta.changes)return;
   try{
     const result=await fetch(GITHUB_DISPATCH,{method:'POST',headers:{
