@@ -1,0 +1,176 @@
+name: BLUE R1.5.10.31 - Stock 30-2-26 Signal Parity Audit (RESEARCH ONLY)
+
+on:
+  workflow_dispatch:
+    inputs:
+      stock_code:
+        description: 'Six-digit KRX ticker (HMM=011200)'
+        required: true
+        type: string
+        default: '011200'
+      asof_date:
+        description: 'Past verified EOD date (HMM case=2026-11-12)'
+        required: true
+        type: string
+        default: '2026-11-12'
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Guard repository, branch and audit-only scope
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REPOSITORY" = 'ehdud6728-bit/BLUE-Signal-Lab'
+          test "$GITHUB_REF" = 'refs/heads/main'
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install same data dependencies as production EOD scan
+        run: python -m pip install pandas numpy pyarrow requests 'cryptography>=43,<48' 'pykrx==1.2.9'
+      - name: Reconstruct one stock's as-of signal evidence without future candles
+        shell: bash
+        env:
+          STOCK_CODE: ${{ inputs.stock_code }}
+          ASOF_DATE: ${{ inputs.asof_date }}
+          KRX_AUTH_KEY: ${{ secrets.KRX_AUTH_KEY }}
+          KRX_ID: ${{ secrets.KRX_DATA_ID || secrets.KRX_ID }}
+          KRX_PW: ${{ secrets.KRX_DATA_PW || secrets.KRX_PW }}
+          KRX_DATA_ID: ${{ secrets.KRX_DATA_ID || secrets.KRX_ID }}
+          KRX_DATA_PW: ${{ secrets.KRX_DATA_PW || secrets.KRX_PW }}
+        run: |
+          set -euo pipefail
+          mkdir -p audit
+          PYTHONPATH=scripts python - <<'PY'
+          import hashlib
+          import json
+          import math
+          import os
+          import re
+          from datetime import date, datetime, timezone
+          from pathlib import Path
+
+          import numpy as np
+          from market_scan import enrich, load_marcap, normalise
+          from market_scan_r11 import ensure_eod_request, selected_provider, upgraded_history
+
+          code=os.environ['STOCK_CODE'].strip()
+          day=os.environ['ASOF_DATE'].strip()
+          if not re.fullmatch(r'\d{6}',code):
+              raise SystemExit('INVALID_STOCK_CODE: require exactly six digits')
+          try:
+              target=date.fromisoformat(day)
+          except ValueError as exc:
+              raise SystemExit('INVALID_ASOF_DATE') from exc
+          if target.isoformat()!=day:
+              raise SystemExit('INVALID_ASOF_DATE')
+          same_day=ensure_eod_request(target,datetime.now(timezone.utc))
+          raw,hashes=load_marcap([2025,2026])
+          pre=normalise(raw)
+          latest=pre.date.max().date()
+          present=len(pre.loc[pre.date.dt.date.eq(target)])
+          need_krx=same_day or target>latest or present<1700
+          replaced=[]
+          source='FinanceData/marcap daily'
+          if need_krx:
+              key=os.getenv('KRX_AUTH_KEY','').strip()
+              has_account=bool(os.getenv('KRX_DATA_ID') and os.getenv('KRX_DATA_PW'))
+              provider=selected_provider('auto',key,has_account)
+              raw,replaced,source=upgraded_history(raw,target,same_day,provider,key)
+          prices=normalise(raw)
+          history=prices.loc[(prices.code==code)&(prices.date.dt.date<=target)].copy()
+          if history.empty or history.date.iloc[-1].date()!=target:
+              result={'status':'NO_EXACT_DAY_PRICE','asof':day,'code':code,
+                      'source':source,'source_dates_replaced':replaced,
+                      'explanation':'No verified ticker EOD candle exists on selected date.'}
+          else:
+              data=enrich(history)
+              now=data.iloc[-1]
+              prior=data.iloc[-2] if len(data)>1 else None
+              def num(v):
+                  try:
+                      x=float(v)
+                      return round(x,6) if math.isfinite(x) else None
+                  except (TypeError,ValueError):
+                      return None
+              def yes(v):
+                  return bool(v) if v is not None and not (isinstance(v,float) and math.isnan(v)) else False
+              def trace(key,strict_key):
+                  line=num(now.get(key));prev_line=num(prior.get(key)) if prior is not None else None
+                  op=num(now.open);cl=num(now.close)
+                  prev_close=num(prior.close) if prior is not None else None
+                  body=(cl-op) if op is not None and cl is not None else 0
+                  lower_ratio=(line-op)/body if line is not None and body>0 else None
+                  upper_ratio=(cl-line)/body if line is not None and body>0 else None
+                  gates={
+                      'previous_close_below_or_equal_previous_line':prev_close is not None and prev_line is not None and prev_close<=prev_line,
+                      'opening_below_line':op is not None and line is not None and op<line,
+                      'closing_above_line':cl is not None and line is not None and cl>line,
+                      'bullish_candle':body>0,
+                      'line_falling':prev_line is not None and line is not None and line<prev_line,
+                      'lower_body_ratio_at_least_20pct':lower_ratio is not None and lower_ratio>=.2,
+                      'upper_body_ratio_at_least_20pct':upper_ratio is not None and upper_ratio>=.2,
+                      'body_gain_at_least_0_5pct':op is not None and op>0 and 100*body/op>=.5,
+                  }
+                  return {'previous_line':prev_line,'current_line':line,
+                          'lower_body_fraction':num(lower_ratio),'upper_body_fraction':num(upper_ratio),
+                          'existing_signal':yes(now.get(strict_key)),
+                          'strict_gates':gates,
+                          'without_falling_line_requirement':all(v for k,v in gates.items() if k!='line_falling')}
+              signals={}
+              for n in (20,30,40):
+                  for side in ('UPPER','LOWER'):
+                      for suffix in ('','_ALT'):
+                          k=f'BB{n}_{side}_SIGNAL{suffix}'
+                          signals[f'BB{n}{"_LOWER" if side=="LOWER" else ""}{suffix}']=yes(now.get(k))
+              for n in (20,40):
+                  signals[f'ENV{n}']=yes(now.get(f'ENV{n}_SIGNAL'))
+              default=('BB20','BB30','BB40','ENV20','ENV40')
+              lower=('BB20_LOWER','BB30_LOWER','BB40_LOWER')
+              gap=num(now.get('gap_abs_pct'))
+              sufficient=len(history)>=250 and num(now.get('ma224')) is not None
+              excluded_gap=gap is not None and gap>=40
+              baseline_eligible=sufficient and not excluded_gap
+              result={
+                  'status':'EXACT_DAY_EOD_RECONSTRUCTED','asof':day,'code':code,
+                  'source':source,'source_dates_replaced':replaced,
+                  'marcap_source_sha256_by_year':hashes,
+                  'history_bars_asof':len(history),
+                  'ohlcv':{k:num(now[k]) for k in ('open','high','low','close','volume','amount')},
+                  'traded_amount_eok':num(now.amount/1e8),
+                  'eligible_for_existing_scanner':baseline_eligible,
+                  'insufficient_history':not sufficient,
+                  'gap_above_40pct_excluded':excluded_gap,
+                  'signals_generated_by_current_scanner':signals,
+                  'existing_default_ui_match':baseline_eligible and any(signals[k] for k in default),
+                  'existing_lower_30_match':baseline_eligible and signals['BB30_LOWER'],
+                  'existing_any_lower_match':baseline_eligible and any(signals[k] for k in lower),
+                  'blue30_2_26_lower_detail':trace('BB30_LOWER','BB30_LOWER_SIGNAL'),
+                  'blue30_2_26_upper_detail':trace('BB30_UPPER','BB30_UPPER_SIGNAL'),
+                  'notice':'30/2/26 matches scanner parameters; proprietary HTS calculation parity is not independently certified. Do not use post-asof bars.',
+              }
+          out=Path('audit')/f'STOCK_{code}_{day}_SIGNAL_DIAG.json'
+          out.write_text(json.dumps(result,indent=2,ensure_ascii=False),encoding='utf-8')
+          short={k:result.get(k) for k in ('status','asof','code','source','traded_amount_eok',
+                  'eligible_for_existing_scanner','existing_default_ui_match',
+                  'existing_lower_30_match','existing_any_lower_match')}
+          short['blue30_lower_detail']=result.get('blue30_2_26_lower_detail')
+          print('BLUE_R15131_SIGNAL_DIAGNOSTIC',json.dumps(short,ensure_ascii=False))
+          print('BLUE_R15131_AUDIT_ONLY_NO_D1_WRITES_NO_DEPLOY')
+          PY
+      - name: Preserve diagnostic evidence as downloadable artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: BLUE_R15131_STOCK_SIGNAL_AUDIT_${{ github.run_id }}
+          path: audit/
+          if-no-files-found: warn
+          retention-days: 14
