@@ -2,7 +2,7 @@ import sys, unittest
 from pathlib import Path
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'scripts'))
 import numpy as np, pandas as pd
-from market_scan import enrich, scan
+from market_scan import body_cross, enrich, scan
 
 class MarketScanTest(unittest.TestCase):
  def fixture(self):
@@ -24,6 +24,14 @@ class MarketScanTest(unittest.TestCase):
   res=enrich(d)
   for k in ('BB20_UPPER','BB30_UPPER','BB40_UPPER','ENV20_MID','ENV40_MID','slow_14_3_3_gc','slow_12_5_5_gc','slow_20_12_12_gc','prior_high_224'):
    self.assertIn(k,res)
+  self.assertIn('BB30_LOWER_RECLAIM_SIGNAL',res)
+  self.assertFalse(bool((res['BB30_LOWER_RECLAIM_SIGNAL'] & res['BB30_LOWER_SIGNAL']).any()))
+ def test_rising_lower_line_reclaim_distinct_from_falling_signal(self):
+  # Recreates HMM's 2026-11-12 lower-line geometry, with no future bars.
+  d=pd.DataFrame({'open':[20000,20050],'close':[20100,20700]})
+  line=pd.Series([20197.063052,20202.115899])
+  self.assertTrue(bool(body_cross(d,line,False).iloc[-1]))
+  self.assertFalse(bool(body_cross(d,line,True).iloc[-1]))
  def test_historical_no_lookahead(self):
   d=self.fixture().rename(columns=str.lower)
   res=enrich(d)

@@ -21,6 +21,7 @@ const ALLOWED = new Set([
   'BB20_LOWER','BB30_LOWER','BB40_LOWER',
   'BB20_ALT','BB30_ALT','BB40_ALT',
   'BB20_LOWER_ALT','BB30_LOWER_ALT','BB40_LOWER_ALT',
+  'BB30_LOWER_RECLAIM',
 ]);
 const isoPattern = /^\d{4}-\d{2}-\d{2}$/;
 const inFlightMs = 45 * 60 * 1000;

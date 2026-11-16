@@ -45,6 +45,7 @@ def macd_metrics(history: pd.DataFrame) -> dict:
 LINE_MAP = {
     'BB20': 'BB20_UPPER', 'BB30': 'BB30_UPPER', 'BB40': 'BB40_UPPER',
     'BB20_LOWER': 'BB20_LOWER', 'BB30_LOWER': 'BB30_LOWER',
+    'BB30_LOWER_RECLAIM': 'BB30_LOWER',
     'BB40_LOWER': 'BB40_LOWER',
     'BB20_ALT': 'BB20_UPPER_ALT', 'BB30_ALT': 'BB30_UPPER_ALT',
     'BB40_ALT': 'BB40_UPPER_ALT',

@@ -46,7 +46,10 @@ const GC_OPTIONS:{key:GcKey;label:string}[]=[
 ];
 const ALL_GC_KEYS=GC_OPTIONS.map(x=>x.key);
 type InstallPrompt = Event & {prompt:()=>Promise<void>;userChoice:Promise<{outcome:string}>};
-const tags=['BB20','BB30','BB40','ENV20','ENV40'];
+// Include existing lower-band signals in default OR searches so that
+// historical rebounds are not silently hidden by the search UI.
+const tags=['BB20','BB30','BB40','ENV20','ENV40',
+  'BB20_LOWER','BB30_LOWER','BB40_LOWER','BB40_LOWER_ALT','BB30_LOWER_RECLAIM'];
 const todayKST=()=>new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Seoul',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date());
 const eodRequestReadyKST=()=>new Intl.DateTimeFormat('en-GB',{
   timeZone:'Asia/Seoul',hour:'2-digit',minute:'2-digit',hourCycle:'h23'
@@ -60,7 +63,13 @@ const rememberedScanDate=():string=>{
     return Number.isFinite(d.getTime())&&d.toISOString().slice(0,10)===day?day:'';
   }catch{return '';}
 };
-const showSignal=(t:string)=>t.replace(/^(?:BLUE|BB)(?=\d)/i,'B');
+const showSignal=(t:string)=>({
+  BB20_LOWER:'B20 하단 돌파',
+  BB30_LOWER:'B30 하단 돌파(하락선)',
+  BB40_LOWER:'B40 하단 돌파',
+  BB40_LOWER_ALT:'B40 하단 돌파(대체)',
+  BB30_LOWER_RECLAIM:'B30 하단 반등(상승·수평선)',
+}[t]||t.replace(/^(?:BLUE|BB)(?=\d)/i,'B'));
 const money=(n:number|null|undefined)=>n==null?'—':n.toLocaleString('ko-KR');
 
 function App(){
@@ -508,6 +517,7 @@ function App(){
           {mode==='single'?<><label htmlFor="scan-date">검색 날짜</label><input id="scan-date" type="date" value={date} onChange={e=>{setDate(e.target.value);setDataStatus('');}}/></>:
           <><label htmlFor="scan-start">시작일</label><input id="scan-start" type="date" value={start} onChange={e=>setStart(e.target.value)}/><label htmlFor="scan-end">종료일</label><input id="scan-end" type="date" value={end} onChange={e=>setEnd(e.target.value)}/></>}
           <label>기술 신호</label><div className="checks">{tags.map(t=><label className="check" key={t}><input type="checkbox" checked={signals.includes(t)} onChange={()=>flip(t)}/>{showSignal(t)}</label>)}</div>
+          <p className="small">하단 돌파도 기본 검색에 포함됩니다. B30 하단 반등은 기존 B30 하락선 돌파와 구분한 별도 탐색 신호이며, 과거 날짜는 재분석 후 표시될 수 있습니다.</p>
           <label htmlFor="scan-logic">신호 조합</label><select id="scan-logic" value={logic} onChange={e=>setLogic(e.target.value)}><option value="any">하나라도 충족 (OR)</option><option value="all">모두 충족 (AND)</option></select>
           <div className="r1599-filters" role="group" aria-label="거래대금 검색 조건">
             <label htmlFor="r1599-amount">검색일 거래대금 최소 (억원)</label>

@@ -85,6 +85,12 @@ def enrich(g):
             d[f'BB{n}_LOWER{suffix}']=lower
             d[f'BB{n}_UPPER_SIGNAL{suffix}']=body_cross(d,upper,True)
             d[f'BB{n}_LOWER_SIGNAL{suffix}']=body_cross(d,lower,True)
+            if n == 30 and not suffix:
+                # Exploratory rising/flat lower-line reclaim: preserve the
+                # original falling-line BB30_LOWER definition unchanged.
+                d['BB30_LOWER_RECLAIM_SIGNAL']=(
+                    body_cross(d,lower,False) & ~d['BB30_LOWER_SIGNAL']
+                )
         d[f'ma{n}']=m
     for n in (20,40):
         mid=d.close.rolling(n,min_periods=n).mean()
@@ -138,6 +144,8 @@ def scan(raw, asof=None):
             if bool(row[f'BB{n}_LOWER_SIGNAL']):flags.append(f'BB{n}_LOWER')
             if bool(row[f'BB{n}_UPPER_SIGNAL_ALT']):flags.append(f'BB{n}_ALT')
             if bool(row[f'BB{n}_LOWER_SIGNAL_ALT']):flags.append(f'BB{n}_LOWER_ALT')
+        if bool(row['BB30_LOWER_RECLAIM_SIGNAL']):
+            flags.append('BB30_LOWER_RECLAIM')
         for n in (20,40):
             if bool(row[f'ENV{n}_SIGNAL']):flags.append(f'ENV{n}')
         if not flags:continue
