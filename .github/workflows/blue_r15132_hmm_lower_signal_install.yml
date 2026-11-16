@@ -1,0 +1,193 @@
+name: BLUE R1.5.10.32 HMM Lower Signal Fix (MANUAL SAFE)
+
+on:
+  workflow_dispatch:
+    inputs:
+      apply_changes:
+        description: 'FALSE = build/test only. TRUE = commit 5 reviewed source files to main. No deployment or D1 writes.'
+        type: boolean
+        required: true
+        default: false
+
+permissions:
+  contents: write
+
+concurrency:
+  group: blue-r15132-hmm-lower-signal-install
+  cancel-in-progress: false
+
+jobs:
+  verify_and_install:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Guard exact repository and main branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REPOSITORY" = 'ehdud6728-bit/BLUE-Signal-Lab'
+          test "$GITHUB_REF" = 'refs/heads/main'
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Apply guarded source-only fixes in memory before writing
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY_PATCH'
+          from pathlib import Path
+          import subprocess
+
+          paths = [
+              'web/src/main.tsx',
+              'worker/src/index.ts',
+              'scripts/market_scan.py',
+              'scripts/market_scan_r08_diagnostics.py',
+              'tests/test_market_scan.py',
+          ]
+          changed = subprocess.check_output(['git','status','--porcelain','--',*paths],text=True)
+          if changed.strip():
+              raise SystemExit('BLOCKED: one or more target files have pre-existing modifications')
+          original = {name: Path(name).read_text(encoding='utf-8') for name in paths}
+          pending = original.copy()
+
+          def change(name, old, new):
+              content = pending[name]
+              count = content.count(old)
+              if count != 1:
+                  raise SystemExit(f'BLOCKED: expected one safe insertion point in {name}, found {count}')
+              pending[name] = content.replace(old,new,1)
+
+          web = 'web/src/main.tsx'
+          change(web,
+              "const tags=['BB20','BB30','BB40','ENV20','ENV40'];",
+              "// Include existing lower-band signals in default OR searches so that\n"
+              "// historical rebounds are not silently hidden by the search UI.\n"
+              "const tags=['BB20','BB30','BB40','ENV20','ENV40',\n"
+              "  'BB20_LOWER','BB30_LOWER','BB40_LOWER','BB40_LOWER_ALT','BB30_LOWER_RECLAIM'];")
+          change(web,
+              "const showSignal=(t:string)=>t.replace(/^(?:BLUE|BB)(?=\\d)/i,'B');",
+              "const showSignal=(t:string)=>({\n"
+              "  BB20_LOWER:'B20 하단 돌파',\n"
+              "  BB30_LOWER:'B30 하단 돌파(하락선)',\n"
+              "  BB40_LOWER:'B40 하단 돌파',\n"
+              "  BB40_LOWER_ALT:'B40 하단 돌파(대체)',\n"
+              "  BB30_LOWER_RECLAIM:'B30 하단 반등(상승·수평선)',\n"
+              "}[t]||t.replace(/^(?:BLUE|BB)(?=\\d)/i,'B'));")
+          change(web,
+              '          <label>기술 신호</label><div className="checks">{tags.map(t=><label className="check" key={t}><input type="checkbox" checked={signals.includes(t)} onChange={()=>flip(t)}/>{showSignal(t)}</label>)}</div>',
+              '          <label>기술 신호</label><div className="checks">{tags.map(t=><label className="check" key={t}><input type="checkbox" checked={signals.includes(t)} onChange={()=>flip(t)}/>{showSignal(t)}</label>)}</div>\n'
+              '          <p className="small">하단 돌파도 기본 검색에 포함됩니다. B30 하단 반등은 기존 B30 하락선 돌파와 구분한 별도 탐색 신호이며, 과거 날짜는 재분석 후 표시될 수 있습니다.</p>')
+
+          worker = 'worker/src/index.ts'
+          change(worker,
+              "  'BB20_LOWER_ALT','BB30_LOWER_ALT','BB40_LOWER_ALT',",
+              "  'BB20_LOWER_ALT','BB30_LOWER_ALT','BB40_LOWER_ALT',\n"
+              "  'BB30_LOWER_RECLAIM',")
+
+          scanner = 'scripts/market_scan.py'
+          change(scanner,
+              "            d[f'BB{n}_LOWER_SIGNAL{suffix}']=body_cross(d,lower,True)",
+              "            d[f'BB{n}_LOWER_SIGNAL{suffix}']=body_cross(d,lower,True)\n"
+              "            if n == 30 and not suffix:\n"
+              "                # Exploratory rising/flat lower-line reclaim: preserve the\n"
+              "                # original falling-line BB30_LOWER definition unchanged.\n"
+              "                d['BB30_LOWER_RECLAIM_SIGNAL']=(\n"
+              "                    body_cross(d,lower,False) & ~d['BB30_LOWER_SIGNAL']\n"
+              "                )")
+          change(scanner,
+              "            if bool(row[f'BB{n}_LOWER_SIGNAL_ALT']):flags.append(f'BB{n}_LOWER_ALT')",
+              "            if bool(row[f'BB{n}_LOWER_SIGNAL_ALT']):flags.append(f'BB{n}_LOWER_ALT')\n"
+              "        if bool(row['BB30_LOWER_RECLAIM_SIGNAL']):\n"
+              "            flags.append('BB30_LOWER_RECLAIM')")
+
+          diag = 'scripts/market_scan_r08_diagnostics.py'
+          change(diag,
+              "    'BB20_LOWER': 'BB20_LOWER', 'BB30_LOWER': 'BB30_LOWER',",
+              "    'BB20_LOWER': 'BB20_LOWER', 'BB30_LOWER': 'BB30_LOWER',\n"
+              "    'BB30_LOWER_RECLAIM': 'BB30_LOWER',")
+
+          tests = 'tests/test_market_scan.py'
+          change(tests,
+              'from market_scan import enrich, scan',
+              'from market_scan import body_cross, enrich, scan')
+          change(tests,
+              "   self.assertIn(k,res)\n def test_historical_no_lookahead(self):",
+              "   self.assertIn(k,res)\n"
+              "  self.assertIn('BB30_LOWER_RECLAIM_SIGNAL',res)\n"
+              "  self.assertFalse(bool((res['BB30_LOWER_RECLAIM_SIGNAL'] & res['BB30_LOWER_SIGNAL']).any()))\n"
+              " def test_rising_lower_line_reclaim_distinct_from_falling_signal(self):\n"
+              "  # Recreates HMM's 2026-11-12 lower-line geometry, with no future bars.\n"
+              "  d=pd.DataFrame({'open':[20000,20050],'close':[20100,20700]})\n"
+              "  line=pd.Series([20197.063052,20202.115899])\n"
+              "  self.assertTrue(bool(body_cross(d,line,False).iloc[-1]))\n"
+              "  self.assertFalse(bool(body_cross(d,line,True).iloc[-1]))\n"
+              " def test_historical_no_lookahead(self):")
+
+          assert all(pending[name] != original[name] for name in paths)
+          for name in paths:
+              Path(name).write_text(pending[name],encoding='utf-8')
+          actual = subprocess.check_output(['git','diff','--name-only'],text=True).splitlines()
+          if set(actual) != set(paths):
+              raise SystemExit(f'BLOCKED: unexpected source modifications: {actual}')
+          print('BLUE_R15132_SOURCE_PATCH_VERIFIED', ', '.join(paths))
+          PY_PATCH
+          git diff --check
+      - name: Install Python scanner test dependencies
+        shell: bash
+        run: python -m pip install 'numpy>=1.26,<3' 'pandas>=2.1,<3'
+      - name: Verify original and rising-line lower signal semantics
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m unittest discover -s tests -p 'test_market_scan.py' -v
+          python -m unittest discover -s tests -p 'test_market_scan_r06.py' -v
+      - name: Compile WEB without deployment
+        working-directory: web
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm ci --no-audit --no-fund --legacy-peer-deps
+          npm run build
+      - name: Compile API Worker without deployment
+        working-directory: worker
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm ci --no-audit --no-fund --legacy-peer-deps
+          npx wrangler deploy --dry-run --outdir /tmp/blue-r15132-worker-check
+      - name: Review exact source scope
+        shell: bash
+        run: |
+          set -euo pipefail
+          git diff --check
+          git diff --stat -- web/src/main.tsx worker/src/index.ts scripts/market_scan.py scripts/market_scan_r08_diagnostics.py tests/test_market_scan.py
+          test "$(git diff --name-only | wc -l)" -eq 5
+      - name: Commit source only when explicitly requested
+        if: ${{ inputs.apply_changes }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -- web/src/main.tsx worker/src/index.ts scripts/market_scan.py scripts/market_scan_r08_diagnostics.py tests/test_market_scan.py
+          git diff --cached --check
+          test "$(git diff --cached --name-only | wc -l)" -eq 5
+          git commit -m 'BLUE R1.5.10.32: expose lower signals and distinguish 30 reclaim'
+          git push origin HEAD:main
+      - name: Clear next steps without automatic production changes
+        shell: bash
+        run: |
+          if [ '${{ inputs.apply_changes }}' = true ]; then
+            echo 'BLUE_R15132_SOURCE_COMMITTED: no deployment and no D1 import performed.'
+            echo 'Next: deploy API and WEB with their pre-existing safe workflows.'
+            echo 'Then rerun historical EOD scanner for 2026-11-12 and publish to D1 only after reviewing audit.'
+          else
+            echo 'BLUE_R15132_CHECK_ONLY: no source commit, deployment, or D1 import performed.'
+          fi
