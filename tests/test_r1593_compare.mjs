@@ -30,6 +30,13 @@ test('recent price is selected by trading date before source priority',()=>{
   {price:110,day:'2026-11-11',source:'KIS',at:null,market:'J',priority:10}];
  assert.equal(bestObservation(all)?.price,110);
 });
+test('newer same-day observation wins over a higher-priority older source',()=>{
+ const all=[
+  {price:9950,day:'2026-11-12',source:'SEARCH_PRIORITY',at:'2026-11-12T00:10:00Z',market:'J',priority:85},
+  {price:10150,day:'2026-11-12',source:'BASKET_WATCH',at:'2026-11-12T00:18:00Z',market:'J',priority:80}
+ ];
+ assert.equal(bestObservation(all)?.price,10150);
+});
 test('high observed later cannot silently turn a partial period into complete history',()=>{
  const h=highSummary([{price:160,day:'2026-11-07',source:'DAILY',coverageTo:'2026-11-10',full:true},
   {price:165,day:'2026-11-11',source:'SNAP',coverageTo:'2026-11-11',full:false}], '2026-11-11');
