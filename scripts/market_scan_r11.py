@@ -198,7 +198,8 @@ def selected_provider(provider: str, key: str, has_account: bool) -> str:
 
 
 def upgraded_history(raw: pd.DataFrame, target: date, today: bool, provider: str,
-                     key: str, stock_module=None, session=requests, max_days: int = 45):
+                     key: str, stock_module=None, session=requests, max_days: int = 45,
+                     allow_verified_fallback: bool = False):
     """Replace incomplete/required target with proved daily rows; preserve history.
 
     On today, force KRX proof even if marcap already has >=1700 rows. On older
@@ -221,10 +222,29 @@ def upgraded_history(raw: pd.DataFrame, target: date, today: bool, provider: str
         days = [target]
     additions = []
     added_days = []
+    used_openapi_fallback = False
     for d in days:
         try:
             if provider == "pykrx":
-                daily = pykrx_verified_day(d, stock_module=stock_module)
+                try:
+                    daily = pykrx_verified_day(d, stock_module=stock_module)
+                except SourcePending as primary_error:
+                    # KRX's pykrx cross-section and single-ticker check can
+                    # disagree even after 15:40. Do not trust either value.
+                    # A separately date-verified KRX Open API result is the
+                    # only permitted fallback, never an older marcap candle.
+                    if not (allow_verified_fallback and key and d == target):
+                        raise
+                    print("KRX_PRIMARY_PENDING", str(primary_error),
+                          "trying independent exact-date KRX Open API")
+                    try:
+                        daily = openapi_verified_day(d, key, session=session)
+                    except SourcePending as alternate_error:
+                        raise SourcePending(
+                            "KRX_BOTH_PROVIDERS_PENDING: "
+                            f"primary={primary_error}; alternative={alternate_error}"
+                        ) from alternate_error
+                    used_openapi_fallback = True
             else:
                 daily = openapi_verified_day(d, key, session=session)
         except SourcePending as exc:
@@ -257,8 +277,11 @@ def upgraded_history(raw: pd.DataFrame, target: date, today: bool, provider: str
         if col not in incoming.columns:
             incoming[col] = None
     combined = pd.concat([base, incoming[base.columns]], ignore_index=True)
-    return combined, added_days, ("KRX pykrx verified account daily" if provider == "pykrx"
-                                  else "KRX Open API verified daily")
+    source = ("KRX Open API exact-date verified fallback"
+              if used_openapi_fallback else
+              "KRX pykrx verified account daily" if provider == "pykrx"
+              else "KRX Open API verified daily")
+    return combined, added_days, source
 
 
 def diagnose_symbol(raw: pd.DataFrame, asof: str, code: str, matches: list[dict]) -> dict:
@@ -426,7 +449,9 @@ def main():
     requires_fetch = today or target > prices.date.max().date() or len(prices.loc[prices.date.dt.date.eq(target)]) < 1700
     if requires_fetch:
         provider = selected_provider(args.daily_provider, key, has_account)
-        upgraded, days, target_source = upgraded_history(raw, target, today, provider, key)
+        upgraded, days, target_source = upgraded_history(
+            raw, target, today, provider, key,
+            allow_verified_fallback=args.daily_provider == "auto")
     else:
         upgraded, days, target_source = raw, [], "FinanceData/marcap daily"
     rows, audit = scan_r08(upgraded, target.isoformat())
@@ -450,10 +475,19 @@ def main():
         audit["supplemental_sha256"] = hashlib.sha256(
             supplement[COLS].to_csv(index=False).encode("utf-8")).hexdigest()
     export(rows, audit, args.out, hashes)
-    if args.diagnose_code:
+    # Keep the searchable stock-name catalog current on every successful
+    # full-market EOD run, not only when one ticker is diagnosed. An incomplete
+    # name catalog must never invalidate otherwise verified EOD candles.
+    directory = None
+    try:
         directory = build_symbol_directory(upgraded, target.isoformat())
         (Path(args.out)/'SYMBOL_DIRECTORY.json').write_text(
-            json.dumps(directory, ensure_ascii=False, separators=(',', ':')), encoding='utf-8')
+            json.dumps(directory, ensure_ascii=False, separators=(',', ':')),
+            encoding='utf-8')
+        print('BLUE_SYMBOL_DIRECTORY_READY', target.isoformat(), len(directory['symbols']))
+    except (ValueError, KeyError, TypeError) as exc:
+        print('BLUE_SYMBOL_DIRECTORY_PENDING', type(exc).__name__)
+    if args.diagnose_code:
         diagnostic=diagnose_symbol(upgraded,target.isoformat(),args.diagnose_code.upper(),rows)
         (Path(args.out)/'SYMBOL_DIAGNOSE.json').write_text(
             json.dumps(diagnostic,ensure_ascii=False,indent=2),encoding='utf-8')

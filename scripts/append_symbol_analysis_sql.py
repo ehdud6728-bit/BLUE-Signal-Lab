@@ -131,11 +131,35 @@ def write_sql(input_path: str, output_path: str, run_id: str,
     return len(pieces)
 
 
+def append_directory_only(directory_path: str, target_sql: str) -> int:
+    """Add a verified-date name index to the existing EOD D1 publication.
+
+    The caller must first complete the EOD validation step. Retain inactive
+    historical tickers; never bulk-delete names after an incomplete session.
+    """
+    directory = json.loads(Path(directory_path).read_text(encoding='utf-8'))
+    statements_sql = directory_statements(directory)
+    path = Path(target_sql)
+    if not path.is_file():
+        raise ValueError('Verified EOD SQL must exist before directory append')
+    with path.open('a', encoding='utf-8') as stream:
+        stream.write('\n' + SCHEMA + '\n' + '\n'.join(statements_sql) + '\n')
+    return len(statements_sql)
+
+
 if __name__ == '__main__':
     p=argparse.ArgumentParser()
-    p.add_argument('--input',required=True)
-    p.add_argument('--out',required=True)
-    p.add_argument('--run-id',required=True)
+    p.add_argument('--input')
+    p.add_argument('--out')
+    p.add_argument('--run-id')
     p.add_argument('--directory',help='As-of full market stock name index (independent table)')
+    p.add_argument('--append-to', help='Append only the name directory to verified full-market D1 SQL')
     args=p.parse_args()
-    print('BLUE_SYMBOL_DIAGNOSTIC_SQL',write_sql(args.input,args.out,args.run_id,args.directory))
+    if args.append_to:
+        if not args.directory or args.input or args.out or args.run_id:
+            p.error('--append-to requires --directory and does not accept diagnostic arguments')
+        print('BLUE_SYMBOL_DIRECTORY_SQL', append_directory_only(args.directory,args.append_to))
+    else:
+        if not args.input or not args.out or not args.run_id:
+            p.error('diagnostic mode requires --input, --out and --run-id')
+        print('BLUE_SYMBOL_DIAGNOSTIC_SQL',write_sql(args.input,args.out,args.run_id,args.directory))
