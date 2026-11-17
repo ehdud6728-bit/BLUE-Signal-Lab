@@ -1,7 +1,7 @@
 /** R1.5.9.4: bounded, quote-only priority collection. No new orders or tokens.
  * Existing research collector and basket watch run unchanged after this task.
  */
-import {cachedToken,kstParts,marketsFor,getKisQuote,parseQuote} from './core.mjs';
+import {inspectCachedToken,kstParts,marketsFor,getKisQuote,parseQuote} from './core.mjs';
 const dateISO=x=>new Date(x).toISOString();
 const LIMIT=4;
 export async function collectSearchPriority(env,now=new Date(),deps={}){
@@ -25,16 +25,23 @@ export async function collectSearchPriority(env,now=new Date(),deps={}){
     ORDER BY CASE status WHEN 'QUEUED' THEN 0 WHEN 'RETRY' THEN 1 ELSE 2 END,requested_at_utc DESC,next_due_utc ASC LIMIT 4`)
     .bind(stamp,since).all();
   if(!due.results.length)return {status:'IDLE'};
-  let token=null;
-  if(env.KIS_APP_KEY&&env.KIS_APP_SECRET){try{token=await (deps.token||cachedToken)(db,env.KIS_APP_KEY,env.KIS_APP_SECRET,now);}catch{}}
+  let token=null,tokenReason='KIS_CONFIG_MISSING';
+  if(deps.token){
+   try{token=await deps.token(db,env.KIS_APP_KEY,env.KIS_APP_SECRET,now);
+    tokenReason=token?'TOKEN_READY':'TOKEN_VAULT_MISSING';}
+   catch{tokenReason='TOKEN_VAULT_DB_UNAVAILABLE';}
+  }else{
+   const checked=await inspectCachedToken(db,env.KIS_APP_KEY,env.KIS_APP_SECRET,now);
+   token=checked.token;tokenReason=checked.status;
+  }
   if(!token){
    // Persist the blocked reason without deleting any previously validated price.
    const next=dateISO(now.getTime()+5*60000);
    for(const item of due.results){
-    await db.prepare("UPDATE blue_search_quote_priority_r1594 SET status='WAITING_TOKEN',checked_at_utc=?,last_error='KIS_TOKEN_CACHE_UNAVAILABLE',next_due_utc=? WHERE code=?")
-      .bind(stamp,next,item.code).run();
+    await db.prepare("UPDATE blue_search_quote_priority_r1594 SET status='WAITING_TOKEN',checked_at_utc=?,last_error=?,next_due_utc=? WHERE code=?")
+      .bind(stamp,tokenReason,next,item.code).run();
    }
-   return {status:'WAITING_TOKEN',count:due.results.length};
+   return {status:'WAITING_TOKEN',reason:tokenReason,count:due.results.length};
   }
   const [market,phase]=phases.find(x=>x[0]==='J')||phases[0];
   let saved=0;let errors=0;
@@ -50,10 +57,12 @@ export async function collectSearchPriority(env,now=new Date(),deps={}){
       .bind(stamp,parsed.trade_date_kst,parsed.price,parsed.high,stamp,market,
         dateISO(now.getTime()+10*60000),item.code).run();
     saved++;
-   }catch{
+   }catch(error){
+    const reason=error instanceof Error&&/^KIS_HTTP_(401|403)$/.test(error.message)
+      ?'KIS_AUTH_REJECTED':'KIS_PRICE_RESPONSE_UNAVAILABLE';
     await db.prepare(`UPDATE blue_search_quote_priority_r1594 SET
-      status='RETRY',checked_at_utc=?,last_error='PRICE_UNAVAILABLE',next_due_utc=? WHERE code=?`)
-      .bind(stamp,dateISO(now.getTime()+5*60000),item.code).run();
+      status='RETRY',checked_at_utc=?,last_error=?,next_due_utc=? WHERE code=?`)
+      .bind(stamp,reason,dateISO(now.getTime()+5*60000),item.code).run();
     errors++;
    }
   }

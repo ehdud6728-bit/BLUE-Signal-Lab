@@ -56,11 +56,25 @@ export async function decryptVault(encoded, appkey, appsecret){
   }catch{throw Error('TOKEN_DECRYPT_FAILED');}
 }
 export async function cachedToken(db,appkey,appsecret,now){
-  const scope=await vaultScope(appkey);
-  const row=await db.prepare('SELECT ciphertext, expires_at_utc FROM blue_kis_token_vault_v1 WHERE scope = ?').bind(scope).first();
-  if(!row||typeof row.ciphertext!=='string'||!Number.isFinite(Date.parse(row.expires_at_utc)))return null;
-  if(Date.parse(row.expires_at_utc)<=now.getTime()+5*60000)return null;
-  return decryptVault(row.ciphertext,appkey,appsecret);
+  const result=await inspectCachedToken(db,appkey,appsecret,now);
+  if(result.status==='TOKEN_DECRYPT_FAILED'||result.status==='TOKEN_VAULT_DB_UNAVAILABLE')throw Error(result.status);
+  return result.token;
+}
+/** Reason codes only; never logs or persists a token or provider response. */
+export async function inspectCachedToken(db,appkey,appsecret,now){
+  if(!appkey||!appsecret)return {status:'KIS_CONFIG_MISSING',token:null};
+  let row;
+  try{
+    const scope=await vaultScope(appkey);
+    row=await db.prepare('SELECT ciphertext, expires_at_utc FROM blue_kis_token_vault_v1 WHERE scope = ?').bind(scope).first();
+  }catch{return {status:'TOKEN_VAULT_DB_UNAVAILABLE',token:null};}
+  if(!row)return {status:'TOKEN_VAULT_MISSING',token:null};
+  if(typeof row.ciphertext!=='string'||!Number.isFinite(Date.parse(row.expires_at_utc)))
+    return {status:'TOKEN_VAULT_INVALID_METADATA',token:null};
+  if(Date.parse(row.expires_at_utc)<=now.getTime()+5*60000)
+    return {status:'TOKEN_EXPIRED',token:null};
+  try{return {status:'TOKEN_READY',token:await decryptVault(row.ciphertext,appkey,appsecret)};}
+  catch{return {status:'TOKEN_DECRYPT_FAILED',token:null};}
 }
 export function normalizeCandidate(raw,origin){
   const code=String(raw.code??'');const close=Number(raw.eod_close);
