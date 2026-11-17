@@ -41,5 +41,26 @@ class MarketScanTest(unittest.TestCase):
  def test_market_filter(self):
   d=self.fixture();other=d.copy();other['Code']='123456';other['Market']='KONEX'
   _,a=scan(pd.concat([d,other]));self.assertEqual(a['observed_stocks'],1)
+ def test_env20_lower_20_percent_first_touch_is_distinct_from_midline_reclaim(self):
+  # Envelope(20,20%) lower-touch research: first real daily candle crossing
+  # the lower line, even though it did not finish as a bullish midline cross.
+  dates=pd.bdate_range('2025-01-01',periods=280)
+  d=pd.DataFrame({'Date':dates,'Code':'225190','Open':100.,'High':102.,
+                  'Low':85.,'Close':100.,'Volume':10000,'Amount':100000000,
+                  'Market':'KOSDAQ'})
+  d.loc[d.index[-1],['Open','High','Low','Close']]=[98.,100.,79.,95.]
+  day=str(d.Date.iloc[-1].date())
+  matches,_=scan(d,day)
+  self.assertEqual([r['code'] for r in matches],['225190'])
+  self.assertIn('ENV20_LOWER_TOUCH',matches[0]['signals'].split(','))
+  self.assertNotIn('ENV20',matches[0]['signals'].split(','))
+  enriched=enrich(d.rename(columns=str.lower))
+  self.assertAlmostEqual(float(enriched.iloc[-1].ENV20_LOWER_20PCT),79.8,places=3)
+  next_row=d.iloc[-1:].copy()
+  next_row['Date']=dates[-1]+pd.Timedelta(days=1)
+  next_row.loc[:,['Open','High','Low','Close']]=[95.,100.,79.,96.]
+  extended=pd.concat([d,next_row],ignore_index=True)
+  later=enrich(extended.rename(columns=str.lower))
+  self.assertFalse(bool(later.iloc[-1].ENV20_LOWER_TOUCH_SIGNAL))
 
 if __name__=='__main__':unittest.main()

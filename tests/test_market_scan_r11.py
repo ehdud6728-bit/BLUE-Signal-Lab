@@ -8,7 +8,8 @@ import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'scripts'))
 from market_scan_r11 import (SourcePending, ensure_eod_request, pykrx_verified_day,
-                             openapi_verified_day, selected_provider, upgraded_history)
+                             openapi_verified_day, selected_provider, upgraded_history,
+                             diagnose_symbol)
 
 KST = timezone(timedelta(hours=9))
 
@@ -38,6 +39,21 @@ class FakeStock:
 
 
 class SameDayTests(unittest.TestCase):
+    def test_asof_symbol_diagnostic_explains_unmatched_and_lower_touch(self):
+        stamps=pd.bdate_range('2025-01-01',periods=280)
+        d=pd.DataFrame({'Date':stamps,'Code':'225190','Open':100.,'High':102.,
+                        'Low':85.,'Close':100.,'Volume':10000,'Amount':100000000,
+                        'Market':'KOSDAQ'})
+        d.loc[d.index[-1],['Open','High','Low','Close']]=[98.,100.,79.,95.]
+        day=str(stamps[-1].date())
+        record=diagnose_symbol(d,day,'225190',[])
+        self.assertEqual(record['reason'],'NO_ENABLED_SIGNAL_ON_TARGET_DAY')
+        self.assertTrue(record['signal_predicates']['ENV20_LOWER_TOUCH_SIGNAL'])
+        self.assertEqual(record['env20_lower_20pct'],79.8)
+        self.assertFalse(record['matched'])
+        self.assertEqual(diagnose_symbol(d,day,'123456',[])['reason'],
+                         'MISSING_VERIFIED_TARGET_CANDLE')
+
     def test_today_pre_close_blocked(self):
         with self.assertRaisesRegex(SourcePending, '15:40'):
             ensure_eod_request(date(2026, 11, 10), datetime(2026, 11, 10, 15, 39, tzinfo=KST))

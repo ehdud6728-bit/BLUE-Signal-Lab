@@ -34,9 +34,14 @@ test('actual SQLite selects only matching search-day signals, including combined
   add.run('000002',JSON.stringify({ma20:120,ma40:110,ma60:100,ma224_cross:true}));
   add.run('000003',JSON.stringify({ma20:100,ma40:110,ma60:120,ma112_cross:true,ma224_cross:true}));
   add.run('000004',JSON.stringify({name:'missing historical moving averages'}));
+  // Production csv_to_d1.py stores research extras as JSON text, not JSON numbers.
+  add.run('000005',JSON.stringify({ma20:'100.125',ma40:'110.5',ma60:'120.75'}));
+  add.run('000006',JSON.stringify({ma20:'100xxx',ma40:'110',ma60:'120'}));
+  add.run('000007',JSON.stringify({ma20:'0',ma40:'110',ma60:'120'}));
+  add.run('000008',JSON.stringify({ma20:' ',ma40:'110',ma60:'120'}));
   const codes=(where)=>db.prepare(`SELECT code FROM signals WHERE ${where} ORDER BY code`).all().map(x=>x.code);
-  assert.deepEqual(codes(technicalFilterWhere('inverse','any')),['000001','000003']);
+  assert.deepEqual(codes(technicalFilterWhere('inverse','any')),['000001','000003','000005']);
   assert.deepEqual(codes(technicalFilterWhere('ma112,ma224','all')),['000003']);
-  assert.deepEqual(codes(technicalFilterWhere('inverse,ma224','any')),['000001','000002','000003']);
+  assert.deepEqual(codes(technicalFilterWhere('inverse,ma224','any')),['000001','000002','000003','000005']);
  }finally{db.close();}
 });
