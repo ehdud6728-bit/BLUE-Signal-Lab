@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  kstParts,marketsFor,ageDays,vaultScope,decryptVault,cachedToken,
+  kstParts,marketsFor,ageDays,vaultScope,decryptVault,cachedToken,inspectCachedToken,
   normalizeCandidate,candidateSelection,parseQuote,batchStatements,collect,MAX_STOCKS
 } from '../src/core.mjs';
 
@@ -66,6 +66,26 @@ test('token cache fail-closed on expiry, never calls token issuing endpoint',asy
   assert.equal(await cachedToken(db,app,secret,at(9)),'FAKE_ACCESS_TOKEN_EXAMPLE');
   db=fakeDb({tokenRow:{ciphertext:encoded,expires_at_utc:'2026-11-10T22:00:00Z'}});
   assert.equal(await cachedToken(db,app,secret,at(9)),null);
+});
+
+test('read-only token inspection separates missing, expired, decrypt failure and ready',async()=>{
+  const app='TEST_APP_KEY_NOT_REAL',secret='TEST_APP_SECRET_NOT_REAL';
+  const cipher='AAECAwQFBgcICQoLHoySzGOkixdwKEhHed2XN1mNTkhM40RLJU6sVjUQNBq2sf1Ot0WpkLk=';
+  const cases=[
+    [null,'TOKEN_VAULT_MISSING'],
+    [{ciphertext:cipher,expires_at_utc:'2026-11-11T00:00:00Z'},'TOKEN_EXPIRED'],
+    [{ciphertext:cipher,expires_at_utc:'2026-11-11T23:59:00Z'},'TOKEN_READY'],
+    [{ciphertext:'not-a-valid-cipher',expires_at_utc:'2026-11-11T23:59:00Z'},'TOKEN_DECRYPT_FAILED'],
+    [{ciphertext:cipher,expires_at_utc:'broken'},'TOKEN_VAULT_INVALID_METADATA']
+  ];
+  for(const [row,expected] of cases){
+    const db=fakeDb({tokenRow:row});
+    const info=await inspectCachedToken(db,app,secret,at(9));
+    assert.equal(info.status,expected);
+    assert.ok(db.calls.every(x=>x.type==='first'));
+    assert.ok(!JSON.stringify({status:info.status}).includes('FAKE_ACCESS_TOKEN'));
+  }
+  assert.equal((await inspectCachedToken(fakeDb(),null,null,at(9))).status,'KIS_CONFIG_MISSING');
 });
 
 test('candidate source preserves verified artifact provenance and does not pretend old EOD is fresh',async()=>{
