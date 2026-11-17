@@ -132,6 +132,7 @@ jobs:
         run: |
           python scripts/append_symbol_analysis_sql.py \
             --input output/SYMBOL_ANALYSIS.json \
+            --directory output/SYMBOL_DIRECTORY.json \
             --out output/symbol_analysis_import.sql \
             --run-id "blue_symbol_${{ github.run_id }}"
       - name: Upload EOD audit and D1 SQL as artifact

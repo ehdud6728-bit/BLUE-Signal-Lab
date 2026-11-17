@@ -1,0 +1,31 @@
+name: BLUE AI - Additive D1 Schema Repair (Manual)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  install_ai_schema:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Verify BLUE repository
+        run: test "$GITHUB_REPOSITORY" = 'ehdud6728-bit/BLUE-Signal-Lab'
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install Wrangler
+        working-directory: worker
+        run: npm install --no-package-lock --no-audit --no-fund
+      - name: Install only missing BLUE AI tables
+        working-directory: worker
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          test -n "$CLOUDFLARE_API_TOKEN" && test -n "$CLOUDFLARE_ACCOUNT_ID" || { echo 'Missing Cloudflare D1 deployment secrets'; exit 1; }
+          npx wrangler d1 execute blue-signal-lab-db --remote --file=ai_schema_r09.sql --yes
+          echo 'BLUE_AI_SCHEMA_READY: additive CREATE IF NOT EXISTS, existing reports preserved'
