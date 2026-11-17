@@ -11,7 +11,8 @@ import pandas as pd
 SRC=Path(__file__).resolve().parents[1]/'scripts'
 sys.path.insert(0,str(SRC))
 from market_scan_r11 import build_symbol_snapshot, build_symbol_directory
-from append_symbol_analysis_sql import statements, write_sql, directory_statements
+from append_symbol_analysis_sql import (statements, write_sql, directory_statements,
+                                        append_directory_only)
 
 
 def history(with_gap=False):
@@ -111,5 +112,24 @@ class Tests(unittest.TestCase):
         same={'code':'225190','name':'LK삼양','market':'KOSDAQ'}
         with self.assertRaisesRegex(ValueError,'duplicate'):
             directory_statements({'asof':'2026-11-06','symbols':[same]*1300})
+
+    def test_daily_directory_refresh_is_additive_and_preserves_older_names(self):
+        with tempfile.TemporaryDirectory() as folder:
+            sql=Path(folder)/'verified_eod.sql'
+            index=Path(folder)/'names.json'
+            sql.write_text('CREATE TABLE daily_audit (day TEXT);\n'
+                           "INSERT INTO daily_audit VALUES('2026-11-17');\n",encoding='utf-8')
+            directory={'asof':'2026-11-17','symbols':[
+                {'code':f'{n:06d}','name':f'종목{n}', 'market':'KOSPI'}
+                for n in range(1300)]}
+            index.write_text(json.dumps(directory,ensure_ascii=False),encoding='utf-8')
+            self.assertGreater(append_directory_only(str(index),str(sql)),40)
+            db=sqlite3.connect(':memory:')
+            db.executescript(sql.read_text(encoding='utf-8'))
+            self.assertEqual(db.execute('SELECT COUNT(*) FROM blue_symbol_directory_v1').fetchone()[0],1300)
+            self.assertEqual(db.execute('SELECT day FROM daily_audit').fetchone()[0],'2026-11-17')
+            self.assertEqual(db.execute("SELECT name FROM blue_symbol_directory_v1 WHERE code='000002'").fetchone()[0], '종목2')
+            with self.assertRaisesRegex(ValueError, 'must exist'):
+                append_directory_only(str(index),str(Path(folder)/'missing.sql'))
 
 if __name__=='__main__':unittest.main()

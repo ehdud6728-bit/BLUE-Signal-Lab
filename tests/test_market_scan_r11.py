@@ -38,6 +38,33 @@ class FakeStock:
         return pd.DataFrame([{'종가': 4000}], index=[pd.Timestamp('2026-11-10')])
 
 
+class FakeKrxOpenApi:
+    def __init__(self, bad_date=False):
+        self.bad_date = bad_date
+        self.calls = 0
+
+    def get(self, url, params, headers, timeout):
+        self.calls += 1
+        market = 'KOSPI' if 'stk_bydd_trd' in url.lower() else 'KOSDAQ'
+        stamp = '20261109' if self.bad_date else '20261110'
+        rows = []
+        for i in range(600):
+            code = f'{i + (0 if market == "KOSPI" else 100000):06d}'
+            rows.append({'BAS_DD': stamp, 'ISU_CD': code, 'ISU_NM': 'TEST '+code,
+                         'TDD_OPNPRC': '100', 'TDD_HGPRC': '120',
+                         'TDD_LWPRC': '90', 'TDD_CLSPRC': '110',
+                         'ACC_TRDVOL': '1000', 'ACC_TRDVAL': '100000'})
+
+        class Response:
+            def raise_for_status(self):
+                return None
+
+            def json(self):
+                return {'OutBlock_1': rows}
+
+        return Response()
+
+
 class SameDayTests(unittest.TestCase):
     def test_asof_symbol_diagnostic_explains_unmatched_and_lower_touch(self):
         stamps=pd.bdate_range('2025-01-01',periods=280)
@@ -177,6 +204,32 @@ class SameDayTests(unittest.TestCase):
         today = out.loc[out.Date.dt.date.eq(date(2026, 11, 10))]
         self.assertEqual(len(today), 1202)
         self.assertEqual(int((out.Date.dt.date.eq(date(2026, 11, 9))).sum()), 2000)
+
+    def test_auto_switches_only_to_independently_verified_exact_date(self):
+        baseline = self.marcap_fixture(True)
+        session = FakeKrxOpenApi()
+        out, days, source = upgraded_history(
+            baseline, date(2026, 11, 10), True, 'pykrx', 'fake-key',
+            stock_module=FakeStock(mismatch=True), session=session,
+            allow_verified_fallback=True)
+        self.assertEqual(days, ['2026-11-10'])
+        self.assertEqual(session.calls, 2)
+        self.assertIn('Open API', source)
+        self.assertEqual(len(out[out.Date.dt.date.eq(date(2026, 11, 10))]), 1200)
+
+    def test_auto_refuses_fallback_with_wrong_date(self):
+        with self.assertRaisesRegex(SourcePending, 'KRX_BOTH_PROVIDERS_PENDING'):
+            upgraded_history(self.marcap_fixture(True), date(2026, 11, 10),
+                True, 'pykrx', 'fake-key', stock_module=FakeStock(mismatch=True),
+                session=FakeKrxOpenApi(bad_date=True), allow_verified_fallback=True)
+
+    def test_forced_pykrx_never_switches_provider(self):
+        session = FakeKrxOpenApi()
+        with self.assertRaisesRegex(SourcePending, 'KRX_SAMPLE_PRICE_MISMATCH'):
+            upgraded_history(self.marcap_fixture(True), date(2026, 11, 10),
+                True, 'pykrx', 'fake-key', stock_module=FakeStock(mismatch=True),
+                session=session, allow_verified_fallback=False)
+        self.assertEqual(session.calls, 0)
 
     def test_historical_complete_marcap_unchanged(self):
         old = self.marcap_fixture(False)
