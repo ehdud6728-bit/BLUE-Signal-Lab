@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {lookupSymbolAnalysis,validAnalysisCode,validAnalysisDate} from '../worker/src/symbol-analysis.ts';
+import {lookupSymbolAnalysis,lookupSymbolDirectory,validAnalysisCode,validAnalysisDate} from '../worker/src/symbol-analysis.ts';
 
 function mockDb(row=null,exists=true){
  const sqls=[];
@@ -39,4 +39,22 @@ test('unmatched symbol can return isolated chart while preserving review warning
 test('future-dated bar is never served to historical analysis',async()=>{
  const out=await lookupSymbolAnalysis(mockDb(saved({future:true})),'225190','2026-11-06');
  assert.equal(out.status,'CORRUPT_STORED_ANALYSIS');
+});
+test('directory search is read-only and returns stock code plus Korean name',async()=>{
+ const sqls=[];
+ const db={prepare(sql){
+  return {bind(...args){this.args=args;return this;},async first(){sqls.push({sql,args:this.args||[]});return {name:'blue_symbol_directory_v1'};},
+   async all(){sqls.push({sql,args:this.args||[]});return {results:[{code:'225190',name:'LK삼양',market:'KOSDAQ'}]};}};
+ }};
+ const result=await lookupSymbolDirectory(db,'LK삼양');
+ assert.equal(result.status,'READY');
+ assert.deepEqual(result.results[0],{code:'225190',name:'LK삼양',market:'KOSDAQ'});
+ assert.ok(sqls.every(x=>!/(INSERT|DELETE|UPDATE)/i.test(x.sql)));
+ assert.ok(sqls.find(x=>x.sql.includes('instr(lower(name)')));
+});
+test('directory is optional before isolated D1 import',async()=>{
+ const db={prepare(){return {async first(){return null;}};}};
+ const result=await lookupSymbolDirectory(db,'225190');
+ assert.equal(result.status,'CATALOG_NOT_READY');
+ assert.equal((await lookupSymbolDirectory(db,'')).status,'INVALID_QUERY');
 });

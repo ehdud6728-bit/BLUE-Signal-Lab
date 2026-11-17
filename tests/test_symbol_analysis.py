@@ -10,8 +10,8 @@ import pandas as pd
 
 SRC=Path(__file__).resolve().parents[1]/'scripts'
 sys.path.insert(0,str(SRC))
-from market_scan_r11 import build_symbol_snapshot
-from append_symbol_analysis_sql import statements, write_sql
+from market_scan_r11 import build_symbol_snapshot, build_symbol_directory
+from append_symbol_analysis_sql import statements, write_sql, directory_statements
 
 
 def history(with_gap=False):
@@ -81,5 +81,35 @@ class Tests(unittest.TestCase):
           'chart':{'asof':day,'bars':[{'t':'2026-11-09'}]},'stats':None}
         with self.assertRaisesRegex(ValueError,'Future'):
             statements(bad,'test01')
+
+    def test_stock_names_are_asof_only_and_published_without_touching_signals(self):
+        day='2026-11-06'
+        items=pd.DataFrame({
+          'Date':[day]*1350+['2026-11-09'],
+          'Code':[f'{n:06d}' for n in range(1350)]+['001349'],
+          'Name':['LK삼양' if n==1 else f'기업{n}' for n in range(1350)]+['미래이름'],
+          'Market':['KOSDAQ']*1351})
+        directory=build_symbol_directory(items,day)
+        self.assertEqual(len(directory['symbols']),1350)
+        self.assertEqual(directory['symbols'][1]['name'],'LK삼양')
+        self.assertEqual(directory['symbols'][-1]['name'],'기업1349')
+        sql=directory_statements(directory)
+        self.assertLess(len(sql),60)
+        db=sqlite3.connect(':memory:')
+        db.execute('CREATE TABLE signals (code TEXT,name TEXT)')
+        db.execute("INSERT INTO signals VALUES('000001','기존 데이터')")
+        from append_symbol_analysis_sql import SCHEMA
+        db.executescript(SCHEMA+'\n'+'\n'.join(sql))
+        self.assertEqual(db.execute('SELECT COUNT(*) FROM blue_symbol_directory_v1').fetchone()[0],1350)
+        self.assertEqual(db.execute("SELECT name FROM signals WHERE code='000001'").fetchone()[0],'기존 데이터')
+        later={**directory,'asof':'2026-11-05','symbols':[
+          {**item,'name':'이전이름'} for item in directory['symbols']]}
+        db.executescript('\n'.join(directory_statements(later)))
+        self.assertEqual(db.execute("SELECT name FROM blue_symbol_directory_v1 WHERE code='000001'").fetchone()[0],'LK삼양')
+
+    def test_directory_validation_rejects_duplicate_stock_codes(self):
+        same={'code':'225190','name':'LK삼양','market':'KOSDAQ'}
+        with self.assertRaisesRegex(ValueError,'duplicate'):
+            directory_statements({'asof':'2026-11-06','symbols':[same]*1300})
 
 if __name__=='__main__':unittest.main()
