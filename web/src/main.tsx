@@ -27,6 +27,7 @@ import './r159-ma-evidence.css';
 import './r1591-evidence-basket.css';
 import './r1594-refresh.css';
 import './r1599-pattern-filters.css';
+import './r15116-technical-filters.css';
 // R1581_SCAN_RESUME: persistent scan status across tabs and reloads.
 import './r1581-scan-monitor.css';
 
@@ -37,6 +38,12 @@ type Day = {day:string;observed_stocks:number;signal_events:number;matched_stock
 type ScanStatus = 'READY'|'NOT_IMPORTED'|'PENDING'|'FAILED'|'';
 type Line = {signal:string;price:number;gap_from_close_pct:number;slope_pct:number|null;status:string};
 type GcKey='rsi'|'slow14'|'slow12'|'slow20'|'macd';
+type TechKey='inverse'|'ma112'|'ma224';
+const TECH_OPTIONS:{key:TechKey;label:string}[]=[
+  {key:'inverse',label:'역배열 (20<40<60)'},
+  {key:'ma112',label:'112일선 상향 돌파'},
+  {key:'ma224',label:'224일선 상향 돌파'}
+];
 const GC_OPTIONS:{key:GcKey;label:string}[]=[
   {key:'rsi',label:'RSI GC'},
   {key:'slow14',label:'Slow 14·3·3 GC'},
@@ -90,6 +97,8 @@ function App(){
   const [localQuery,setLocalQuery]=useState('');
   const [gcFields,setGcFields]=useState<GcKey[]>([]);
   const [gcLogic,setGcLogic]=useState<'any'|'all'>('any');
+  const [techFields,setTechFields]=useState<TechKey[]>([]);
+  const [techLogic,setTechLogic]=useState<'any'|'all'>('any');
   // R1599 shared options: search outlines, detail chart and basket use same threshold.
   const [amountChoice,setAmountChoice]=useState(()=>{
     try{const v=localStorage.getItem('blue_r1599_amount_choice');return ['0','100','300','500','1000','custom'].includes(v||'')?v!:'0';}
@@ -252,7 +261,7 @@ function App(){
     }catch(e){setError(String(e));}
     finally{setRequestBusy(false);}
   }
-  async function search(p=1,scroll=true,selectedGc:GcKey[]=gcFields,selectedGcLogic:'any'|'all'=gcLogic,requestedDay?:string,patternOverride?:{enabled?:boolean;threshold?:number|null;minSamples?:number;amountEok?:number}){
+  async function search(p=1,scroll=true,selectedGc:GcKey[]=gcFields,selectedGcLogic:'any'|'all'=gcLogic,requestedDay?:string,patternOverride?:{enabled?:boolean;threshold?:number|null;minSamples?:number;amountEok?:number},selectedTech:TechKey[]=techFields,selectedTechLogic:'any'|'all'=techLogic){
     const serial=++searchVersion.current;
     const queryAmountEok=patternOverride?.amountEok??amountEok;
     if(!Number.isInteger(queryAmountEok)||queryAmountEok<0||queryAmountEok>50000){
@@ -268,6 +277,7 @@ function App(){
       else {u.searchParams.set('start',start);u.searchParams.set('end',end);}
       u.searchParams.set('signals',signals.join(','));u.searchParams.set('logic',logic);u.searchParams.set('page',String(p));
       if(selectedGc.length){u.searchParams.set('gc',selectedGc.join(','));u.searchParams.set('gc_logic',selectedGcLogic);}
+      if(selectedTech.length){u.searchParams.set('tech',selectedTech.join(','));u.searchParams.set('tech_logic',selectedTechLogic);}
       u.searchParams.set('min_amount_eok',String(queryAmountEok));
       // Chart-backed pattern extraction needs the actual selected sample floor,
       // even when highlighting all stocks rather than filtering only hot ones.
@@ -400,6 +410,11 @@ function App(){
     setGcFields(next);setGcLogic(mode);setLocalQuery('');
     // Search in D1 across all stored result pages, not only the 100 rows currently loaded.
     if(total!==null)void search(1,false,next,mode);
+  };
+  const changeTech=(next:TechKey[],mode:'any'|'all'=techLogic)=>{
+    setTechFields(next);setTechLogic(mode);setLocalQuery('');
+    // Rerun server-side search before pagination; not just the visible 100 rows.
+    if(total!==null)void search(1,false,gcFields,gcLogic,undefined,undefined,next,mode);
   };
   const flip=(t:string)=>setSignals(a=>a.includes(t)?a.filter(s=>s!==t):[...a,t]);
   const inBasket=(r:Signal)=>basketIds.includes(`MANUAL:${r.code}:${r.day}`);
@@ -620,6 +635,21 @@ function App(){
                 <button type="button" className={gcLogic==='any'?'active':''} disabled={busy} onClick={()=>changeGc(gcFields,'any')}>하나라도 (OR)</button>
                 <button type="button" className={gcLogic==='all'?'active':''} disabled={busy} onClick={()=>changeGc(gcFields,'all')}>모두 (AND)</button>
               </div>}
+              <div className="r15116-technical-filter" role="group" aria-label="역배열 및 장기 이동평균선 돌파 검색 필터">
+                <div className="r15116-tech-heading"><strong>추세·돌파 필터</strong><small>검색일 기준 · 전체 검색 결과에 적용</small></div>
+                <div className="gc-filter-options">
+                  {TECH_OPTIONS.map(item=><label key={item.key} className={'gc-filter-chip '+(techFields.includes(item.key)?'selected':'')}>
+                    <input type="checkbox" checked={techFields.includes(item.key)} disabled={busy}
+                      onChange={()=>changeTech(techFields.includes(item.key)?techFields.filter(x=>x!==item.key):[...techFields,item.key])}/>{item.label}
+                  </label>)}
+                  <button type="button" className="r15116-tech-clear" disabled={busy||techFields.length===0} onClick={()=>changeTech([])}>추세 조건 해제</button>
+                </div>
+                {techFields.length>1&&<div className="gc-logic"><span>선택 조건:</span>
+                  <button type="button" className={techLogic==='any'?'active':''} disabled={busy} onClick={()=>changeTech(techFields,'any')}>하나라도 (OR)</button>
+                  <button type="button" className={techLogic==='all'?'active':''} disabled={busy} onClick={()=>changeTech(techFields,'all')}>모두 (AND)</button>
+                </div>}
+                <small className="r15116-tech-note">이동평균선 값이나 돌파 신호가 저장되지 않은 과거 종목은 해당 조건에 포함하지 않습니다. GC·거래대금 조건과 함께 적용됩니다.</small>
+              </div>
             <div className="r15102-tomato-inline" role="group" aria-label="토마토색 과거 패턴 기준">
               <label htmlFor="r1599-pattern">토마토 기준</label>
               <select id="r1599-pattern" value={patternThreshold} onChange={e=>{

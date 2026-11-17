@@ -7,6 +7,7 @@ import {Bot,Download,Upload,Trash2,RefreshCw,AlertCircle,ShoppingBasket,Bookmark
 import {groupBasketRecords} from './basket-grouping';
 import './r1595-group-price.css';
 import './smart-basket.css';
+import './r15116-basket-priority.css';
 import './r158-long-watch.css';
 import {comparisonKey,fetchCompared,sourceName,type PriceCompare} from './price-compare';
 import StopLossRow from './StopLossRow';
@@ -24,6 +25,10 @@ type Performance={code:string;day:string;status:string;baseline?:number;
 const perfId=(x:{code:string;day:string})=>`${x.code}:${x.day}`;
 const pctChange=(n:number|null|undefined,base:number)=>typeof n==='number'&&Number.isFinite(n)&&n>0&&base>0?(n/base-1)*100:null;
 const pctText=(p:number|null)=>p===null?'—':`${p>0?'+':''}${p.toFixed(2)}%`;
+const observedTimeKst=(utc:string|null|undefined):string=>{
+ if(!utc||!Number.isFinite(Date.parse(utc)))return '';
+ return new Date(utc).toLocaleTimeString('ko-KR',{timeZone:'Asia/Seoul',hour:'2-digit',minute:'2-digit',hour12:false});
+};
 // R154_CLARITY: distinguish original scan signals from later AI commentary.
 const discoveredSignals=(stored:string[]|undefined,verified:string|null|undefined):string[]=>{
  const source=stored?.length?stored:(verified||'').split(',');
@@ -175,11 +180,18 @@ export default function SmartBasket({quickAddRequest,onItemsChange,active=true,r
     if(inFlight||document.visibilityState==='hidden')return;
     inFlight=true;
     try{
-     const url=new URL(API+'/api/basket/watch');url.searchParams.set('items',idsKey);
-     const r=await fetch(url.toString(),{credentials:'include',cache:'no-store'});
-     if(!r.ok)throw Error(r.status===404?'수집 API 배포 전':`조회 API 오류 ${r.status}`);
-     const data=await r.json() as {items:Performance[]};
-     if(!disposed){setPerformance(Object.fromEntries((data.items||[]).map(x=>[perfId(x),x])));
+     const entries=idsKey.split(',');const found:Performance[]=[];
+     // The server intentionally caps each watch GET at 100 entries; the UI can
+     // hold 100 ordinary + 20 protected discovery records.
+     for(let i=0;i<entries.length;i+=70){
+      if(disposed)break;
+      const url=new URL(API+'/api/basket/watch');url.searchParams.set('items',entries.slice(i,i+70).join(','));
+      const r=await fetch(url.toString(),{credentials:'include',cache:'no-store'});
+      if(!r.ok)throw Error(r.status===404?'수집 API 배포 전':`조회 API 오류 ${r.status}`);
+      const data=await r.json() as {items:Performance[]};
+      found.push(...(data.items||[]));
+     }
+     if(!disposed){setPerformance(Object.fromEntries(found.map(x=>[perfId(x),x])));
        setPerformanceChecked(new Date().toISOString());setPerformanceError('');}
     }catch(e){if(!disposed)setPerformanceError(e instanceof Error?e.message:'가격 확인 실패');}
     finally{inFlight=false;}
@@ -408,7 +420,7 @@ export default function SmartBasket({quickAddRequest,onItemsChange,active=true,r
    {performanceError&&<p className="basket-alert" role="status">시세 수집 연결: {performanceError}</p>}
    {r1593Error&&<p className="r1593-comparison-status" role="status">D1 저장 시세 비교: {r1593Error}</p>}
    {items.length>0&&<p className="r153-performance-status" role="status">
-    <RefreshCw size={12}/> 장바구니 등록 직후 수집 요청 · 서버 분당 최대 3종목 처리 · 화면 확인 30초
+    <RefreshCw size={12}/> 등록 종목 우선 연속 수집 · 서버 분당 최대 18건 처리 · 화면 확인 30초
     {performanceChecked&&<span> · 마지막 화면 확인 {new Date(performanceChecked).toLocaleTimeString('ko-KR')}</span>}
    </p>}
   <div className="basket-tabs" role="group" aria-label="장바구니 분류">{([['ALL','전체'],['MANUAL','내 선택'],['AI','AI 선택'],['PROTECTED','장기 관찰']] as const).map(([key,title])=><button
@@ -454,7 +466,7 @@ export default function SmartBasket({quickAddRequest,onItemsChange,active=true,r
          <small>{group.records.map(it=>it.day).join(' · ')} · 펼쳐서 개별 수익률 확인</small></span>
        <ChevronDown size={17}/></button>}
      {(!groupSimilar||group.records.length===1||expandedCodes.includes(group.code))&&
-       <div className="r1595-group-records">{group.records.map(it=>{const q=latestQuote.get(it.code),growth=pct(it);
+       <div className="r1595-group-records">{group.records.map(it=>{const q=latestQuote.get(it.code);
      const pr=performance[perfId(it)];
      const signalChips=discoveredSignals(it.signals,pr?.signal_names);
      const quoteIsLater=!!(pr?.quote_day&&pr.quote_day>it.day&&pr.quote_day>=(pr.recent_day||''));
@@ -467,10 +479,16 @@ export default function SmartBasket({quickAddRequest,onItemsChange,active=true,r
      const shownRecent=compareRecent??recent??(q&&q.trade_date_kst>it.day?q.price:null);
      const shownRecentDay=compareRecent?comp?.latest_day:recent?recentDay:q&&q.trade_date_kst>it.day?q.trade_date_kst:null;
      const shownSource=compareRecent?sourceName(comp?.latest_source):recent?'기존 KIS 수집기':'KIS 저장 시세';
+     // Never attach a different provider's timestamp to a daily-close price.
+     const shownAt=compareRecent?comp?.latest_at:recent?(quoteIsLater?pr?.quote_at:null):q?.received_at_utc;
+     const observedAt=observedTimeKst(shownAt);
+     // Use the exact price displayed on screen for every current-return calculation.
+     const growth=pctChange(shownRecent,it.baseline);
      const highs=[
        ...(intradayHigh?[{price:intradayHigh,day:pr?.quote_day||'',source:'장중 관측'}]:[]),
        ...(dailyHigh?[{price:dailyHigh,day:pr?.highest_day||'',source:'KIS 일봉'}]:[]),
-       ...(comp?.period_high?[{price:comp.period_high,day:comp.period_high_day||'',source:comp.high_complete?'수집 기간':'부분 관측'}]:[])
+       ...(comp?.period_high?[{price:comp.period_high,day:comp.period_high_day||'',source:comp.high_complete?'수집 기간':'부분 관측'}]:[]),
+       ...(shownRecent&&shownRecentDay?[{price:shownRecent,day:shownRecentDay,source:'최근 관측 가격'}]:[])
      ];
      const highest=highs.sort((a,b)=>b.price-a.price)[0];
      const maxHigh=highest?.price??null,maxHighDay=highest?.day||null;
@@ -499,21 +517,21 @@ export default function SmartBasket({quickAddRequest,onItemsChange,active=true,r
        <div className="r1599-pattern-dates" title={it.patternDays10d.join(' · ')}>
          과거 신호일 {it.patternDays10d.slice(-3).join(' · ')}{it.patternDays10d.length>3?' 외':''}
        </div>}
-     <div className="r154-origin-strip">
+     <div className="basket-record-stats r153-price-grid basket-price-focus" aria-label="장바구니 주요 가격 지표">
+       <div className="basket-price-high"><span>검색 이후 관측 최고가</span><b>{maxHigh?`${cash(maxHigh)}원`:'—'}</b>
+         <small>{maxHigh?`최고 수익률 ${pctText(pctChange(maxHigh,it.baseline))} · ${maxHighDay||''}${comp&&!comp.high_complete?' · 과거 수집 중':''}`:pending?'수집 중':'기간 고가 미확인'}</small></div>
+       <div className="basket-price-recent"><span>최근시세</span><b>{shownRecent?`${cash(shownRecent)}원`:'—'}</b>
+         <small>{shownRecentDay?`${shownRecentDay}${observedAt?' '+observedAt:''} · ${shownSource}`:'후속 시세 미수집'} · 실시간 체결가 아님</small></div>
+       <div className="basket-price-return"><span>현재수익률 <small>발견가 기준</small></span><b className={growth==null?'':growth>=0?'basket-rise':'basket-fall'}>{pctText(growth)}</b>
+         <small>{maxHigh&&shownRecent?`최고가 대비 ${pctText(pctChange(shownRecent,maxHigh))}`:state}</small></div>
+     </div>
+     <div className="r154-origin-strip basket-origin-secondary">
        <div className="r154-discovery-price"><span>발견가</span><strong>{cash(it.baseline)}원</strong><small>{it.day} · 확정 종가</small></div>
        <div className="r154-discovery-signals"><span>발견 당시 기술 신호</span>
          <div>{signalChips.length?signalChips.slice(0,5).map(t=><span className="r154-signal-chip" key={t}>{t}</span>):
            <small className="r154-no-signal">원본 신호 확인 불가</small>}
            {signalChips.length>5&&<small className="r154-more-signals">+{signalChips.length-5}</small>}</div>
        </div>
-     </div>
-     <div className="basket-record-stats r153-price-grid">
-       <div><span>검색 이후 최고가</span><b>{maxHigh?`${cash(maxHigh)}원`:'—'}</b>
-         <small>{maxHigh?`${pctText(pctChange(maxHigh,it.baseline))} · ${maxHighDay||''} · ${highest?.source||'저장 시세'}${comp?.high_coverage_to?' · '+comp.high_coverage_to+'까지 확인':''}`:pending?'수집 중':'기간 고가 미확인'}</small></div>
-       <div><span>최근 확인가</span><b>{shownRecent?`${cash(shownRecent)}원`:'—'}</b>
-         <small>{shownRecentDay?`${shownRecentDay} · ${shownSource}`:'후속 시세 미수집'} · 실시간 체결가 아님</small></div>
-       <div><span>기준가 대비</span><b className={growth==null?'':growth>=0?'basket-rise':'basket-fall'}>{pctText(growth)}</b>
-         <small>{maxHigh&&recent?`최고가 대비 ${pctText(pctChange(recent,maxHigh))}`:state}</small></div>
      </div>
      <StopLossRow active={active} code={it.code} day={it.day} baseline={it.baseline}
        signals={signalChips} highestObserved={maxHigh} highestDay={maxHighDay}
