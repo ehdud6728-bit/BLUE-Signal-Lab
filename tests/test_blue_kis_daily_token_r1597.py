@@ -44,6 +44,12 @@ def metadata(saved_at,expiry):
     return {'saved_at_utc':saved_at.isoformat(),'expires_at_utc':expiry.isoformat()}
 
 class Tests(unittest.TestCase):
+    def test_scheduled_maintenance_is_automatic_with_emergency_pause(self):
+        workflow=(SRC.parent/'.github/workflows/blue_kis_daily_token_r1597.yml').read_text(encoding='utf-8')
+        self.assertIn("if: github.event_name != 'schedule' || vars.BLUE_KIS_TOKEN_AUTO_PAUSED != 'true'",workflow)
+        self.assertIn("ALLOW_ISSUE: ${{ github.event_name == 'schedule' && 'true' || inputs.enable_issuance }}",workflow)
+        self.assertNotIn('BLUE_KIS_TOKEN_AUTO_ENABLED',workflow)
+        self.assertIn('python scripts/blue_kis_daily_token_r1597.py --mode issue --scheduled',workflow)
     def test_readonly_no_mutation_no_issue(self):
         db=SQLiteDB(metadata(NOW-timedelta(hours=25),NOW-timedelta(minutes=1)))
         issuer=Mock()
