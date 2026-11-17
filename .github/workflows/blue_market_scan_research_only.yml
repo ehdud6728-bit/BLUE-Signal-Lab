@@ -127,6 +127,15 @@ jobs:
             --input output/chart_snapshots.jsonl \
             --sql output/import.sql \
             --run-id "blue_market_$(python -c "import json;print(json.load(open('output/AUDIT.json'))['asof'].replace('-',''))")"
+      - name: Append daily stock-name directory when verified
+        run: |
+          if [ -s output/SYMBOL_DIRECTORY.json ]; then
+            python scripts/append_symbol_analysis_sql.py \
+              --directory output/SYMBOL_DIRECTORY.json \
+              --append-to output/import.sql
+          else
+            echo 'No complete verified stock-name directory; EOD candles remain eligible for publication.'
+          fi
       - name: Prepare independent symbol analysis (matched or not matched)
         if: ${{ inputs.diagnose_code != '' }}
         run: |
