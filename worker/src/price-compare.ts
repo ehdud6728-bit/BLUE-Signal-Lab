@@ -52,7 +52,10 @@ export function chartAfterSearch(json:string,baseDay:string,asof:string):{
 }
 export function bestObservation(all:Observation[]):Observation|null {
  const values=all.filter(x=>money(x.price)!==null&&iso(x.day));
- values.sort((a,b)=>b.day.localeCompare(a.day)||b.priority-a.priority||(b.at||'').localeCompare(a.at||''));
+ // The freshest saved observation must win within the same trading day.
+ // Source priority only breaks ties when the observation times are equal or absent.
+ // Otherwise an older high-priority search quote can hide a newer basket quote.
+ values.sort((a,b)=>b.day.localeCompare(a.day)||(b.at||'').localeCompare(a.at||'')||b.priority-a.priority);
  return values[0]||null;
 }
 export function highSummary(all:HighObservation[],latestDay:string|null):{
@@ -162,6 +165,7 @@ export async function comparePrices(db:D1Database,url:URL):Promise<Response>{
   out.push({code,day,status:latest?'READY':'NO_LATER_PRICE',latest_price:latest?.price||null,
    latest_day:latest?.day||null,latest_source:latest?.source||null,latest_at:latest?.at||null,
    latest_market:latest?.market||null,period_high:high.price,period_high_day:high.day,
+   period_high_source:high.source,
    high_coverage_to:high.coverageTo,high_complete:high.complete,
    quote_status:quoteStatus,quote_checked_at:quoteCheckedAt,quote_error:quoteError});
  }

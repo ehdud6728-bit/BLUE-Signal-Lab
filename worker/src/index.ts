@@ -4,6 +4,7 @@ import { handleBasketAi } from './basket';
 import {basketWatch} from './performance';
 import {comparePrices} from './price-compare';
 import {requestSearchQuotes} from './search-quote-priority';
+import {technicalFilterWhere} from './technical-filters';
 import {runEodCloudflareCron} from './eod-cron';
 interface Env {
   DB: D1Database;
@@ -285,6 +286,11 @@ export default {
           const gcWhere=gcNames.map(k=>`LOWER(CAST(json_extract(extras_json,'$.${gcAllowed[k]}') AS TEXT)) IN ('true','1')`);
           filters.push('('+gcWhere.join(gcLogic==='all'?' AND ':' OR ')+')');
         }
+        // Search-day trend/breakout filters are applied in SQL BEFORE LIMIT,
+        // just like the GC filters. Missing historical MA data never qualifies.
+        const technicalWhere=technicalFilterWhere(u.searchParams.get('tech')||'',u.searchParams.get('tech_logic')||'any');
+        if(technicalWhere===null)return respond({error:'INVALID_TECH_FILTER'},400);
+        if(technicalWhere)filters.push(technicalWhere);
         const where = filters.join(' AND ');
         const limit = Math.min(500, Math.max(1, Math.floor(Number(u.searchParams.get('limit')) || 100)));
         const page = Math.min(10000, Math.max(1, Math.floor(Number(u.searchParams.get('page')) || 1)));
