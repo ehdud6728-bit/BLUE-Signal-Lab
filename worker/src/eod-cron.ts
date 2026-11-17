@@ -10,7 +10,7 @@ interface CronEnv {
 const GITHUB_DISPATCH='https://api.github.com/repos/ehdud6728-bit/BLUE-Signal-Lab/actions/workflows/blue_market_scan_research_only.yml/dispatches';
 // A successful GitHub dispatch (HTTP 204) does not mean KRX EOD was imported.
 // The provider can be temporarily inconsistent after the close. Permit the
-// scheduled 16:55 / 20:35 attempts when the previous dispatch is stale.
+// scheduled retries when the prior dispatch is stale.
 const RETRY_DISPATCH_AFTER_MS=14*60*1000;
 const SCHEMA=`CREATE TABLE IF NOT EXISTS blue_eod_schedule_r15109 (
   day TEXT NOT NULL, phase TEXT NOT NULL, status TEXT NOT NULL,
@@ -95,7 +95,11 @@ export async function runEodCloudflareCron(event:ScheduledController,env:CronEnv
     console.warn('BLUE_EOD_YEAR_CONFIG_UPDATE_REQUIRED',day);return;
   }
   await env.DB.prepare(SCHEMA).run();
-  if(clock==='16:40'||clock==='16:55'){
+  // 15:45 is only the earliest vendor check. Prove the exact source date,
+  // then continue retries as needed instead of leaving the day at 11-16.
+  const eodChecks=new Set(['15:45','16:10','16:40','16:55',
+    '17:15','17:45','18:15','19:00']);
+  if(eodChecks.has(clock)){
     await requestVerifiedEod(env,day,'KRX_EOD');
   } else if(clock==='20:20'||clock==='20:35'){
     await afterMarketAudit(env,day);

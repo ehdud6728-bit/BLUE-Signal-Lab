@@ -57,6 +57,26 @@ function githubHeaders(env: Env): HeadersInit {
     'User-Agent': 'BLUE-Signal-Lab-R07',
   };
 }
+/** GitHub dispatch commonly returns 204 without an ID. Best-effort link a
+ * pending request to a unique recent run, never guess when runs overlap. */
+async function findPendingScanRun(env: Env, requestedAt: string): Promise<{id:number;url:string}|null> {
+  if (!env.GITHUB_TOKEN) return null;
+  const since = Date.parse(requestedAt);
+  if (!Number.isFinite(since)) return null;
+  try {
+    const result = await fetch(`https://api.github.com/repos/${OWNER}/${REPO}/actions/workflows/${WORKFLOW}/runs?event=workflow_dispatch&per_page=12`, {
+      headers: githubHeaders(env)
+    });
+    if (!result.ok) return null;
+    const body = await result.json() as {workflow_runs?:Array<{id?:number;html_url?:string;created_at?:string;event?:string}>};
+    const candidates=(body.workflow_runs||[]).filter(run=>
+      run.event==='workflow_dispatch' && typeof run.id==='number' &&
+      typeof run.html_url==='string' && typeof run.created_at==='string' &&
+      Date.parse(run.created_at)>=since-5_000 &&
+      Date.parse(run.created_at)<=since+90_000);
+    return candidates.length===1?{id:candidates[0].id!,url:candidates[0].html_url!}:null;
+  } catch { return null; }
+}
 function availableSQL(): string {
   return `SELECT 1 AS found FROM daily_counts d JOIN runs r ON d.run_id=r.run_id
     WHERE d.day=? AND r.latest_price_date=d.day AND r.is_demo=0 LIMIT 1`;
@@ -432,10 +452,24 @@ export default {
             .bind(new Date().toISOString(),day).run();
           return respond({date:day,status:'FAILED',reason:'45분 내 D1 등록 결과가 확인되지 않았습니다.',actions_url:row.github_run_url});
         }
-        // When GitHub returned a run ID, detect an Actions failure before the 45-minute expiry.
-        if (row.github_run_id && env.GITHUB_TOKEN) {
+        // A successful 204 dispatch has no run ID. Recover it only when there
+        // is exactly one matching run in the narrow dispatch time window.
+        let runId=row.github_run_id;
+        let runUrl=row.github_run_url;
+        if (!runId && age>15_000 && env.GITHUB_TOKEN) {
+          const found=await findPendingScanRun(env,row.requested_at);
+          if (found) {
+            runId=found.id;
+            runUrl=found.url;
+            await env.DB.prepare(`UPDATE scan_requests SET github_run_id=?,github_run_url=?,updated_at=?
+              WHERE day=? AND status='pending' AND github_run_id IS NULL`)
+              .bind(runId,runUrl,new Date().toISOString(),day).run();
+          }
+        }
+        // When a run ID is known, detect Actions failure before 45 minutes.
+        if (runId && env.GITHUB_TOKEN) {
           try {
-            const gh = await fetch(`https://api.github.com/repos/${OWNER}/${REPO}/actions/runs/${row.github_run_id}`, {
+            const gh = await fetch(`https://api.github.com/repos/${OWNER}/${REPO}/actions/runs/${runId}`, {
               headers:githubHeaders(env)
             });
             if (gh.ok) {
@@ -444,18 +478,18 @@ export default {
                 const reason = 'GitHub Actions ' + (job.conclusion || '실패');
                 await env.DB.prepare('UPDATE scan_requests SET status=?,failure_reason=?,updated_at=? WHERE day=?')
                   .bind('failed',reason,new Date().toISOString(),day).run();
-                return respond({date:day,status:'FAILED',reason,actions_url:row.github_run_url});
+                return respond({date:day,status:'FAILED',reason,actions_url:runUrl});
               }
               if (job.status === 'completed' && job.conclusion === 'success'
                 && job.updated_at && Date.now() - Date.parse(job.updated_at) > 120_000) {
                 await env.DB.prepare('UPDATE scan_requests SET status=?,failure_reason=?,updated_at=? WHERE day=?')
                   .bind('failed','Actions는 완료됐으나 해당 날짜의 D1 데이터가 없습니다.',new Date().toISOString(),day).run();
-                return respond({date:day,status:'FAILED',reason:'Actions 완료 후 D1 등록 데이터가 없습니다.',actions_url:row.github_run_url});
+                return respond({date:day,status:'FAILED',reason:'Actions 완료 후 D1 등록 데이터가 없습니다.',actions_url:runUrl});
               }
             }
           } catch { /* GitHub status lookup is best-effort; never fabricate success. */ }
         }
-        return respond({date:day,status:'PENDING',actions_url:row.github_run_url});
+        return respond({date:day,status:'PENDING',actions_url:runUrl});
       }
       if (p === '/api/scan' && request.method === 'POST') {
         if (request.headers.get('Origin') !== origin) return respond({error:'Origin not allowed'},403);
