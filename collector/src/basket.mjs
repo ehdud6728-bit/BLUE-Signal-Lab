@@ -74,26 +74,53 @@ export async function collectBasket(env,now=new Date(),deps={}){
  const taken=await db.prepare('UPDATE blue_basket_lock_r153 SET lease_until_ms=? WHERE id=1 AND lease_until_ms<?')
   .bind(now.getTime()+90000,now.getTime()).run();
  if(taken.meta?.changes!==1)return {status:'BUSY'};
- const stamp=iso(now),phases=marketsFor(now,env.CLOSED_DATES||''),today=kstParts(now).date;
+ const stamp=iso(now),phases=(deps.phases||marketsFor)(now,env.CLOSED_DATES||''),today=kstParts(now).date;
+ // One cron tick must drain more than three waiting basket records. Keep a
+ // bounded workload and the existing per-request pacing for KIS safety.
+ const requestedBatch=Number(env.BASKET_BATCH_LIMIT||18);
+ const batchLimit=Number.isInteger(requestedBatch)?Math.min(24,Math.max(1,requestedBatch)):18;
  let processed=0,success=0;
  try{
   const due=await db.prepare(`SELECT * FROM blue_basket_watch_r153
     WHERE next_due_utc<=? AND last_seen_at_utc>=?
-    ORDER BY next_due_utc ASC,created_at_utc ASC LIMIT 3`)
-   .bind(stamp,iso(new Date(now.getTime()-7*86400000))).all();
+    ORDER BY next_due_utc ASC,created_at_utc ASC LIMIT ?`)
+   .bind(stamp,iso(new Date(now.getTime()-7*86400000)),batchLimit).all();
   if(!due.results.length)return {status:'IDLE'};
   let token=null;
-  if(env.KIS_APP_KEY&&env.KIS_APP_SECRET){try{token=await cachedToken(db,env.KIS_APP_KEY,env.KIS_APP_SECRET,now);}catch{/* no token */}}
+  if(deps.token){try{token=await deps.token(db,env,now);}catch{/* no token */}}
+  else if(env.KIS_APP_KEY&&env.KIS_APP_SECRET){try{token=await cachedToken(db,env.KIS_APP_KEY,env.KIS_APP_SECRET,now);}catch{/* no token */}}
   if(!token){for(const r of due.results){
    await setState(db,r,{status:'WAITING_TOKEN',last_error:'CACHED_TOKEN_UNAVAILABLE',checked_at_utc:stamp,
      next_due_utc:iso(new Date(now.getTime()+15*60000))});
   }return {status:'WAITING_TOKEN',processed:due.results.length};}
   const lastFinal=finalDay(now);
+  // A ticker can have multiple discovery dates. Its intraday KIS quote is
+  // shared in the same cron run; historical highs still remain date-specific.
+  const quotesByCode=new Map();
   for(const r of due.results){
    processed++;
    try{
     const base=String(r.base_day),next=addDays(r.progress_to_day||base,1);
     const values={};let end=null;
+    // Current-session quote comes FIRST. A slow/failed historical backfill
+    // must not prevent the newest price from reaching the basket.
+    if(phases.length && base<today){
+     const [market,phase]=phases.find(x=>x[0]==='J')||phases[0];
+     if(!quotesByCode.has(r.code)){
+      try{
+       const raw=await (deps.quote||getKisQuote)(env,token,market,r.code);
+       quotesByCode.set(r.code,parseQuote({code:r.code,name:'',eod_close:r.baseline_close,
+         eod_asof:base,eod_signals:'',origin:'BASKET_WATCH'},market,phase,raw,now,today));
+      }catch{quotesByCode.set(r.code,null);}
+     }
+     const quote=quotesByCode.get(r.code);
+     if(quote){
+      const current={quote_price:quote.price,quote_high:quote.high,quote_day:quote.trade_date_kst,
+       quote_at_utc:stamp,quote_market:market};
+      Object.assign(values,current);
+      await setState(db,r,current);
+     }
+    }
     if(next<=lastFinal){
      // On first registration, fetch the most recent window first so the latest
      // confirmed close can appear quickly even for a 2025 discovery. Highest
@@ -114,28 +141,23 @@ export async function collectBasket(env,now=new Date(),deps={}){
      const bars=verifiedDailyRows(payload,next,end,base);
      Object.assign(values,mergeDaily(r,bars),{progress_to_day:end});
     }
-    if(phases.length && base<today){
-     const [market,phase]=phases.find(x=>x[0]==='J')||phases[0];
-     try{
-      const raw=await (deps.quote||getKisQuote)(env,token,market,r.code);
-      const quote=parseQuote({code:r.code,name:'',eod_close:r.baseline_close,
-        eod_asof:base,eod_signals:'',origin:'BASKET_WATCH'},market,phase,raw,now,today);
-      Object.assign(values,{quote_price:quote.price,quote_high:quote.high,quote_day:quote.trade_date_kst,
-       quote_at_utc:stamp,quote_market:market});
-     }catch{/* keep last verified quote */}
-    }
     const progress=values.progress_to_day||r.progress_to_day||base;
     const complete=progress>=lastFinal;
     const hasLaterDay=(values.recent_day||r.recent_day)!=null;
     const status=complete?(hasLaterDay?'READY':'WAITING_NEXT_SESSION'):'HISTORY_PARTIAL';
-    const nextDue=phases.length?5*60000:(status==='HISTORY_PARTIAL'?60000:45*60000);
-    await setState(db,r,{...values,status,last_error:null,checked_at_utc:stamp,
+    // Keep trying once per cron when the current-session quote is still absent;
+    // an observed quote can be refreshed on a gentler two-minute cadence.
+    // History backfills remain continuous even when the market is closed.
+    const nextDue=phases.length?(complete&&values.quote_day===today?2*60000:60000):
+      (status==='HISTORY_PARTIAL'?60000:45*60000);
+    const quoteFailed=phases.length&&base<today&&!values.quote_day;
+    await setState(db,r,{...values,status,last_error:quoteFailed?'QUOTE_UNAVAILABLE':null,checked_at_utc:stamp,
       next_due_utc:iso(new Date(now.getTime()+nextDue))});
     success++;
     if(!deps.daily&&!deps.quote)await delay(500);
    }catch{
     await setState(db,r,{status:'PROVIDER_RETRY',last_error:'PROVIDER_OR_DATA_NOT_READY',checked_at_utc:stamp,
-      next_due_utc:iso(new Date(now.getTime()+5*60000))});
+      next_due_utc:iso(new Date(now.getTime()+2*60000))});
    }
   }
   return {status:success?'PROCESSED':'RETRY',processed,success};
