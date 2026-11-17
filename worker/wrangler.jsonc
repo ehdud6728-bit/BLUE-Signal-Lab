@@ -4,5 +4,6 @@
   "compatibility_date": "2026-11-01",
   "triggers": {"crons": ["45 6-8,11 * * MON-FRI"]},
   "d1_databases": [{"binding":"DB", "database_name":"blue-signal-lab-db", "database_id":"272318c7-afd2-419c-91cc-dc59475ef87a"}],
+  "services": [{"binding":"KIS_COLLECTOR", "service":"blue-market-collector", "entrypoint":"InstantQuoteService"}],
   "vars": {"CORS_ORIGIN":"https://blue-signal-lab.ehdud6728.workers.dev"}
 }
