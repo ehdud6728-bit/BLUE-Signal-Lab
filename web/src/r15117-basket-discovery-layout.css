@@ -1,0 +1,89 @@
+/* R1.5.11.7: highlight the discovery price above the comparison cards. */
+.blue-basket .basket-discovery-primary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+  margin: 0 0 10px;
+  padding: 10px 12px;
+  background: #f1f6ff;
+  border: 1px solid #bfd4f2;
+  border-left: 4px solid #4076bd;
+  border-radius: 11px;
+}
+
+.blue-basket .basket-discovery-value {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 5px 10px;
+  min-width: 0;
+}
+
+.blue-basket .basket-discovery-value > span {
+  color: #486080;
+  font-size: 12px;
+  font-weight: 850;
+}
+
+.blue-basket .basket-discovery-value > strong {
+  color: #163f78;
+  font-size: clamp(21px, 4.6vw, 27px);
+  font-weight: 900;
+  line-height: 1.2;
+  letter-spacing: -0.45px;
+  font-variant-numeric: tabular-nums;
+}
+
+.blue-basket .basket-discovery-primary > small {
+  color: #60748f;
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+/* Present all recorded signals in a full-width, readable wrapping row. */
+.blue-basket .basket-discovery-signals {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 10px 0 12px;
+  padding: 11px 12px;
+  background: #f8faff;
+  border: 1px solid #e0e9f5;
+  border-radius: 11px;
+}
+
+.blue-basket .basket-discovery-signals-title {
+  color: #425b7c;
+  font-size: 12px;
+  font-weight: 850;
+}
+
+.blue-basket .basket-discovery-signals-list {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.blue-basket .basket-discovery-signal-chip {
+  display: inline-flex;
+  align-items: center;
+  max-width: 100%;
+  padding: 5px 8px;
+  color: #2454a0;
+  background: #fff;
+  border: 1px solid #bbd1ef;
+  border-radius: 7px;
+  font-size: 11px;
+  font-weight: 750;
+  line-height: 1.3;
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 700px) {
+  .blue-basket .basket-discovery-primary { padding: 9px 10px; }
+  .blue-basket .basket-discovery-value > strong { font-size: 22px; }
+  .blue-basket .basket-discovery-signals { padding: 10px; }
+}

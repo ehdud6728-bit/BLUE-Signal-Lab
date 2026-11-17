@@ -9,6 +9,7 @@ import './r1595-group-price.css';
 import './smart-basket.css';
 import './r15116-basket-priority.css';
 import './r158-long-watch.css';
+import './r15117-basket-discovery-layout.css';
 import {comparisonKey,fetchCompared,sourceName,type PriceCompare} from './price-compare';
 import StopLossRow from './StopLossRow';
 import type {StopMethod} from './stop-loss';
@@ -505,6 +506,10 @@ export default function SmartBasket({quickAddRequest,onItemsChange,active=true,r
           disabled={it.protected===true} aria-label={`${it.name} 제거`}
           onClick={()=>setItems(old=>old.filter(x=>x.protected||x.id!==it.id))}><Trash2 size={16}/></button>
        </div></div>
+     <div className="basket-discovery-primary" aria-label="종목 발견가격">
+       <div className="basket-discovery-value"><span>발견가</span><strong>{cash(it.baseline)}원</strong></div>
+       <small>{it.day} · 발견일 확정 종가</small>
+     </div>
       {isHot(it)&&<div className="r1591-basket-evidence" title={it.patternLabel10d||'실제 과거 일봉 패턴 검증'}>
        과거 10일 상승 {it.patternUp10d!.toFixed(1)}% · 표본 {it.patternN10d}건 · 탐색적 결과
       </div>}
@@ -525,13 +530,10 @@ export default function SmartBasket({quickAddRequest,onItemsChange,active=true,r
        <div className="basket-price-return"><span>현재수익률 <small>발견가 기준</small></span><b className={growth==null?'':growth>=0?'basket-rise':'basket-fall'}>{pctText(growth)}</b>
          <small>{maxHigh&&shownRecent?`최고가 대비 ${pctText(pctChange(shownRecent,maxHigh))}`:state}</small></div>
      </div>
-     <div className="r154-origin-strip basket-origin-secondary">
-       <div className="r154-discovery-price"><span>발견가</span><strong>{cash(it.baseline)}원</strong><small>{it.day} · 확정 종가</small></div>
-       <div className="r154-discovery-signals"><span>발견 당시 기술 신호</span>
-         <div>{signalChips.length?signalChips.slice(0,5).map(t=><span className="r154-signal-chip" key={t}>{t}</span>):
-           <small className="r154-no-signal">원본 신호 확인 불가</small>}
-           {signalChips.length>5&&<small className="r154-more-signals">+{signalChips.length-5}</small>}</div>
-       </div>
+     <div className="basket-discovery-signals" aria-label="발견 당시 기술 신호">
+       <span className="basket-discovery-signals-title">발견 당시 기술 신호</span>
+       <div className="basket-discovery-signals-list">{signalChips.length?signalChips.map(t=><span className="basket-discovery-signal-chip" key={t}>{t}</span>):
+         <small className="r154-no-signal">원본 신호 확인 불가</small>}</div>
      </div>
      <StopLossRow active={active} code={it.code} day={it.day} baseline={it.baseline}
        signals={signalChips} highestObserved={maxHigh} highestDay={maxHighDay}
