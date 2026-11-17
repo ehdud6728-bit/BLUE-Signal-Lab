@@ -50,7 +50,8 @@ export default function SymbolAnalysisPanel({defaultDate}:{defaultDate:string}){
     const data=await r.json() as Catalog;
     if(controller.signal.aborted)return;
     setMatches(data.results||[]);
-    setCatalogMessage(data.status==='CATALOG_NOT_READY'?'종목명 목록 준비 중 · 종목코드로는 조회할 수 있습니다.':'');
+    setCatalogMessage(data.status==='CATALOG_NOT_READY'?'종목명 목록 준비 중 · 종목코드로는 조회할 수 있습니다.':
+      data.status==='PARTIAL_CATALOG'?'전체 종목명 목록 저장 전 · 기존 검색 종목부터 검색됩니다.':'');
     if(/^[0-9A-Z]{6}$/.test(term.toUpperCase())){
      const exact=(data.results||[]).find(x=>x.code===term.toUpperCase());
      setName(exact?.name||'');
@@ -78,13 +79,32 @@ export default function SymbolAnalysisPanel({defaultDate}:{defaultDate:string}){
  async function requestAnalysis(){
   if(!valid)return;setBusy(true);setNotice('');
   try{
+   if(result?.status==='READY'){
+    setNotice('이미 저장된 분석입니다. 아래 분석 결과를 확인해 주세요.');return;
+   }
+   // Avoid dispatching a redundant GitHub run for an already-stored diagnosis.
+   const checkUrl=new URL(API+'/api/analysis/symbol');
+   checkUrl.searchParams.set('code',code.trim().toUpperCase());checkUrl.searchParams.set('asof',day);
+   const check=await fetch(checkUrl.toString(),{credentials:'include',cache:'no-store'});
+   const saved=await check.json() as Result&{error?:string};
+   if(!check.ok)throw Error(saved.message||saved.error||`기존 기록 확인 실패 (${check.status})`);
+   if(saved.status==='READY'){
+    setResult(saved);setNotice('이미 저장된 분석입니다. 분석 요청 없이 기존 기록을 표시했습니다.');return;
+   }
+   if(saved.status!=='NOT_STORED')throw Error(saved.message||'분석 기록 상태를 확인할 수 없습니다.');
    const r=await fetch(API+'/api/analysis/request',{method:'POST',credentials:'include',
-    headers:{'Content-Type':'application/json'},body:JSON.stringify({code:code.trim().toUpperCase(),asof:day})});
+    // text/plain is a CORS-simple request. Avoid JSON preflight through Access.
+    headers:{'Content-Type':'text/plain;charset=UTF-8'},body:JSON.stringify({code:code.trim().toUpperCase(),asof:day})});
    const data=await r.json() as Result&{error?:string};
-   if(!r.ok)throw Error(data.message||data.error||`분석 요청 실패 ${r.status}`);
+   if(!r.ok)throw Error(data.message||data.error||`분석 요청 실패 (HTTP ${r.status})`);
    setNotice(data.status==='READY'?'이미 분석 기록이 있습니다. 조회해 주세요.':
     '분석 요청이 접수됐습니다. GitHub 분석·D1 저장 후 다시 조회해 주세요.');
-  }catch(e){setNotice(e instanceof Error?e.message:'분석을 요청할 수 없습니다.');}
+  }catch(e){
+   const msg=e instanceof Error?e.message:'분석을 요청할 수 없습니다.';
+   setNotice(/Failed to fetch|NetworkError|Load failed/i.test(msg)
+    ?'분석 API와 연결하지 못했습니다. API Worker 배포·Access 로그인·브라우저 네트워크를 확인해 주세요. 같은 요청을 반복해서 누르지 않아도 됩니다.'
+    :msg);
+  }
   finally{setBusy(false);}
  }
  const d=result?.diagnosis,quality=result?.quality_status;
@@ -109,7 +129,7 @@ export default function SymbolAnalysisPanel({defaultDate}:{defaultDate:string}){
     </div>
     <label>분석 기준일<input type="date" value={day} onChange={e=>{setDay(e.target.value);setResult(null);}}/></label>
     <button type="button" disabled={!valid||busy} onClick={()=>{void lookup();}}>{busy?'확인 중…':'분석 조회'}</button>
-    <button type="button" className="outline" disabled={!valid||busy} onClick={()=>{void requestAnalysis();}}>분석 요청</button>
+    <button type="button" className="outline" disabled={!valid||busy||result?.status==='READY'} onClick={()=>{void requestAnalysis();}}>{result?.status==='READY'?'저장된 분석':'분석 요청'}</button>
    </div>
    {notice&&<p role="status" className="symbol-analysis-message">{notice}</p>}
    {result&&result.status!=='READY'&&<p className="symbol-analysis-warning" role="status">{result.message||'분석 자료를 확인하지 못했습니다. 관리자에게 저장 상태를 문의해 주세요.'}</p>}
