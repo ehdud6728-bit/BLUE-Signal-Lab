@@ -10,6 +10,7 @@
   "triggers": {"crons": ["* * * * *"]},
   "vars": {
     "COLLECTOR_ENABLED": "true",
+    "BASKET_BATCH_LIMIT": "18",
     "CANDIDATE_LIMIT": "12",
     "CLOSED_DATES": ""
   }
