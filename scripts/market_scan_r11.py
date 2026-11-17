@@ -268,7 +268,14 @@ def diagnose_symbol(raw: pd.DataFrame, asof: str, code: str, matches: list[dict]
     selected = next((r for r in matches if r.get("code") == code), None)
     clean = normalise(raw)
     history = clean[(clean.code == code) & (clean.date.le(pd.Timestamp(asof)))]
+    name = ''
+    if 'Name' in history.columns:
+        known = history['Name'].dropna().astype(str).str.strip()
+        known = known[known.ne('') & known.ne('nan')]
+        if not known.empty:
+            name = known.iloc[-1][:100]
     result: dict = {"code": code, "asof": asof, "matched": selected is not None,
+                    "name": name,
                     "selected_signals": selected.get("signals", "") if selected else ""}
     if history.empty or history.date.iloc[-1].strftime("%Y-%m-%d") != asof:
         return {**result, "reason": "MISSING_VERIFIED_TARGET_CANDLE"}
@@ -351,6 +358,32 @@ def diagnose_symbol(raw: pd.DataFrame, asof: str, code: str, matches: list[dict]
     return result
 
 
+def build_symbol_directory(raw: pd.DataFrame, asof: str) -> dict:
+    """Names available on the proven target date, no later-date survivorship.
+
+    Published independently of matched signals for Korean-name autocomplete.
+    """
+    if 'Name' not in raw.columns:
+        raise ValueError('Stock names missing from directory source')
+    base = raw.reset_index() if 'Date' not in raw.columns and raw.index.name == 'Date' else raw.copy()
+    dates = pd.to_datetime(base['Date']).dt.normalize()
+    target = base.loc[dates.eq(pd.Timestamp(asof))].copy()
+    target['Code'] = target['Code'].astype(str).str.replace(r'\.0$', '', regex=True).str.upper().str.zfill(6)
+    target['Market'] = target['Market'].astype(str).str.upper()
+    target = target.loc[target['Market'].isin(['KOSPI', 'KOSDAQ'])]
+    if target.Code.duplicated().any():
+        raise ValueError('Duplicate as-of stock code in directory source')
+    items = []
+    for row in target.itertuples(index=False):
+        code = str(row.Code)
+        name = str(row.Name).strip() if pd.notna(row.Name) else ''
+        if re.fullmatch(r'[0-9A-Z]{6}', code) and 0 < len(name) <= 100 and name.lower() != 'nan':
+            items.append({'code': code, 'name': name, 'market': str(row.Market)})
+    if len(items) < 1200:
+        raise ValueError(f'Incomplete stock name directory: {len(items)}')
+    return {'asof': asof, 'symbols': sorted(items, key=lambda item: item['code'])}
+
+
 def build_symbol_snapshot(raw: pd.DataFrame, asof: str, code: str,
                           matches: list[dict], source: str) -> dict:
     """Independent as-of snapshot, including symbols that failed the scanner.
@@ -418,6 +451,9 @@ def main():
             supplement[COLS].to_csv(index=False).encode("utf-8")).hexdigest()
     export(rows, audit, args.out, hashes)
     if args.diagnose_code:
+        directory = build_symbol_directory(upgraded, target.isoformat())
+        (Path(args.out)/'SYMBOL_DIRECTORY.json').write_text(
+            json.dumps(directory, ensure_ascii=False, separators=(',', ':')), encoding='utf-8')
         diagnostic=diagnose_symbol(upgraded,target.isoformat(),args.diagnose_code.upper(),rows)
         (Path(args.out)/'SYMBOL_DIAGNOSE.json').write_text(
             json.dumps(diagnostic,ensure_ascii=False,indent=2),encoding='utf-8')

@@ -21,7 +21,52 @@ SCHEMA = '''CREATE TABLE IF NOT EXISTS blue_symbol_analysis_v1 (
  PRIMARY KEY (run_id,code,day)
 );
 CREATE INDEX IF NOT EXISTS idx_symbol_analysis_v1_lookup
- ON blue_symbol_analysis_v1(code,day,created_at_utc);'''
+ ON blue_symbol_analysis_v1(code,day,created_at_utc);
+CREATE TABLE IF NOT EXISTS blue_symbol_directory_v1 (
+ code TEXT PRIMARY KEY, name TEXT NOT NULL, market TEXT NOT NULL,
+ asof_day TEXT NOT NULL, updated_at_utc TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_blue_symbol_directory_v1_name
+ ON blue_symbol_directory_v1(name);'''
+
+
+def directory_statements(directory: dict) -> list[str]:
+    day = str(directory.get('asof', ''))
+    symbols = directory.get('symbols')
+    if not re.fullmatch(r'20\d{2}-\d{2}-\d{2}', day) or not isinstance(symbols, list):
+        raise ValueError('Invalid symbol directory')
+    if not 1200 <= len(symbols) <= 10000:
+        raise ValueError('Unexpected stock directory size')
+    seen: set[str] = set()
+    statements: list[str] = []
+    batch: list[str] = []
+
+    def flush() -> None:
+        if not batch:
+            return
+        sql = ('INSERT INTO blue_symbol_directory_v1(code,name,market,asof_day) VALUES '\
+               + ','.join(batch) + ' ON CONFLICT(code) DO UPDATE SET '
+               'name=excluded.name,market=excluded.market,asof_day=excluded.asof_day,'
+               'updated_at_utc=CURRENT_TIMESTAMP '
+               'WHERE excluded.asof_day>=blue_symbol_directory_v1.asof_day;')
+        if len(sql.encode('utf-8')) > MAX_STATEMENT_BYTES:
+            raise ValueError('Directory SQL too large')
+        statements.append(sql)
+        batch.clear()
+
+    for item in symbols:
+        code = str(item.get('code', ''))
+        name = str(item.get('name', '')).strip()
+        market = str(item.get('market', ''))
+        if not re.fullmatch(r'[0-9A-Z]{6}', code) or not 0 < len(name) <= 100 \
+                or market not in ('KOSPI', 'KOSDAQ') or code in seen:
+            raise ValueError('Invalid or duplicate stock directory entry')
+        seen.add(code)
+        batch.append('(' + ','.join(map(quoted, (code, name, market, day))) + ')')
+        if len(batch) >= 30:
+            flush()
+    flush()
+    return statements
 
 
 def statements(item: dict, run_id: str) -> list[str]:
@@ -73,9 +118,15 @@ def statements(item: dict, run_id: str) -> list[str]:
     return result
 
 
-def write_sql(input_path: str, output_path: str, run_id: str) -> int:
+def write_sql(input_path: str, output_path: str, run_id: str,
+              directory_path: str | None = None) -> int:
     item = json.loads(Path(input_path).read_text(encoding='utf-8'))
     pieces = statements(item,run_id)
+    if directory_path:
+        directory = json.loads(Path(directory_path).read_text(encoding='utf-8'))
+        if directory.get('asof') != item['day']:
+            raise ValueError('Directory and diagnosis dates differ')
+        pieces += directory_statements(directory)
     Path(output_path).write_text(SCHEMA+'\n'+'\n'.join(pieces)+'\n',encoding='utf-8')
     return len(pieces)
 
@@ -85,5 +136,6 @@ if __name__ == '__main__':
     p.add_argument('--input',required=True)
     p.add_argument('--out',required=True)
     p.add_argument('--run-id',required=True)
+    p.add_argument('--directory',help='As-of full market stock name index (independent table)')
     args=p.parse_args()
-    print('BLUE_SYMBOL_DIAGNOSTIC_SQL',write_sql(args.input,args.out,args.run_id))
+    print('BLUE_SYMBOL_DIAGNOSTIC_SQL',write_sql(args.input,args.out,args.run_id,args.directory))
