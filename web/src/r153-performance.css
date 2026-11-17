@@ -11,6 +11,7 @@
   color:#6680a4;font-size:11px;font-weight:800;cursor:pointer;}
  .mobile-dock button.dock-primary{color:#1e5add;background:#eff4ff}
 }
+@media(max-width:400px){.mobile-dock{padding-left:6px!important;padding-right:6px!important;gap:1px!important}.mobile-dock button{font-size:9px!important;min-width:0}.mobile-dock button span{white-space:nowrap}}
 .r153-performance-status{display:flex;align-items:center;gap:5px;flex-wrap:wrap;color:#64809f;font-size:11px;margin:7px 0 10px}
 .r153-row-state{margin-top:4px;font-size:10px;color:#8192aa}
 .r153-price-grid small{display:block;margin-top:2px;font-size:10px;color:#8896ad;line-height:1.3}

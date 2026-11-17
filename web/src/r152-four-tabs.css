@@ -8,6 +8,7 @@
 .r152-full-mode>.search-panel{display:none!important}
 .r152-full-mode>.content{max-width:none!important;width:100%!important}
 .r152-tracking-content,.r152-ai-content{width:100%;min-width:0;display:flex;flex-direction:column;gap:12px}
+.r152-analysis-content{width:100%;min-width:0;display:flex;flex-direction:column;gap:12px}
 .r152-tracking-content>.blue-live{margin:0}
 .r152-ai-section{width:100%;scroll-margin-top:14px}
 .r152-ai-section>.ai-panel{margin:0}

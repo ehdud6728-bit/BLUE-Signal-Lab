@@ -56,3 +56,4 @@ html{scroll-behavior:smooth}body{min-width:320px}button{touch-action:manipulatio
 .gc-filter-note{margin:8px 0 0;color:#6c7e9b;font-size:10px;line-height:1.6}
 @media(max-width:790px){.ai-accordion-toggle{padding:12px}.gc-filter-panel{padding:11px}.gc-filter-chip{font-size:11px!important}.gc-filter-heading span{width:100%}}
 @media(prefers-reduced-motion:reduce){.ai-collapse-label svg{transition:none}}
+.ai-status-check{display:inline-flex;align-items:center;gap:5px;margin:9px 0;padding:8px 10px;background:#edf4ff;border:1px solid #d2e0fa;border-radius:9px;color:#315b9a;font-size:11px;font-weight:700;cursor:pointer}

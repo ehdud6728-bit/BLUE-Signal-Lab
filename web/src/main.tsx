@@ -9,7 +9,7 @@ import './r1595-group-price.css';
 import AiWidget from './AiWidget';
 import React, {useEffect, useRef, useState} from 'react';
 import {createRoot} from 'react-dom/client';
-import {Search, CalendarDays, BarChart3, AlertCircle, RefreshCw, SlidersHorizontal, ListFilter, X, ChevronRight, Download, ArrowLeft, Activity, Clock3, Database, CheckCircle2, ShoppingBasket, Radar} from 'lucide-react';
+import {Search, CalendarDays, BarChart3, AlertCircle, RefreshCw, SlidersHorizontal, ListFilter, X, ChevronRight, Download, ArrowLeft, Activity, Clock3, Database, CheckCircle2, ShoppingBasket, Radar, ScanSearch} from 'lucide-react';
 import './style.css';
 import './r08.css';
 import './mobile-pwa.css';
@@ -138,7 +138,8 @@ function App(){
   },[amountChoice,customAmount,patternThreshold,onlyPattern,patternSampleMin]);
   // R151_BASKET_TAB: keep both workspaces mounted, toggle only visibility.
   // R152_FOUR_TABS: separate search, live tracking, AI briefing and basket.
-  const [activeView,setActiveView]=useState<'research'|'tracking'|'ai'|'basket'>('research');
+  const [activeView,setActiveView]=useState<'research'|'analysis'|'tracking'|'ai'|'basket'>('research');
+  const [analysisRefresh,setAnalysisRefresh]=useState(0);
   const [basketIds,setBasketIds]=useState<string[]>(()=>{
     try{const x=JSON.parse(localStorage.getItem('blue_r15_basket_v1')||'[]');
       return Array.isArray(x)?x.filter((i:unknown)=>Boolean(i&&typeof i==='object'&&'id' in i)).map((i:any)=>String(i.id)):[];
@@ -426,8 +427,8 @@ function App(){
     if(!canBasket(r)||inBasket(r)||basketIds.length>=100)return;
     setBasketRequest({serial:++basketSequence.current,item:{...r,name:displayName(r)}});
   };
-  const nav=(target:'search'|'results'|'summary'|'ai'|'basket'|'tracking')=>{
-    if(target==='basket'||target==='tracking'||target==='ai'){
+  const nav=(target:'search'|'results'|'summary'|'ai'|'basket'|'tracking'|'analysis')=>{
+    if(target==='basket'||target==='tracking'||target==='ai'||target==='analysis'){
       setActiveView(target);
       window.setTimeout(()=>window.scrollTo({top:0,behavior:'smooth'}),20);
       return;
@@ -449,8 +450,10 @@ function App(){
       if(total!==null)void search(page,false);
     }else if(activeView==='tracking')setR1594TrackingRefresh(v=>v+1);
     else if(activeView==='basket')setR1594BasketRefresh(v=>v+1);
+    else if(activeView==='analysis')setAnalysisRefresh(v=>v+1);
     else setR1594AiRefresh(v=>v+1);
   };
+  const aiReportDay=mode==='single'?(latest&&date>latest?latest:date):latest||end;
   // R1595: manually request a missing verified symbol, then poll only that pair.
   // The protected API validates real discovery evidence; no KIS call from this browser.
   async function requestMissingQuote(r:Signal){
@@ -502,7 +505,7 @@ function App(){
       </div>
     </header>
     <div className="r1594-view-toolbar" role="group" aria-label="현재 화면 데이터 새로고침">
-      <span>{({research:'종목 검색',tracking:'종목 추적',ai:'AI 시황',basket:'장바구니'} as const)[activeView]}</span>
+      <span>{({research:'종목 검색',analysis:'종목 정밀분석',tracking:'종목 추적',ai:'AI 시황',basket:'장바구니'} as const)[activeView]}</span>
       <button type="button" disabled={activeView==='research'&&(busy||requestBusy)}
         onClick={refreshCurrentView}><RefreshCw size={16}/> 새로고침</button>
     </div>
@@ -582,6 +585,9 @@ function App(){
         </div>
       </aside>
       <section className="content">
+        <div className={'r152-analysis-content '+(activeView==='analysis'?'':'r151-hidden')}>
+          <SymbolAnalysisPanel key={analysisRefresh} defaultDate={date}/>
+        </div>
         <div className={'r151-basket-content '+(activeView==='basket'?'':'r151-hidden')}>
           <SmartBasket quickAddRequest={basketRequest} onItemsChange={setBasketIds} active={activeView==='basket'} refreshKey={r1594BasketRefresh} patternHighlightMin={highlightMin} patternSampleMin={patternSampleMin}/>
         </div>
@@ -589,17 +595,17 @@ function App(){
           <LiveMarket active={activeView==='tracking'} refreshKey={r1594TrackingRefresh}/>
         </div>
         <div className={'r152-ai-content '+(activeView==='ai'?'':'r151-hidden')}>
+          {mode==='single'&&latest&&date>latest&&<p className="r159-data-note">{date}에는 저장된 확정 일봉이 없어, AI 시황은 최근 저장일 {latest} 기준으로 조회합니다.</p>}
           <section ref={aiRef} id="ai-panel" className="r152-ai-section">
-            <AiWidget key={'market-'+(mode==='single'?date:latest||end)+'-'+r1594AiRefresh} kind="market"
-              date={mode==='single'?date:latest||end}
-              observed={mode==='single'?days.find(d=>d.day===date)?.observed_stocks:null}
-              matched={mode==='single'?days.find(d=>d.day===date)?.matched_stocks:null}
-              events={mode==='single'?days.find(d=>d.day===date)?.signal_events:null}
+            <AiWidget key={'market-'+aiReportDay+'-'+r1594AiRefresh} kind="market"
+              date={aiReportDay}
+              observed={mode==='single'?days.find(d=>d.day===aiReportDay)?.observed_stocks:null}
+              matched={mode==='single'?days.find(d=>d.day===aiReportDay)?.matched_stocks:null}
+              events={mode==='single'?days.find(d=>d.day===aiReportDay)?.signal_events:null}
               searchMatched={rows}/>
           </section>
         </div>
         <div className={'r151-research-content '+(activeView==='research'?'':'r151-hidden')}>
-        <SymbolAnalysisPanel defaultDate={date}/>
         <div className="stats" ref={summaryRef} id="summary-panel">
           <div className="metric"><span>검색 결과</span><strong>{total==null?'—':total.toLocaleString()}</strong><small>종목</small></div>
           <div className="metric"><span>검색 거래일</span><strong>{total==null?'—':days.length}</strong><small>저장된 날짜</small></div>
@@ -747,6 +753,7 @@ function App(){
     <footer>BLUE Signal Lab · RESEARCH ONLY · 매매 주문 기능 없음</footer>
     <nav className="mobile-dock" aria-label="모바일 메뉴">
       <button className={activeView==='research'?'dock-primary':''} onClick={()=>nav('search')}><BarChart3 size={20}/><span>검색</span></button>
+      <button className={activeView==='analysis'?'dock-primary':''} onClick={()=>nav('analysis')}><ScanSearch size={20}/><span>정밀분석</span></button>
       <button className={activeView==='tracking'?'dock-primary':''} onClick={()=>nav('tracking')}><Radar size={20}/><span>추적</span></button>
       <button className={activeView==='ai'?'dock-primary':''} onClick={()=>nav('ai')}><Activity size={20}/><span>AI 시황</span></button>
       <button className={activeView==='basket'?'dock-primary':''} onClick={()=>nav('basket')}><ShoppingBasket size={20}/><span>장바구니</span></button>

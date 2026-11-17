@@ -5,6 +5,19 @@ import './ai.css';
 const API=(import.meta.env.VITE_API_BASE||'https://blue-signal-lab-api-v2.ehdud6728.workers.dev').replace(/\/+$/,'');
 type Source={title:string;url:string};
 type Report={status:'READY'|'PENDING'|'NOT_CACHED'|'FAILED';report?:string;sources?:Source[];generated_at?:string;cached?:boolean;message?:string;error?:string};
+type AiStatus={status:string;gemini_key_configured?:boolean;ai_schema_ready?:boolean;model?:string;error?:string;message?:string};
+const aiErrorGuide:Record<string,string>={
+ ACCESS_REQUIRED:'API 인증이 만료되었거나 연결되지 않았습니다. Access에 다시 로그인한 후 시도해 주세요.',
+ ORIGIN_DENIED:'허용된 앱 주소에서 요청하지 않았습니다. 앱을 새로고침해 주세요.',
+ GEMINI_KEY_MISSING:'Worker의 GEMINI_API_KEY Secret이 등록되지 않았습니다.',
+ GEMINI_AUTH:'Gemini API 키 또는 프로젝트 권한을 확인해야 합니다.',
+ QUOTA:'Gemini 제공사 사용량 한도에 도달했습니다. 할당량을 확인해 주세요.',
+ DAILY_LIMIT:'BLUE AI의 오늘 호출 한도에 도달했습니다.',
+ MODEL_NOT_AVAILABLE:'설정된 Gemini 모델 접근 권한을 확인해야 합니다.',
+ DATE_NOT_ANALYZED:'이 날짜의 전체 종목 검색 결과가 D1에 저장되지 않았습니다. 저장된 날짜를 선택해 주세요.',
+ AI_SETUP_REQUIRED:'AI 분석용 D1 테이블과 API Worker 배포 상태를 확인해 주세요.',
+ REQUEST_FAILED:'Gemini 호출이 실패했습니다. API 연결과 제한 상태를 확인해 주세요.'
+};
 export type AiStock={code:string;name:string|null;day:string;signals:string[];close_price:number|null;supply_distance_pct:number|null;extras:Record<string,unknown>};
 type Props={kind:'market'|'stock';date:string;stock?:AiStock|null;observed?:number|null;matched?:number|null;events?:number|null;searchMatched?:AiStock[]};
 const smallFields=[
@@ -35,6 +48,8 @@ export default function AiWidget(props:Props){
   const [busy,setBusy]=useState(false);
   const [error,setError]=useState('');
   const [manualNotice,setManualNotice]=useState('');
+  const [diagnostic,setDiagnostic]=useState<AiStatus|null>(null);
+  const [diagnosticBusy,setDiagnosticBusy]=useState(false);
   const valid=kind==='market'||Boolean(stock?.code);
   const endpoint=new URL(API+'/api/ai/report');endpoint.searchParams.set('kind',kind);endpoint.searchParams.set('date',date);
   if(kind==='stock'&&stock)endpoint.searchParams.set('code',stock.code);
@@ -71,10 +86,20 @@ export default function AiWidget(props:Props){
         body:JSON.stringify({date,...(kind==='stock'?{code:stock?.code}:{})})
       });
       let d:Report;try{d=await r.json() as Report;}catch{throw new Error(`AI 응답을 읽지 못했습니다 (${r.status})`);}
-      if(!r.ok)throw new Error(d.message||d.error||`AI API 오류 (${r.status})`);
+      if(!r.ok){const code=d.error||`HTTP_${r.status}`;throw new Error(`${aiErrorGuide[code]||d.message||'AI 호출에 실패했습니다.'} (오류 ${code} / HTTP ${r.status})`);}
       setReport(d);
     }catch(e){setError(e instanceof Error?e.message:String(e));}
     finally{setBusy(false);}
+  }
+  async function checkConnection(){
+    setDiagnosticBusy(true);
+    try{
+      const r=await fetch(API+'/api/ai/status',{credentials:'include',cache:'no-store'});
+      const result=await r.json() as AiStatus;
+      if(!r.ok)throw Error(`${result.message||result.error||'연결 실패'} (HTTP ${r.status})`);
+      setDiagnostic(result);
+    }catch(e){setDiagnostic({status:'ERROR',message:e instanceof Error?e.message:'연결을 확인하지 못했습니다.'});}
+    finally{setDiagnosticBusy(false);}
   }
   function openExternal(to:'gemini'|'chatgpt'){
     // Both actions originate from one user gesture. The destination cannot receive pasted content automatically.
@@ -91,6 +116,11 @@ export default function AiWidget(props:Props){
     <button className="ai-primary" type="button" disabled={busy||!valid||report?.status==='PENDING'} onClick={()=>{void generate();}}>
       {busy?<LoaderCircle size={16} className="ai-spin"/>:<Newspaper size={16}/>}{busy?'Gemini 분석 중…':report?.status==='READY'?'저장된 분석 확인':kind==='market'?'Gemini 시황 분석':'Gemini 종목 분석'}
     </button>
+    <button type="button" className="ai-status-check" disabled={diagnosticBusy} onClick={()=>{void checkConnection();}}>
+      <RefreshCw size={14}/> {diagnosticBusy?'점검 중…':'AI 연결 상태 점검'}
+    </button>
+    {diagnostic&&<p className="ai-note" role="status">{diagnostic.status==='ERROR'?diagnostic.message:
+      `AI 키: ${diagnostic.gemini_key_configured?'등록됨':'미등록'} · D1 AI 저장소: ${diagnostic.ai_schema_ready?'준비됨':'설치 필요'} · 모델: ${diagnostic.model||'미확인'}`}</p>}
     {report?.status==='PENDING'&&<div className="ai-note"><RefreshCw size={16}/> 다른 기기에서 분석 중입니다. 완료되면 결과가 표시됩니다.</div>}
     {error&&<div className="ai-error" role="alert"><AlertCircle size={16}/>{error}</div>}
     {report?.status==='READY'&&<div className="ai-report">
