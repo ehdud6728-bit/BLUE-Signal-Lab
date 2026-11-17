@@ -6,7 +6,7 @@ import {comparePrices} from './price-compare';
 import {requestSearchQuotes} from './search-quote-priority';
 import {technicalFilterWhere} from './technical-filters';
 import {validChartCode} from './chart-query';
-import {lookupSymbolAnalysis,validAnalysisCode} from './symbol-analysis';
+import {lookupSymbolAnalysis,lookupSymbolDirectory,validAnalysisCode} from './symbol-analysis';
 import {runEodCloudflareCron} from './eod-cron';
 interface Env {
   DB: D1Database;
@@ -90,6 +90,12 @@ export default {
     // An Origin header alone never grants permission to dispatch a GitHub workflow.
     const access = (ctx as ExecutionContext & { access?: unknown } | undefined)?.access;
     try {
+      if (p === '/api/analysis/symbols' && request.method === 'GET') {
+        if (!access) return respond({error:'ACCESS_REQUIRED',message:'Cloudflare Access 로그인 필요'},401);
+        const q=u.searchParams.get('q')||'';
+        const data=await lookupSymbolDirectory(env.DB,q);
+        return respond(data,data.status==='INVALID_QUERY'?400:200);
+      }
       if (p === '/api/analysis/symbol' && request.method === 'GET') {
         if (!access) return respond({error:'ACCESS_REQUIRED',message:'Cloudflare Access 로그인 필요'},401);
         const code=(u.searchParams.get('code')||'').trim().toUpperCase();
@@ -137,6 +143,16 @@ export default {
           message:'과거 일봉 분석을 요청했습니다. 등록되면 이 화면에서 다시 조회하세요.'},202);
       }
       // AI requires Cloudflare Access at the API Worker edge. Origin alone is not authentication.
+      if (p === '/api/ai/status' && request.method === 'GET') {
+        if (!access) return respond({error:'ACCESS_REQUIRED',message:'Cloudflare Access 로그인 필요'},401);
+        const rows=await env.DB.prepare(`SELECT name FROM sqlite_master
+          WHERE type='table' AND name IN ('ai_analysis_cache','ai_daily_usage')`).all<{name:string}>();
+        const present=new Set((rows.results||[]).map(r=>r.name));
+        return respond({status:'READY',gemini_key_configured:Boolean(env.GEMINI_API_KEY),
+          ai_schema_ready:present.has('ai_analysis_cache')&&present.has('ai_daily_usage'),
+          model:env.GEMINI_MODEL||'gemini-3.5-flash-lite',
+          note:'키 값이나 API 응답 본문은 반환하지 않습니다. 키 존재 여부와 D1 테이블만 확인합니다.'});
+      }
       if (p === '/api/ai/report' && request.method === 'GET') {
         if (!access) return respond({error:'ACCESS_REQUIRED',message:'Cloudflare Access 로그인 필요'},401);
         const upstream=await getCachedAi(request,env);

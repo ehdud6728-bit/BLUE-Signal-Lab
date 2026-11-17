@@ -3,6 +3,23 @@ export const validAnalysisCode=(code:string)=>/^[0-9A-Z]{6}$/.test(code);
 export const validAnalysisDate=(day:string)=>/^20\d{2}-\d{2}-\d{2}$/.test(day)&&
   !Number.isNaN(Date.parse(day+'T00:00:00Z'))&&new Date(day+'T00:00:00Z').toISOString().slice(0,10)===day;
 
+/** Bounded, read-only name/code lookup; never relies on matched signals. */
+export async function lookupSymbolDirectory(db:D1Database, query:string):Promise<Record<string,unknown>>{
+  const q=query.trim();
+  if(!q||q.length>40||/[\u0000-\u001f]/.test(q))return {status:'INVALID_QUERY'};
+  const table=await db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='blue_symbol_directory_v1'").first();
+  if(!table)return {status:'CATALOG_NOT_READY',results:[],message:'종목명 목록이 아직 설치되지 않았습니다. 종목코드는 직접 입력할 수 있습니다.'};
+  const response=await db.prepare(`SELECT code,name,market FROM blue_symbol_directory_v1
+    WHERE instr(lower(name),lower(?))>0 OR instr(code,upper(?))>0
+    ORDER BY CASE WHEN code=upper(?) THEN 0
+      WHEN lower(name)=lower(?) THEN 1
+      WHEN substr(code,1,length(?))=upper(?) THEN 2
+      WHEN substr(lower(name),1,length(?))=lower(?) THEN 3 ELSE 4 END,
+      name,code LIMIT 12`)
+    .bind(q,q,q,q,q,q,q,q).all<{code:string;name:string;market:string}>();
+  return {status:'READY',results:response.results||[]};
+}
+
 export async function lookupSymbolAnalysis(db:D1Database,code:string,day:string):Promise<Record<string,unknown>>{
   if(!validAnalysisCode(code)||!validAnalysisDate(day))return {status:'INVALID_QUERY'};
   const exists=await db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='blue_symbol_analysis_v1'").first();
