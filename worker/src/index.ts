@@ -11,6 +11,7 @@ import {lookupSymbolLive,requestSymbolLive,validLiveCode} from './symbol-live';
 import {runEodCloudflareCron} from './eod-cron';
 interface Env {
   DB: D1Database;
+  KIS_COLLECTOR?: {collectNow(code:string):Promise<{status:string;code?:string}>};
   CORS_ORIGIN?: string;
   GITHUB_TOKEN?: string;
   GEMINI_API_KEY?: string;
@@ -112,7 +113,8 @@ export default {
     const access = (ctx as ExecutionContext & { access?: unknown } | undefined)?.access;
     try {
       // Current KIS quote research is independent of today's confirmed KRX EOD.
-      // It remains Access-protected, code-allowlisted and asynchronous.
+      // The saved quote is always available immediately. The optional private
+      // RPC call refreshes it synchronously, without sending KIS keys to API.
       if (p === '/api/analysis/live' && request.method === 'GET') {
         if(!access)return respond({error:'ACCESS_REQUIRED',message:'Cloudflare Access 로그인 필요'},401);
         const code=(u.searchParams.get('code')||'').trim().toUpperCase();
@@ -130,6 +132,42 @@ export default {
         const data=await requestSymbolLive(env.DB,code);
         return respond(data,data.status==='UNKNOWN_SYMBOL'?404:
           data.status==='QUEUE_FULL'?429:202);
+      }
+      if (p === '/api/analysis/live/refresh' && request.method === 'POST') {
+        if(request.headers.get('Origin')!==origin)return respond({error:'ORIGIN_DENIED'},403);
+        if(!access)return respond({error:'ACCESS_REQUIRED',message:'Cloudflare Access 로그인 필요'},401);
+        let payload:{code?:unknown};
+        try{payload=await request.json() as typeof payload;}
+        catch{return respond({error:'INVALID_JSON'},400);}
+        const code=typeof payload.code==='string'?payload.code.trim().toUpperCase():'';
+        if(!validLiveCode(code))return respond({error:'INVALID_CODE'},400);
+        const before=await lookupSymbolLive(env.DB,code);
+        if(before.status==='UNKNOWN_SYMBOL')return respond(before,404);
+        let outcome='NOT_CONNECTED';
+        if(env.KIS_COLLECTOR){
+          try{
+            const result=await env.KIS_COLLECTOR.collectNow(code);
+            outcome=result?.status||'QUOTE_UNAVAILABLE';
+          }catch{outcome='QUOTE_UNAVAILABLE';}
+        }
+        // The one-off read succeeds without touching the minute queue. Only
+        // an unavailable provider/service falls back to normal Cron recovery.
+        if(!['SAVED','COOLDOWN','RATE_LIMITED'].includes(outcome)){
+          const queued=await requestSymbolLive(env.DB,code);
+          if(queued.status==='UNKNOWN_SYMBOL')return respond(queued,404);
+        }
+        const latest=await lookupSymbolLive(env.DB,code);
+        const notice:Record<string,string>={
+          SAVED:'KIS 시세를 직접 조회해 저장했습니다. 확정 일봉은 아닙니다.',
+          MARKET_CLOSED:'현재 KIS 즉시 수집 시간이 아닙니다. 기존 저장 시세를 표시합니다.',
+          WAITING_TOKEN:'KIS 토큰을 확인하지 못해 자동 수집을 대기합니다.',
+          COOLDOWN:'최근 요청한 종목입니다. 저장 시세를 먼저 확인해 주세요.',
+          RATE_LIMITED:'시세 호출 제한에 도달해 저장 시세를 표시합니다.',
+          NOT_CONNECTED:'즉시 조회 연결이 아직 배포되지 않아 자동 수집으로 대기합니다.',
+          QUOTE_UNAVAILABLE:'KIS 응답을 검증하지 못했습니다. 자동 수집 대기 상태입니다.'
+        };
+        return respond({...latest,refresh_status:outcome,
+          message:notice[outcome]||'저장된 시세를 표시하며 자동 수집을 기다립니다.'},200);
       }
       if (p === '/api/analysis/symbols' && request.method === 'GET') {
         if (!access) return respond({error:'ACCESS_REQUIRED',message:'Cloudflare Access 로그인 필요'},401);
