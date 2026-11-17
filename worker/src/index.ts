@@ -6,6 +6,7 @@ import {comparePrices} from './price-compare';
 import {requestSearchQuotes} from './search-quote-priority';
 import {technicalFilterWhere} from './technical-filters';
 import {validChartCode} from './chart-query';
+import {lookupSymbolAnalysis,validAnalysisCode} from './symbol-analysis';
 import {runEodCloudflareCron} from './eod-cron';
 interface Env {
   DB: D1Database;
@@ -89,6 +90,52 @@ export default {
     // An Origin header alone never grants permission to dispatch a GitHub workflow.
     const access = (ctx as ExecutionContext & { access?: unknown } | undefined)?.access;
     try {
+      if (p === '/api/analysis/symbol' && request.method === 'GET') {
+        if (!access) return respond({error:'ACCESS_REQUIRED',message:'Cloudflare Access 로그인 필요'},401);
+        const code=(u.searchParams.get('code')||'').trim().toUpperCase();
+        const day=u.searchParams.get('asof')||'';
+        if(!validAnalysisCode(code)||!validDate(day)||day>todayKST())
+          return respond({error:'INVALID_ANALYSIS_QUERY'},400);
+        const data=await lookupSymbolAnalysis(env.DB,code,day);
+        return respond(data,data.status==='INVALID_QUERY'?400:200);
+      }
+      if (p === '/api/analysis/request' && request.method === 'POST') {
+        if(request.headers.get('Origin')!==origin)return respond({error:'ORIGIN_DENIED'},403);
+        if(!access)return respond({error:'ACCESS_REQUIRED',message:'Cloudflare Access 로그인 필요'},401);
+        if(!env.GITHUB_TOKEN)return respond({error:'GITHUB_DISPATCH_NOT_CONFIGURED'},503);
+        let payload:{code?:unknown;asof?:unknown};
+        try{payload=await request.json() as typeof payload;}catch{return respond({error:'INVALID_JSON'},400);}
+        const code=typeof payload.code==='string'?payload.code.trim().toUpperCase():'';
+        const day=typeof payload.asof==='string'?payload.asof:'';
+        if(!validAnalysisCode(code)||!scanDateOK(day))return respond({error:'INVALID_ANALYSIS_QUERY'},400);
+        const ready=await lookupSymbolAnalysis(env.DB,code,day);
+        if(ready.status==='READY')return respond({status:'READY',code,asof:day});
+        await env.DB.prepare(`CREATE TABLE IF NOT EXISTS blue_symbol_analysis_requests_v1 (
+          code TEXT NOT NULL,day TEXT NOT NULL,requested_at_utc TEXT NOT NULL,
+          status TEXT NOT NULL,PRIMARY KEY(code,day))`).run();
+        const stamp=new Date().toISOString();
+        const cutoff=new Date(Date.now()-45*60000).toISOString();
+        const claim=await env.DB.prepare(`INSERT INTO blue_symbol_analysis_requests_v1
+          (code,day,requested_at_utc,status) VALUES(?,?,?,'PENDING')
+          ON CONFLICT(code,day) DO UPDATE SET
+          requested_at_utc=excluded.requested_at_utc,status='PENDING'
+          WHERE requested_at_utc<? OR status='FAILED'`)
+          .bind(code,day,stamp,cutoff).run();
+        if(claim.meta?.changes!==1)return respond({status:'PENDING',code,asof:day,deduplicated:true},202);
+        try{
+          const gh=await fetch(`https://api.github.com/repos/${OWNER}/${REPO}/actions/workflows/${WORKFLOW}/dispatches`,{
+            method:'POST',headers:{...githubHeaders(env),'Content-Type':'application/json'},
+            body:JSON.stringify({ref:'main',inputs:{asof_date:day,diagnose_code:code,
+              publish_to_d1:'false',publish_diagnostic_only:'true'}})});
+          if(!gh.ok)throw Error('GITHUB_DISPATCH_'+gh.status);
+        }catch{
+          await env.DB.prepare(`UPDATE blue_symbol_analysis_requests_v1 SET status='FAILED'
+            WHERE code=? AND day=? AND requested_at_utc=?`).bind(code,day,stamp).run();
+          return respond({error:'GITHUB_DISPATCH_FAILED'},502);
+        }
+        return respond({status:'PENDING',code,asof:day,
+          message:'과거 일봉 분석을 요청했습니다. 등록되면 이 화면에서 다시 조회하세요.'},202);
+      }
       // AI requires Cloudflare Access at the API Worker edge. Origin alone is not authentication.
       if (p === '/api/ai/report' && request.method === 'GET') {
         if (!access) return respond({error:'ACCESS_REQUIRED',message:'Cloudflare Access 로그인 필요'},401);
