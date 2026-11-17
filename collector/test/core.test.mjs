@@ -170,7 +170,7 @@ test('collector reuses cache, persists quote, and logs receipt while leaving tok
 });
 
 test('the collector has no public manual trigger and Cron handler exists',async()=>{
-  const {default:handler}=await import('../src/index.mjs');
+  const {default:handler}=await import('../src/handler.mjs');
   const r=await handler.fetch(new Request('https://collector.example/run',{method:'POST'}),{COLLECTOR_ENABLED:'true'});
   assert.equal(r.status,404);assert.equal(typeof handler.scheduled,'function');
 });
