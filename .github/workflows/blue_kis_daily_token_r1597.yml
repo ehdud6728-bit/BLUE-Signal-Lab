@@ -1,4 +1,4 @@
-name: BLUE R1.5.9.7 KIS 24h Token Steward (SAFE GATED)
+name: BLUE R1.5.9.8 KIS Auto Token Steward (24h SAFE)
 
 on:
   workflow_dispatch:
@@ -31,9 +31,11 @@ concurrency:
 
 jobs:
   token_steward:
-    # Default is OFF. Scheduled requests cannot issue until manually setting
-    # repository variable BLUE_KIS_TOKEN_AUTO_ENABLED to the literal 'true'.
-    if: github.event_name == 'workflow_dispatch' || vars.BLUE_KIS_TOKEN_AUTO_ENABLED == 'true'
+    # Automatically run on schedule. Emergency stop: set repo variable
+    # BLUE_KIS_TOKEN_AUTO_PAUSED=true. No activation variable is required.
+    # The D1 atomic ledger, rolling 24h and KST-day guards prevent duplicate
+    # tokenP attempts even when GitHub cron triggers many times per day.
+    if: github.event_name != 'schedule' || vars.BLUE_KIS_TOKEN_AUTO_PAUSED != 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 8
     steps:
@@ -56,7 +58,9 @@ jobs:
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           MODE: ${{ github.event_name == 'schedule' && 'issue' || inputs.mode }}
-          ALLOW_ISSUE: ${{ github.event_name == 'schedule' && vars.BLUE_KIS_TOKEN_AUTO_ENABLED == 'true' || inputs.enable_issuance }}
+          # Scheduled refresh is authorized by default; manual dispatch still
+          # needs its explicit enable_issuance input for a tokenP attempt.
+          ALLOW_ISSUE: ${{ github.event_name == 'schedule' && 'true' || inputs.enable_issuance }}
         shell: bash
         run: |
           set -euo pipefail
