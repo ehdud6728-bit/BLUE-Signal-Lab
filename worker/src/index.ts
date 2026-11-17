@@ -7,6 +7,7 @@ import {requestSearchQuotes} from './search-quote-priority';
 import {technicalFilterWhere} from './technical-filters';
 import {validChartCode} from './chart-query';
 import {lookupSymbolAnalysis,lookupSymbolDirectory,validAnalysisCode} from './symbol-analysis';
+import {lookupSymbolLive,requestSymbolLive,validLiveCode} from './symbol-live';
 import {runEodCloudflareCron} from './eod-cron';
 interface Env {
   DB: D1Database;
@@ -110,6 +111,26 @@ export default {
     // An Origin header alone never grants permission to dispatch a GitHub workflow.
     const access = (ctx as ExecutionContext & { access?: unknown } | undefined)?.access;
     try {
+      // Current KIS quote research is independent of today's confirmed KRX EOD.
+      // It remains Access-protected, code-allowlisted and asynchronous.
+      if (p === '/api/analysis/live' && request.method === 'GET') {
+        if(!access)return respond({error:'ACCESS_REQUIRED',message:'Cloudflare Access 로그인 필요'},401);
+        const code=(u.searchParams.get('code')||'').trim().toUpperCase();
+        if(!validLiveCode(code))return respond({error:'INVALID_CODE'},400);
+        const data=await lookupSymbolLive(env.DB,code);
+        return respond(data,data.status==='UNKNOWN_SYMBOL'?404:200);
+      }
+      if (p === '/api/analysis/live/request' && request.method === 'POST') {
+        if(request.headers.get('Origin')!==origin)return respond({error:'ORIGIN_DENIED'},403);
+        if(!access)return respond({error:'ACCESS_REQUIRED',message:'Cloudflare Access 로그인 필요'},401);
+        let payload:{code?:unknown};
+        try{payload=await request.json() as typeof payload;}catch{return respond({error:'INVALID_JSON'},400);}
+        const code=typeof payload.code==='string'?payload.code.trim().toUpperCase():'';
+        if(!validLiveCode(code))return respond({error:'INVALID_CODE'},400);
+        const data=await requestSymbolLive(env.DB,code);
+        return respond(data,data.status==='UNKNOWN_SYMBOL'?404:
+          data.status==='QUEUE_FULL'?429:202);
+      }
       if (p === '/api/analysis/symbols' && request.method === 'GET') {
         if (!access) return respond({error:'ACCESS_REQUIRED',message:'Cloudflare Access 로그인 필요'},401);
         const q=u.searchParams.get('q')||'';
