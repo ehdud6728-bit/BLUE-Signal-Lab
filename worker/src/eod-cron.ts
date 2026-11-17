@@ -95,15 +95,15 @@ export async function runEodCloudflareCron(event:ScheduledController,env:CronEnv
     console.warn('BLUE_EOD_YEAR_CONFIG_UPDATE_REQUIRED',day);return;
   }
   await env.DB.prepare(SCHEMA).run();
-  // 15:45 is only the earliest vendor check. Prove the exact source date,
-  // then continue retries as needed instead of leaving the day at 11-16.
-  const eodChecks=new Set(['15:45','16:10','16:40','16:55',
-    '17:15','17:45','18:15','19:00']);
+  // A single Cloudflare free-plan cron expression fires at KST 15:45,
+  // 16:45, 17:45 and 20:45. These are verified EOD retries, NOT a
+  // 14:50 pre-close market scan; no intraday full-market source exists here.
+  const eodChecks=new Set(['15:45','16:45','17:45']);
   if(eodChecks.has(clock)){
     await requestVerifiedEod(env,day,'KRX_EOD');
-  } else if(clock==='20:20'||clock==='20:35'){
+  } else if(clock==='20:45'){
     await afterMarketAudit(env,day);
-    // If regular EOD is still missing, the 20:20 checkpoint also retries it.
+    // If regular EOD is still missing, the 20:45 checkpoint retries it.
     await requestVerifiedEod(env,day,'KRX_RETRY');
   }
 }
