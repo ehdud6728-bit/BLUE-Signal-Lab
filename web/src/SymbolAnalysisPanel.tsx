@@ -15,6 +15,17 @@ type Result={status:string;message?:string;diagnosis?:Diagnosis;quality_status?:
  chart?:{bars:unknown[]}|null;stored_at?:string;source?:string};
 type SymbolMatch={code:string;name:string;market:string};
 type Catalog={status:string;results?:SymbolMatch[];message?:string};
+type LiveSnapshot={code:string;market:'J'|'NX';market_label:string;phase:string;
+ trade_date_kst:string;received_at_utc:string;price:number;open:number;high:number;low:number;
+ accumulated_volume:number;accumulated_turnover_raw?:string|null;
+ turnover_unit_verified?:boolean;change_from_prev_close_pct?:number|null;
+ provider_trade_day_verified?:boolean;reported_trade_date?:string|null;
+ exchange_tick_time_verified?:boolean;official_eod?:boolean};
+type LiveReference={day:string;quality_status:string;ma20?:number|null;ma40?:number|null;
+ ma112?:number|null;ma224?:number|null;env20_lower_20pct?:number|null};
+type LiveResult={status:string;code?:string;name?:string;message?:string;
+ snapshot?:LiveSnapshot;reference?:LiveReference|null;
+ request?:{status:string;requested_at_utc:string;message?:string|null}|null;error?:string};
 const labels:Record<string,string>={
  BB20_UPPER_SIGNAL:'BLUE20 상단 신호',BB30_UPPER_SIGNAL:'BLUE30 상단 신호',
  BB40_UPPER_SIGNAL:'BLUE40 상단 신호',BB20_LOWER_SIGNAL:'BLUE20 하단 신호',
@@ -38,6 +49,8 @@ export default function SymbolAnalysisPanel({defaultDate}:{defaultDate:string}){
  const [day,setDay]=useState(defaultDate);
  const [result,setResult]=useState<Result|null>(null);const [busy,setBusy]=useState(false);
  const [notice,setNotice]=useState('');
+ const [live,setLive]=useState<LiveResult|null>(null);const [liveBusy,setLiveBusy]=useState(false);
+ const [liveNotice,setLiveNotice]=useState('');
  useEffect(()=>{setDay(defaultDate);setResult(null);},[defaultDate]);
  useEffect(()=>{
   if(chosen||!term.trim()){setMatches([]);return;}
@@ -62,9 +75,33 @@ export default function SymbolAnalysisPanel({defaultDate}:{defaultDate:string}){
  },[term,chosen]);
  const choose=(symbol:SymbolMatch)=>{
   setChosen(true);setTerm(`${symbol.name} (${symbol.code})`);setCode(symbol.code);setName(symbol.name);
-  setMatches([]);setResult(null);setNotice('');setCatalogMessage('');
+  setMatches([]);setResult(null);setNotice('');setCatalogMessage('');setLive(null);setLiveNotice('');
  };
  const valid=/^[0-9A-Z]{6}$/.test(code.toUpperCase())&&/^20\d{2}-\d{2}-\d{2}$/.test(day);
+ const validLive=/^[0-9A-Z]{6}$/.test(code.toUpperCase());
+ async function lookupLive(){
+  if(!validLive)return;setLiveBusy(true);setLiveNotice('');
+  try{
+   const u=new URL(API+'/api/analysis/live');u.searchParams.set('code',code.trim().toUpperCase());
+   const r=await fetch(u.toString(),{credentials:'include',cache:'no-store'});
+   const data=await r.json() as LiveResult;
+   if(!r.ok)throw Error(data.message||data.error||`현재 시세 조회 실패 (${r.status})`);
+   setLive(data);
+  }catch(e){setLiveNotice(e instanceof Error?e.message:'최근 시세를 조회할 수 없습니다.');}
+  finally{setLiveBusy(false);}
+ }
+ async function requestLive(){
+  if(!validLive)return;setLiveBusy(true);setLiveNotice('');
+  try{
+   const r=await fetch(API+'/api/analysis/live/request',{method:'POST',credentials:'include',
+    headers:{'Content-Type':'text/plain;charset=UTF-8'},
+    body:JSON.stringify({code:code.trim().toUpperCase()})});
+   const data=await r.json() as LiveResult;
+   if(!r.ok)throw Error(data.message||data.error||`현재 시세 수집 요청 실패 (${r.status})`);
+   setLiveNotice(data.message||'수집 요청을 접수했습니다. 다음 수집 후 저장 시세를 조회하세요.');
+  }catch(e){setLiveNotice(e instanceof Error?e.message:'현재 시세 수집을 요청하지 못했습니다.');}
+  finally{setLiveBusy(false);}
+ }
  async function lookup(){
   if(!valid)return;setBusy(true);setNotice('');setResult(null);
   try{
@@ -117,7 +154,7 @@ export default function SymbolAnalysisPanel({defaultDate}:{defaultDate:string}){
    <div className="symbol-analysis-controls">
     <div className="symbol-analysis-search"><label htmlFor="symbol-search-input">종목명 · 종목코드</label>
      <input id="symbol-search-input" type="search" autoComplete="off" value={term}
-      onChange={e=>{const t=e.target.value.slice(0,60);setTerm(t);setChosen(false);setCode(/^[0-9a-zA-Z]{6}$/.test(t.trim())?t.trim().toUpperCase():'');setName('');setResult(null);setNotice('');}}
+      onChange={e=>{const t=e.target.value.slice(0,60);setTerm(t);setChosen(false);setCode(/^[0-9a-zA-Z]{6}$/.test(t.trim())?t.trim().toUpperCase():'');setName('');setResult(null);setNotice('');setLive(null);setLiveNotice('');}}
       onKeyDown={e=>{if(e.key==='Enter'&&matches.length){e.preventDefault();choose(matches[0]);}}}
       placeholder="예: LK삼양 또는 225190" aria-label="종목명 또는 종목코드" aria-autocomplete="list" aria-expanded={matches.length>0} aria-controls="symbol-search-suggestions"/>
      {matches.length>0&&<div className="symbol-analysis-suggestions" id="symbol-search-suggestions" role="listbox">
@@ -130,6 +167,38 @@ export default function SymbolAnalysisPanel({defaultDate}:{defaultDate:string}){
     <label>분석 기준일<input type="date" value={day} onChange={e=>{setDay(e.target.value);setResult(null);}}/></label>
     <button type="button" disabled={!valid||busy} onClick={()=>{void lookup();}}>{busy?'확인 중…':'분석 조회'}</button>
     <button type="button" className="outline" disabled={!valid||busy||result?.status==='READY'} onClick={()=>{void requestAnalysis();}}>{result?.status==='READY'?'저장된 분석':'분석 요청'}</button>
+   </div>
+   <div className="symbol-live-panel">
+    <div className="symbol-live-heading"><div><strong>📡 최신 시세 기반 분석</strong><small>당일 확정 일봉 없이 수집 · KIS 시세 · 잠정 연구</small></div>
+     <span className="symbol-live-pill">장중 잠정</span></div>
+    <p className="symbol-analysis-hint">종목을 선택한 뒤 시세를 요청하세요. 거래 가능한 시간에 서버가 수집하며 즉시 조회·실시간 체결을 보장하지 않습니다.</p>
+    <div className="symbol-live-actions">
+     <button type="button" disabled={!validLive||liveBusy} onClick={()=>{void lookupLive();}}>{liveBusy?'처리 중…':'저장 시세 조회'}</button>
+     <button type="button" className="outline" disabled={!validLive||liveBusy} onClick={()=>{void requestLive();}}>최신 시세 수집 요청</button>
+    </div>
+    {liveNotice&&<p role="status" className="symbol-analysis-message">{liveNotice}</p>}
+    {live&&!live.snapshot&&<p role="status" className="symbol-analysis-warning">{live.message||'시세가 저장되지 않았습니다.'}{live.request?.status&&` · 요청 상태: ${live.request.status}`}</p>}
+    {live?.snapshot&&<>
+     <div className="symbol-live-summary"><div><b>{live.name||name||live.snapshot.code} ({live.snapshot.code})</b>
+      <small>{live.snapshot.market_label} · {live.snapshot.phase} · {live.snapshot.trade_date_kst}</small></div>
+      <strong>{price(live.snapshot.price)}</strong></div>
+     <p className="symbol-analysis-hint">{live.message} · 수집 시각: {new Date(live.snapshot.received_at_utc).toLocaleString('ko-KR',{timeZone:'Asia/Seoul'})}</p>
+     <div className="symbol-live-facts">
+      <span>시가 <b>{price(live.snapshot.open)}</b></span><span>고가 <b>{price(live.snapshot.high)}</b></span>
+      <span>저가 <b>{price(live.snapshot.low)}</b></span><span>누적 거래량 <b>{live.snapshot.accumulated_volume.toLocaleString('ko-KR')}주</b></span>
+      <span>전일 대비율 <b>{live.snapshot.change_from_prev_close_pct==null?'미확인':`${live.snapshot.change_from_prev_close_pct.toFixed(2)}%`}</b></span>
+      <span>거래대금 제공값 <b>{live.snapshot.accumulated_turnover_raw||'미확인'}</b></span>
+     </div>
+     <p className="symbol-analysis-hint">거래대금 원본값의 단위를 아직 검증하지 않았으므로 500억 조건 판정에는 사용하지 않습니다. KRX 정규장과 NXT·시간외 거래를 합산하지 않습니다.</p>
+     {live.reference&&<details className="symbol-analysis-conditions"><summary>저장된 과거 기술지표와 비교 (잠정 참고)</summary>
+      <p className="symbol-analysis-hint">과거 기준일 {live.reference.day}의 지표이며 오늘의 새 이동평균이 아닙니다. 현재가와의 위치 비교만 가능합니다.</p>
+      {live.reference.quality_status==='CORPORATE_ACTION_REVIEW_REQUIRED'?
+       <p className="symbol-analysis-warning">가격 단절·주식병합 가능성으로 지표 비교를 보류했습니다.</p>:
+       <div>{([['MA20',live.reference.ma20],['MA112',live.reference.ma112],['MA224',live.reference.ma224],['ENV20 하단',live.reference.env20_lower_20pct]] as Array<[string,number|null|undefined]>).map(([label,value])=><div key={label}><span>{label} · {price(value)}</span>
+        <strong className={value==null?'unknown':live.snapshot!.price>=value?'yes':'no'}>{value==null?'자료 부족':live.snapshot!.price>=value?'현재가 상회':'현재가 하회'}</strong></div>)}</div>}
+     </details>}
+     <p className="symbol-analysis-hint">제공 시각이 아닌 실제 체결시각은 별도 검증되지 않았습니다. 이 자료는 확정 일봉·매매 신호·성과 통계로 저장하지 않습니다.</p>
+    </>}
    </div>
    {notice&&<p role="status" className="symbol-analysis-message">{notice}</p>}
    {result&&result.status!=='READY'&&<p className="symbol-analysis-warning" role="status">{result.message||'분석 자료를 확인하지 못했습니다. 관리자에게 저장 상태를 문의해 주세요.'}</p>}

@@ -29,4 +29,20 @@
 .symbol-analysis-conditions>div>div{display:flex;justify-content:space-between;gap:8px;border-bottom:1px solid #edf1f7;padding:7px 0;font-size:12px}
 .symbol-analysis-conditions strong.yes{color:#137b55}.symbol-analysis-conditions strong.no{color:#7c8899}.symbol-analysis-conditions strong.unknown{color:#ad6d22}
 .symbol-analysis-panel .blue-chart-panel{margin:14px}
+.symbol-live-panel{margin:16px 14px 8px;border:1px solid #bbd8ec;border-radius:12px;background:#f7fbff;padding:13px}
+.symbol-live-heading{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap}
+.symbol-live-heading>div{display:grid;gap:3px}.symbol-live-heading strong{color:#16477b;font-size:15px}.symbol-live-heading small{color:#6686a6;font-size:11px}
+.symbol-live-pill{padding:5px 8px;border-radius:999px;background:#fff0d9;color:#80530c;font-weight:750;font-size:11px}
+.symbol-live-actions{display:flex;gap:8px;flex-wrap:wrap}
+.symbol-live-actions button{flex:1;min-height:40px;border:1px solid #2464c7;border-radius:8px;padding:9px;background:#2464c7;color:white;font-size:12px;font-weight:800}
+.symbol-live-actions button.outline{background:white;color:#2464c7}
+.symbol-live-actions button:disabled{opacity:.55}
+.symbol-live-panel>.symbol-analysis-hint,.symbol-live-panel>.symbol-analysis-warning,.symbol-live-panel>.symbol-analysis-message{margin:10px 0}
+.symbol-live-summary{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;margin:14px 0 8px}
+.symbol-live-summary>div{display:grid;gap:3px}.symbol-live-summary b{font-size:14px;color:#153e73}.symbol-live-summary small{font-size:11px;color:#7189a1}
+.symbol-live-summary>strong{font-size:20px;color:#153e73}
+.symbol-live-facts{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:7px}
+.symbol-live-facts span{display:grid;gap:3px;border-radius:7px;background:white;padding:10px;font-size:11px;color:#68809d}
+.symbol-live-facts b{font-size:13px;color:#254771}
+.symbol-live-panel .symbol-analysis-conditions{margin:12px 0}
 @media(max-width:520px){.symbol-analysis-search{flex-basis:100%}.symbol-analysis-controls>label{flex-basis:100%}.symbol-analysis-controls button{flex:1}}
