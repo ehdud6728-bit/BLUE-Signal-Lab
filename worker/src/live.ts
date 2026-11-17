@@ -78,7 +78,7 @@ export async function liveQuotes(db:D1Database):Promise<Record<string,unknown>> 
           row.tracking_start_source=first.source;}}
     }
   } catch { /* metadata unavailable: preserve verified existing quotes */ }
-  const received=latest.reduce((acc,x)=>x.received_at_utc>acc?x.received_at_utc:'');
+  const received=latest.reduce((acc,x)=>x.received_at_utc>acc?x.received_at_utc:acc,'');
   const now=new Date();const state=kstParts(now);
   const age=received?Math.max(0,(now.getTime()-Date.parse(received))/60000):null;
   const current=state.date===latestDay;

@@ -5,6 +5,7 @@ import {basketWatch} from './performance';
 import {comparePrices} from './price-compare';
 import {requestSearchQuotes} from './search-quote-priority';
 import {technicalFilterWhere} from './technical-filters';
+import {validChartCode} from './chart-query';
 import {runEodCloudflareCron} from './eod-cron';
 interface Env {
   DB: D1Database;
@@ -23,6 +24,7 @@ const ALLOWED = new Set([
   'BB20_ALT','BB30_ALT','BB40_ALT',
   'BB20_LOWER_ALT','BB30_LOWER_ALT','BB40_LOWER_ALT',
   'BB30_LOWER_RECLAIM',
+  'ENV20_LOWER_TOUCH',
 ]);
 const isoPattern = /^\d{4}-\d{2}-\d{2}$/;
 const inFlightMs = 45 * 60 * 1000;
@@ -103,7 +105,7 @@ export default {
       if (p === '/api/chart' && request.method === 'GET') {
         const day=u.searchParams.get('date')||'';
         const code=u.searchParams.get('code')||'';
-        if(!validDate(day)||!/^[0-9]{6}$/.test(code))return respond({error:'INVALID_CHART_QUERY'},400);
+        if(!validDate(day)||!validChartCode(code))return respond({error:'INVALID_CHART_QUERY'},400);
         const r=await env.DB.prepare(`SELECT c.chart_json,c.stats_json,c.created_at
           FROM chart_snapshots c
           JOIN runs r ON r.run_id=c.run_id

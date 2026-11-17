@@ -21,7 +21,8 @@ const MODEL = 'gemini-3.5-flash-lite';
 const ALLOWED_MODELS = new Set(['gemini-3.5-flash-lite','gemini-3.1-flash-lite']);
 const DAILY_LIMIT = 25; // server-wide; not a promise of Google free-tier quota
 const SIGNAL_TAGS = ['BB20','BB30','BB40','ENV20','ENV40',
-  'BB20_LOWER','BB30_LOWER','BB40_LOWER','BB20_ALT','BB30_ALT','BB40_ALT'];
+  'BB20_LOWER','BB30_LOWER','BB40_LOWER','BB20_ALT','BB30_ALT','BB40_ALT',
+  'ENV20_LOWER_TOUCH'];
 const ALLOWED_EXTRAS = [
   'name','Name','market','rsi','rsi_signal','rsi_gc','rsi_last_gc',
   'slow_14_3_3_k','slow_14_3_3_d','slow_14_3_3_gc','slow_14_3_3_last_gc',
