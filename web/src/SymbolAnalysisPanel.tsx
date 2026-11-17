@@ -25,7 +25,8 @@ type LiveReference={day:string;quality_status:string;ma20?:number|null;ma40?:num
  ma112?:number|null;ma224?:number|null;env20_lower_20pct?:number|null};
 type LiveResult={status:string;code?:string;name?:string;message?:string;
  snapshot?:LiveSnapshot;reference?:LiveReference|null;
- request?:{status:string;requested_at_utc:string;message?:string|null}|null;error?:string};
+  request?:{status:string;requested_at_utc:string;message?:string|null}|null;
+  refresh_status?:string;error?:string};
 const labels:Record<string,string>={
  BB20_UPPER_SIGNAL:'BLUE20 상단 신호',BB30_UPPER_SIGNAL:'BLUE30 상단 신호',
  BB40_UPPER_SIGNAL:'BLUE40 상단 신호',BB20_LOWER_SIGNAL:'BLUE20 하단 신호',
@@ -52,6 +53,47 @@ export default function SymbolAnalysisPanel({defaultDate}:{defaultDate:string}){
  const [live,setLive]=useState<LiveResult|null>(null);const [liveBusy,setLiveBusy]=useState(false);
  const [liveNotice,setLiveNotice]=useState('');
  useEffect(()=>{setDay(defaultDate);setResult(null);},[defaultDate]);
+ // A stored diagnosis is a quick D1 lookup; it must not trigger a slow GitHub
+ // backfill merely because the user selected a different stock or date.
+ useEffect(()=>{
+  if(!/^[0-9A-Z]{6}$/.test(code)||!/^20\d{2}-\d{2}-\d{2}$/.test(day))return;
+  const controller=new AbortController();
+  const timer=window.setTimeout(async()=>{
+   try{
+    const u=new URL(API+'/api/analysis/symbol');u.searchParams.set('code',code);u.searchParams.set('asof',day);
+    const r=await fetch(u.toString(),{credentials:'include',cache:'no-store',signal:controller.signal});
+    if(!r.ok)return;
+    const data=await r.json() as Result;
+    if(!controller.signal.aborted)setResult(data.status==='READY'?data:null);
+   }catch{/* A missing historical record does not stop today's quote lookup. */}
+  },200);
+  return()=>{window.clearTimeout(timer);controller.abort();};
+ },[code,day]);
+ // Show the last saved KIS quote first, then attempt one bounded, authenticated
+ // direct refresh. The user never has to wait for the minute Cron to see cache.
+ useEffect(()=>{
+  if(!/^[0-9A-Z]{6}$/.test(code))return;
+  const controller=new AbortController();
+  const timer=window.setTimeout(async()=>{
+   try{
+    const u=new URL(API+'/api/analysis/live');u.searchParams.set('code',code);
+    const saved=await fetch(u.toString(),{credentials:'include',cache:'no-store',signal:controller.signal});
+    if(!saved.ok)return;
+    const data=await saved.json() as LiveResult;
+    if(!controller.signal.aborted)setLive(data);
+   }catch{/* Manual lookup remains available. */}
+   if(controller.signal.aborted)return;
+   try{
+    const r=await fetch(API+'/api/analysis/live/refresh',{
+     method:'POST',credentials:'include',signal:controller.signal,
+     headers:{'Content-Type':'text/plain;charset=UTF-8'},body:JSON.stringify({code})});
+    if(!r.ok)return;
+    const refreshed=await r.json() as LiveResult;
+    if(!controller.signal.aborted){setLive(refreshed);setLiveNotice(refreshed.message||'');}
+   }catch{/* Existing snapshot stays visible if direct refresh is unavailable. */}
+  },450);
+  return()=>{window.clearTimeout(timer);controller.abort();};
+ },[code]);
  useEffect(()=>{
   if(chosen||!term.trim()){setMatches([]);return;}
   const controller=new AbortController();
@@ -93,12 +135,12 @@ export default function SymbolAnalysisPanel({defaultDate}:{defaultDate:string}){
  async function requestLive(){
   if(!validLive)return;setLiveBusy(true);setLiveNotice('');
   try{
-   const r=await fetch(API+'/api/analysis/live/request',{method:'POST',credentials:'include',
+   const r=await fetch(API+'/api/analysis/live/refresh',{method:'POST',credentials:'include',
     headers:{'Content-Type':'text/plain;charset=UTF-8'},
     body:JSON.stringify({code:code.trim().toUpperCase()})});
    const data=await r.json() as LiveResult;
    if(!r.ok)throw Error(data.message||data.error||`현재 시세 수집 요청 실패 (${r.status})`);
-   setLiveNotice(data.message||'수집 요청을 접수했습니다. 다음 수집 후 저장 시세를 조회하세요.');
+   setLive(data);setLiveNotice(data.message||'저장 시세를 확인하거나 다음 수집을 기다려 주세요.');
   }catch(e){setLiveNotice(e instanceof Error?e.message:'현재 시세 수집을 요청하지 못했습니다.');}
   finally{setLiveBusy(false);}
  }
@@ -171,10 +213,10 @@ export default function SymbolAnalysisPanel({defaultDate}:{defaultDate:string}){
    <div className="symbol-live-panel">
     <div className="symbol-live-heading"><div><strong>📡 최신 시세 기반 분석</strong><small>당일 확정 일봉 없이 수집 · KIS 시세 · 잠정 연구</small></div>
      <span className="symbol-live-pill">장중 잠정</span></div>
-    <p className="symbol-analysis-hint">종목을 선택한 뒤 시세를 요청하세요. 거래 가능한 시간에 서버가 수집하며 즉시 조회·실시간 체결을 보장하지 않습니다.</p>
+    <p className="symbol-analysis-hint">종목 선택 시 저장된 시세를 먼저 보여주고 KIS에 새 시세를 요청합니다. 거래시간 밖이거나 공급자 응답이 늦으면 기존 저장값을 표시합니다. 실시간 체결 보장은 아닙니다.</p>
     <div className="symbol-live-actions">
      <button type="button" disabled={!validLive||liveBusy} onClick={()=>{void lookupLive();}}>{liveBusy?'처리 중…':'저장 시세 조회'}</button>
-     <button type="button" className="outline" disabled={!validLive||liveBusy} onClick={()=>{void requestLive();}}>최신 시세 수집 요청</button>
+     <button type="button" className="outline" disabled={!validLive||liveBusy} onClick={()=>{void requestLive();}}>KIS 시세 바로 갱신</button>
     </div>
     {liveNotice&&<p role="status" className="symbol-analysis-message">{liveNotice}</p>}
     {live&&!live.snapshot&&<p role="status" className="symbol-analysis-warning">{live.message||'시세가 저장되지 않았습니다.'}{live.request?.status&&` · 요청 상태: ${live.request.status}`}</p>}
