@@ -13,7 +13,7 @@ type Setup={code:string;label:string;factors:string[];factor_count:number;total_
 type Stats={zone_reaction?:ZoneReactionStats;version:string;asof:string;status:string;history_start:string|null;history_end:string;method?:string;limitations?:string[];active_factors?:{code:string;label:string}[];candidate_count?:number;eligible_candidate_count?:number;baseline?:Record<string,Horizon>;sector_lag?:{status:string;reason?:string};setups:Setup[]};
 type Payload={status:string;chart?:{bars:Bar[];asof:string};stats?:Stats;message?:string};
 type LineCandidate={signal:string;price:number};
-type Props={code:string;day:string;name:string;supplyPrice?:number|null;supplyGrade?:string;lineCandidates?:LineCandidate[];highlightThreshold?:number|null;highlightSamplesMin?:number};
+type Props={code:string;day:string;name:string;supplyPrice?:number|null;supplyGrade?:string;lineCandidates?:LineCandidate[];highlightThreshold?:number|null;highlightSamplesMin?:number;analysisMode?:boolean};
 
 function useChartResize(container:React.RefObject<HTMLDivElement|null>, fn:(element:HTMLDivElement)=>IChartApi, deps:unknown[]){
   useEffect(()=>{
@@ -174,17 +174,18 @@ function Evidence({stats,highlightThreshold,highlightSamplesMin}:{stats:Stats;hi
     <p className="blue-caution">이 결과는 당일 조건을 보고 과거 사례를 찾아본 탐색적 비교입니다. 여러 조합을 시험한 선택 편향, 짧은 표본, 20거래일 결과 중첩, 수정주가·거래비용 미반영으로 인해 미래 성과를 보장하지 않습니다. 업종 대장주 선행/후발 여부는 별도 업종과 과거 시계열이 확보되기 전에는 판정하지 않습니다.</p>
   </div>;
 }
-export default function StockChart({code,day,name,lineCandidates,highlightThreshold=70,highlightSamplesMin=8}:Props){
+export default function StockChart({code,day,name,lineCandidates,highlightThreshold=70,highlightSamplesMin=8,analysisMode=false}:Props){
   const [data,setData]=useState<Payload|null>(null);const [error,setError]=useState('');const [loading,setLoading]=useState(true);
   const [reloadKey,setReloadKey]=useState(0);
   useEffect(()=>{
     const ctrl=new AbortController();setLoading(true);setData(null);setError('');
-    const url=new URL(API+'/api/chart');url.searchParams.set('code',code);url.searchParams.set('date',day);
+    const url=new URL(API+(analysisMode?'/api/analysis/symbol':'/api/chart'));
+    url.searchParams.set('code',code);url.searchParams.set(analysisMode?'asof':'date',day);
     fetch(url.toString(),{credentials:'include',cache:'no-store',signal:ctrl.signal}).then(async r=>{
       const x=await r.json() as Payload;if(!r.ok)throw new Error(x.message||`차트 API ${r.status}`);return x;
     }).then(x=>setData(x)).catch(e=>{if(!ctrl.signal.aborted)setError(String(e));}).finally(()=>{if(!ctrl.signal.aborted)setLoading(false);});
     return ()=>ctrl.abort();
-  },[code,day,reloadKey]);
+  },[code,day,reloadKey,analysisMode]);
   const hasR159Highlight=!!data?.stats?.setups?.some(s=>{
     const x=s.horizons?.['10'];return highlightThreshold!==null&&!!x&&x.n>=highlightSamplesMin&&x.up_pct!==null&&x.up_pct>=highlightThreshold;
   });

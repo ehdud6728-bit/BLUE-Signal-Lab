@@ -10,6 +10,21 @@ const difference=(n:number|null|undefined,base:number|null|undefined)=>{
  return <span className={'r1593-delta '+tone}> · 발견가 대비 {pct>0?'+':''}{pct.toFixed(2)}%</span>;
 };
 const received=(s:string|null|undefined)=>{if(!s)return '';const d=new Date(s);return Number.isFinite(d.valueOf())?' · 수집 '+new Intl.DateTimeFormat('ko-KR',{timeZone:'Asia/Seoul',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hour12:false}).format(d):'';};
+const issueLabel:Record<string,string>={
+ KIS_CONFIG_MISSING:'KIS 설정 누락',
+ TOKEN_VAULT_MISSING:'KIS 토큰 저장본 없음 (키·범위 확인)',
+ TOKEN_EXPIRED:'KIS 토큰 만료',
+ TOKEN_VAULT_INVALID_METADATA:'KIS 토큰 저장 정보 오류',
+ TOKEN_DECRYPT_FAILED:'KIS 토큰 복호화 실패 (설정 확인)',
+ TOKEN_VAULT_DB_UNAVAILABLE:'토큰 DB 조회 실패',
+ KIS_AUTH_REJECTED:'KIS 시세 API 인증 거부',
+ KIS_PRICE_RESPONSE_UNAVAILABLE:'KIS 시세 응답 확인 필요',
+};
+export const quoteWarning=(status:string|null|undefined,reason:string|null|undefined)=>{
+ if(status==='WAITING_TOKEN')return issueLabel[reason||'']||'KIS 토큰/인증 확인 필요';
+ if(status==='RETRY')return issueLabel[reason||'']||'시세 수집 재시도 예정';
+ return null;
+};
 export default function PriceCompareMini({data,baseline,loading=false,compact=false,onRequest,requesting=false,requestDisabled=false}: {data?:PriceCompare;baseline?:number|null;loading?:boolean;compact?:boolean;onRequest?:()=>void;requesting?:boolean;requestDisabled?:boolean}){
  const hasLatest=typeof data?.latest_price==='number'&&data.latest_price>0&&!!data.latest_day;
  const hasHigh=typeof data?.period_high==='number'&&data.period_high>0&&!!data.period_high_day;
@@ -20,8 +35,7 @@ export default function PriceCompareMini({data,baseline,loading=false,compact=fa
  // Weekend or pre-open snapshots remain clearly dated without false stale alarms.
  const oldQuote=hasLatest&&['Mon','Tue','Wed','Thu','Fri'].includes(kst.weekday)&&Number(kst.hour)>=10&&String(data!.latest_day)<today;
  const showRequest=!!onRequest;
- const queueWarning=data?.quote_status==='WAITING_TOKEN'?'KIS 토큰/인증 확인 필요':
-  data?.quote_status==='RETRY'?'시세 수집 재시도 예정':null;
+ const queueWarning=quoteWarning(data?.quote_status,data?.quote_error);
  return <div className={'r1593-compare'+(compact?' r1593-compare-compact':'')}>
   <div className="r1593-compare-line"><span>최근 확인가</span><strong>{hasLatest?cash(data!.latest_price):'—'}</strong>
    {showRequest&&<button type="button" className="r1596-inline-request" disabled={requestDisabled||requesting} onClick={e=>{e.stopPropagation();onRequest?.();}} onKeyDown={e=>e.stopPropagation()}>{requesting?'요청 중…':'↻ 시세 갱신'}</button>}

@@ -2,6 +2,7 @@ import StockChart from './StockChart';
 import LiveMarket from './LiveMarket';
 import SmartBasket from './SmartBasket';
 import PriceCompareMini from './PriceCompareMini';
+import SymbolAnalysisPanel from './SymbolAnalysisPanel';
 import {requestSearchPriority} from './search-priority';
 import {comparisonKey,fetchCompared,type PriceCompare} from './price-compare';
 import './r1595-group-price.css';
@@ -598,6 +599,7 @@ function App(){
           </section>
         </div>
         <div className={'r151-research-content '+(activeView==='research'?'':'r151-hidden')}>
+        <SymbolAnalysisPanel defaultDate={date}/>
         <div className="stats" ref={summaryRef} id="summary-panel">
           <div className="metric"><span>검색 결과</span><strong>{total==null?'—':total.toLocaleString()}</strong><small>종목</small></div>
           <div className="metric"><span>검색 거래일</span><strong>{total==null?'—':days.length}</strong><small>저장된 날짜</small></div>
