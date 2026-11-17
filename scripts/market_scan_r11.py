@@ -25,7 +25,7 @@ import sys
 import pandas as pd
 import requests
 
-from market_scan import load_marcap, normalise, export
+from market_scan import load_marcap, normalise, enrich, export
 from market_scan_r08 import SourcePending, krx_day, COLS
 from market_scan_r08_diagnostics import scan_r08
 from chart_research_r10 import generate as generate_chart_research
@@ -258,6 +258,55 @@ def upgraded_history(raw: pd.DataFrame, target: date, today: bool, provider: str
                                   else "KRX Open API verified daily")
 
 
+def diagnose_symbol(raw: pd.DataFrame, asof: str, code: str, matches: list[dict]) -> dict:
+    """Auditable as-of-only reason a ticker was or was not selected."""
+    if not re.fullmatch(r"[0-9A-Z]{6}", code):
+        raise ValueError("Invalid diagnostic stock code")
+    selected = next((r for r in matches if r.get("code") == code), None)
+    clean = normalise(raw)
+    history = clean[(clean.code == code) & (clean.date.le(pd.Timestamp(asof)))]
+    result: dict = {"code": code, "asof": asof, "matched": selected is not None,
+                    "selected_signals": selected.get("signals", "") if selected else ""}
+    if history.empty or history.date.iloc[-1].strftime("%Y-%m-%d") != asof:
+        return {**result, "reason": "MISSING_VERIFIED_TARGET_CANDLE"}
+    d = enrich(history)
+    now = d.iloc[-1]
+    prev = d.iloc[-2] if len(d) > 1 else None
+
+    def value(key: str):
+        n = now.get(key)
+        return round(float(n), 5) if pd.notna(n) else None
+
+    flags = ["BB20_UPPER_SIGNAL", "BB30_UPPER_SIGNAL", "BB40_UPPER_SIGNAL",
+             "BB20_LOWER_SIGNAL", "BB30_LOWER_SIGNAL", "BB40_LOWER_SIGNAL",
+             "ENV20_SIGNAL", "ENV40_SIGNAL", "ENV20_LOWER_TOUCH_SIGNAL"]
+    result.update({"history_bars": len(d),
+                   "open": value("open"), "high": value("high"),
+                   "low": value("low"), "close": value("close"),
+                   "ma20": value("ma20"), "ma40": value("ma40"),
+                   "ma60": value("ma60"), "ma224": value("ma224"),
+                   "env20_mid": value("ENV20_MID"),
+                   "env20_lower_20pct": value("ENV20_LOWER_20PCT"),
+                   "previous_low": round(float(prev.low), 5) if prev is not None else None,
+                   "previous_env20_lower_20pct":
+                       round(float(prev.ENV20_LOWER_20PCT), 5) if prev is not None
+                       and pd.notna(prev.ENV20_LOWER_20PCT) else None,
+                   "gap_abs_pct": value("gap_abs_pct"),
+                   "signal_predicates": {k: bool(now[k]) for k in flags},
+                   "non_adjusted_history": True})
+    if len(d) < 250 or pd.isna(now.get("ma224")):
+        result["reason"] = "INSUFFICIENT_224_DAY_HISTORY"
+    elif pd.notna(now.gap_abs_pct) and float(now.gap_abs_pct) >= 40:
+        result["reason"] = "DAY_GAP_REVIEW_REQUIRED"
+    else:
+        result["reason"] = "MATCHED" if selected else "NO_ENABLED_SIGNAL_ON_TARGET_DAY"
+    # A very large discontinuity somewhere in the previous 224 sessions may be
+    # a corporate action. Never infer the adjustment factor automatically.
+    recent=d.tail(224)
+    result["large_historical_gap_review"] = bool(recent.gap_abs_pct.ge(40).any())
+    return result
+
+
 def main():
     p = argparse.ArgumentParser()
     p.add_argument("--date", default="latest")
@@ -265,6 +314,7 @@ def main():
     p.add_argument("--out", default="output")
     p.add_argument("--local-data-dir")
     p.add_argument("--daily-provider", choices=["auto", "openapi", "pykrx"], default="auto")
+    p.add_argument("--diagnose-code", default="", help="optional six-character ticker; research-only as-of signal audit")
     args = p.parse_args()
     raw, hashes = load_marcap([int(x) for x in args.years.split(",")], args.local_data_dir)
     latest = normalise(raw).date.max().date()
@@ -301,6 +351,11 @@ def main():
         audit["supplemental_sha256"] = hashlib.sha256(
             supplement[COLS].to_csv(index=False).encode("utf-8")).hexdigest()
     export(rows, audit, args.out, hashes)
+    if args.diagnose_code:
+        diagnostic=diagnose_symbol(upgraded,target.isoformat(),args.diagnose_code.upper(),rows)
+        (Path(args.out)/'SYMBOL_DIAGNOSE.json').write_text(
+            json.dumps(diagnostic,ensure_ascii=False,indent=2),encoding='utf-8')
+        print('BLUE_SYMBOL_ASOF_DIAGNOSTIC',json.dumps(diagnostic,ensure_ascii=False))
     count = generate_chart_research(upgraded, rows, target.isoformat(),
                                     str(Path(args.out) / "chart_snapshots.jsonl"))
     if count != len(rows):

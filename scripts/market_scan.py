@@ -96,6 +96,15 @@ def enrich(g):
         mid=d.close.rolling(n,min_periods=n).mean()
         d[f'ENV{n}_MID']=mid
         d[f'ENV{n}_SIGNAL']=body_cross(d,mid,False)
+    # Separate research signal from ENV20 *midline* bullish crosses. The
+    # reference ENVELOPE(20,20%) lower-touch setup is an oversold first-touch
+    # event, not evidence that a bullish reversal has already happened.
+    lower20=d['ENV20_MID']*.8
+    d['ENV20_LOWER_20PCT']=lower20
+    d['ENV20_LOWER_TOUCH_SIGNAL']=(
+        d.low.shift(1).gt(lower20.shift(1)) &
+        d.low.le(lower20) & d.high.ge(lower20) & lower20.notna()
+    ).fillna(False)
     for n in (60,112,224):d[f'ma{n}']=d.close.rolling(n,min_periods=n).mean()
     d['rsi']=wilder_rsi(d.close)
     d['rsi_signal']=d.rsi.rolling(9,min_periods=9).mean()
@@ -148,6 +157,8 @@ def scan(raw, asof=None):
             flags.append('BB30_LOWER_RECLAIM')
         for n in (20,40):
             if bool(row[f'ENV{n}_SIGNAL']):flags.append(f'ENV{n}')
+        if bool(row['ENV20_LOWER_TOUCH_SIGNAL']):
+            flags.append('ENV20_LOWER_TOUCH')
         if not flags:continue
         fields={k:_num(row.get(k)) for k in ['rsi','rsi_signal','slow_14_3_3_k','slow_14_3_3_d','slow_12_5_5_k','slow_12_5_5_d','slow_20_12_12_k','slow_20_12_12_d','amount_ratio20','volume_ratio20','ma20','ma40','ma60','ma112','ma224','prior_high_20','prior_high_60','prior_high_120','prior_high_224','headroom_20','headroom_60','headroom_120','headroom_224']}
         fields.update({'rsi_gc':bool(row.rsi_gc), 'slow_14_3_3_gc':bool(row.slow_14_3_3_gc),'slow_12_5_5_gc':bool(row.slow_12_5_5_gc),'slow_20_12_12_gc':bool(row.slow_20_12_12_gc),'market':str(row.market),'source':'FinanceData/marcap', 'profile_status':'NOT_COMPUTED', 'parity_status':'UNVERIFIED'})

@@ -53,6 +53,7 @@ LINE_MAP = {
     'BB30_LOWER_ALT': 'BB30_LOWER_ALT',
     'BB40_LOWER_ALT': 'BB40_LOWER_ALT',
     'ENV20': 'ENV20_MID', 'ENV40': 'ENV40_MID',
+    'ENV20_LOWER_TOUCH': 'ENV20_LOWER_20PCT',
 }
 
 
@@ -77,7 +78,7 @@ def valid_line_candidates(enriched: pd.DataFrame, flags: str) -> list[dict]:
             'price': round(p, 2),
             'gap_from_close_pct': round(100 * (close / p - 1), 3),
             'slope_pct': round(100 * (p / earlier - 1), 3) if earlier and earlier > 0 else None,
-            'status': 'BODY_CROSS_RESEARCH',
+            'status': 'LOWER_TOUCH_RESEARCH' if name=='ENV20_LOWER_TOUCH' else 'BODY_CROSS_RESEARCH',
         })
     return lines
 

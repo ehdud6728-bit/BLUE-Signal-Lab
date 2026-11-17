@@ -28,6 +28,7 @@ LABELS = {
  'BB20_LOWER_ALT':'BLUE20 대체 하단선 돌파','BB30_LOWER_ALT':'BLUE30 대체 하단선 돌파','BB40_LOWER_ALT':'BLUE40 대체 하단선 돌파',
  'ENV20_UP':'ENV20 중심선 상향 돌파','ENV40_UP':'ENV40 중심선 상향 돌파',
  'ENV20_DOWN':'ENV20 중심선 하향 이탈','ENV40_DOWN':'ENV40 중심선 하향 이탈',
+ 'ENV20_LOWER_TOUCH':'엔벨로프(20,-20%) 하단 첫 터치',
  'RSI_GC':'RSI 골든크로스','RSI_DC':'RSI 데드크로스',
  'SLOW_14_GC':'Slow(14,3,3) 골든크로스','SLOW_14_DC':'Slow(14,3,3) 데드크로스',
  'SLOW_12_GC':'Slow(12,5,5) 골든크로스','SLOW_20_GC':'Slow(20,12,12) 골든크로스',
@@ -95,6 +96,7 @@ def _feature_matrix(d):
         line=d[f'ENV{days}_MID']
         f[f'ENV{days}_UP']=yes(d[f'ENV{days}_SIGNAL'])
         f[f'ENV{days}_DOWN']=yes(d.close.shift().ge(line.shift()) & d.close.lt(line))
+    f['ENV20_LOWER_TOUCH']=yes(d['ENV20_LOWER_TOUCH_SIGNAL'])
     f['RSI_GC']=yes(d.rsi_gc)
     f['RSI_DC']=yes(d.rsi.shift().ge(d.rsi_signal.shift()) & d.rsi.lt(d.rsi_signal))
     for span,pars in [('14',(14,3,3)),('12',(12,5,5)),('20',(20,12,12))]:
