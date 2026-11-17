@@ -9,4 +9,6 @@ test('missing encrypted KIS token is visible without removing last saved prices'
  assert.equal(r.status,'WAITING_TOKEN');assert.equal(quotes,0);
  const updates=writes.filter(([sql])=>sql.includes("status='WAITING_TOKEN'"));assert.equal(updates.length,1);
  assert.ok(updates[0][1].includes('000400'));assert.equal(updates[0][0].includes('price='),false);
+ assert.equal(r.reason,'TOKEN_VAULT_MISSING');
+ assert.ok(updates[0][1].includes('TOKEN_VAULT_MISSING'));
 });
