@@ -56,7 +56,8 @@ type InstallPrompt = Event & {prompt:()=>Promise<void>;userChoice:Promise<{outco
 // Include existing lower-band signals in default OR searches so that
 // historical rebounds are not silently hidden by the search UI.
 const tags=['BB20','BB30','BB40','ENV20','ENV40',
-  'BB20_LOWER','BB30_LOWER','BB40_LOWER','BB40_LOWER_ALT','BB30_LOWER_RECLAIM'];
+  'BB20_LOWER','BB30_LOWER','BB40_LOWER','BB40_LOWER_ALT','BB30_LOWER_RECLAIM',
+  'ENV20_LOWER_TOUCH'];
 const todayKST=()=>new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Seoul',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date());
 const eodRequestReadyKST=()=>new Intl.DateTimeFormat('en-GB',{
   timeZone:'Asia/Seoul',hour:'2-digit',minute:'2-digit',hourCycle:'h23'
@@ -76,6 +77,7 @@ const showSignal=(t:string)=>({
   BB40_LOWER:'B40 하단 돌파',
   BB40_LOWER_ALT:'B40 하단 돌파(대체)',
   BB30_LOWER_RECLAIM:'B30 하단 반등(상승·수평선)',
+  ENV20_LOWER_TOUCH:'엔벨(20,-20%) 하단 첫 터치',
 }[t]||t.replace(/^(?:BLUE|BB)(?=\d)/i,'B'));
 const money=(n:number|null|undefined)=>n==null?'—':n.toLocaleString('ko-KR');
 
