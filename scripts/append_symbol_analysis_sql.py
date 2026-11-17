@@ -79,9 +79,14 @@ def statements(item: dict, run_id: str) -> list[str]:
         raise ValueError('Invalid run id')
     source = str(item['source'])[:120]
     quality = str(item['quality_status'])
-    if quality not in ('CORPORATE_ACTION_REVIEW_REQUIRED','UNADJUSTED_RESEARCH_ONLY'):
+    if quality not in ('CORPORATE_ACTION_REVIEW_REQUIRED','UNADJUSTED_RESEARCH_ONLY',
+                       'VERIFIED_CORPORATE_ACTION_ADJUSTED'):
         raise ValueError('Unknown quality status')
     chart = item.get('chart')
+    if quality == 'VERIFIED_CORPORATE_ACTION_ADJUSTED' and (
+        item.get('price_adjusted') is not True or
+        not isinstance(chart, dict) or chart.get('price_adjusted') is not True):
+        raise ValueError('Corporate action adjustment metadata mismatch')
     if chart is not None:
         bars = chart.get('bars')
         if chart.get('asof') != day or not isinstance(bars,list) or any(

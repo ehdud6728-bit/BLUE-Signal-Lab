@@ -32,6 +32,8 @@ from chart_research_r10 import (generate as generate_chart_research, chart_rows,
                                 backtest)
 from zone_reaction_r15111 import analyze_zone_reactions
 from market_scan_r08_diagnostics import macd_metrics
+from corporate_actions import (adjust_verified_actions, ADJUSTED, ALREADY_ADJUSTED,
+                               REVIEW, VERIFIED_ACTIONS)
 
 KST = timezone(timedelta(hours=9))
 EOD_MIN_TIME_KST = time(15, 40)
@@ -291,6 +293,10 @@ def diagnose_symbol(raw: pd.DataFrame, asof: str, code: str, matches: list[dict]
     selected = next((r for r in matches if r.get("code") == code), None)
     clean = normalise(raw)
     history = clean[(clean.code == code) & (clean.date.le(pd.Timestamp(asof)))]
+    # Standalone diagnostics, including tests and manual calls, use the same
+    # verified corporate-action normalization as the full-market pipeline.
+    if not history.empty and "ActionAdjustmentStatus" not in history.columns:
+        history, _ = adjust_verified_actions(history, asof)
     name = ''
     if 'Name' in history.columns:
         known = history['Name'].dropna().astype(str).str.strip()
@@ -305,6 +311,11 @@ def diagnose_symbol(raw: pd.DataFrame, asof: str, code: str, matches: list[dict]
     d = enrich(history)
     now = d.iloc[-1]
     prev = d.iloc[-2] if len(d) > 1 else None
+    action_status = (str(history.ActionAdjustmentStatus.iloc[-1])
+                     if "ActionAdjustmentStatus" in history.columns else "")
+    price_adjusted = action_status in (ADJUSTED, ALREADY_ADJUSTED)
+    action_info = next((action for action in VERIFIED_ACTIONS
+                        if action['code'] == code and action['first_session'] <= asof), None)
 
     def value(key: str):
         n = now.get(key)
@@ -328,19 +339,31 @@ def diagnose_symbol(raw: pd.DataFrame, asof: str, code: str, matches: list[dict]
                        and pd.notna(prev.ENV20_LOWER_20PCT) else None,
                    "gap_abs_pct": value("gap_abs_pct"),
                    "signal_predicates": {k: bool(now[k]) for k in flags},
-                   "non_adjusted_history": True})
+                   "non_adjusted_history": not price_adjusted,
+                   "price_adjusted": price_adjusted,
+                   "corporate_action_status": action_status,
+                   "corporate_action": {
+                       'first_session': action_info['first_session'],
+                       'old_shares_per_new_share': action_info['old_shares_per_new_share'],
+                       'source': action_info['source']}
+                       if action_info is not None else None})
     if len(d) < 250 or pd.isna(now.get("ma224")):
         result["reason"] = "INSUFFICIENT_224_DAY_HISTORY"
     elif pd.notna(now.gap_abs_pct) and float(now.gap_abs_pct) >= 40:
         result["reason"] = "DAY_GAP_REVIEW_REQUIRED"
     else:
         result["reason"] = "MATCHED" if selected else "NO_ENABLED_SIGNAL_ON_TARGET_DAY"
-    # A very large discontinuity somewhere in the previous 224 sessions may be
-    # a corporate action. Never infer the adjustment factor automatically.
+    # Review genuinely unexplained jumps, never infer an adjustment ratio from
+    # the jump. Registered events must independently pass raw price-parity.
     recent=d.tail(224)
-    result["large_historical_gap_review"] = bool(recent.gap_abs_pct.ge(40).any())
-    result["quality_status"] = ("CORPORATE_ACTION_REVIEW_REQUIRED"
-        if result["large_historical_gap_review"] else "UNADJUSTED_RESEARCH_ONLY")
+    result["large_historical_gap_review"] = bool(recent.gap_abs_pct.ge(40).any()) or action_status == REVIEW
+    result["quality_status"] = (REVIEW if result["large_historical_gap_review"]
+        else ADJUSTED if price_adjusted else "UNADJUSTED_RESEARCH_ONLY")
+    if result["large_historical_gap_review"]:
+        result["reason"] = REVIEW
+        # The values calculated from incomparable pre/post action prices must
+        # not be shown as plausible long-term reference levels.
+        result["ma112"] = result["ma224"] = None
     prev112 = float(prev.ma112) if prev is not None and pd.notna(prev.ma112) else None
     prev224 = float(prev.ma224) if prev is not None and pd.notna(prev.ma224) else None
     macd = macd_metrics(d)
@@ -378,6 +401,15 @@ def diagnose_symbol(raw: pd.DataFrame, asof: str, code: str, matches: list[dict]
         "AMOUNT_OVER_2X_PRIOR20": bool(now.amount>=2*prior_amount20)
             if pd.notna(prior_amount20) and prior_amount20>0 and pd.notna(now.amount) else None,
     }
+    if result["large_historical_gap_review"]:
+        # Turnover is denominated in KRW and remains comparable across a share
+        # consolidation; technical price/volume predicates do not.
+        result["signal_predicates"] = {key: None for key in flags}
+        for key in result["additional_predicates"]:
+            if key not in ("AMOUNT_500_EOK", "AMOUNT_OVER_2X_PRIOR20"):
+                result["additional_predicates"][key] = None
+        result["research_features"]["prior_45_day_high"] = None
+        result["research_features"]["prior_55_day_high"] = None
     return result
 
 
@@ -417,15 +449,27 @@ def build_symbol_snapshot(raw: pd.DataFrame, asof: str, code: str,
     diagnosis = diagnose_symbol(raw, asof, code, matches)
     clean = normalise(raw)
     history = clean[(clean.code == code) & (clean.date.le(pd.Timestamp(asof)))]
+    if not history.empty and "ActionAdjustmentStatus" not in history.columns:
+        history, _ = adjust_verified_actions(history, asof)
     chart = None
     stats = None
     if not history.empty and history.date.iloc[-1].strftime('%Y-%m-%d') == asof:
         chart = chart_rows(history, asof)
+        if diagnosis.get('large_historical_gap_review'):
+            # Do not render unverified long moving averages as usable levels.
+            for bar in chart['bars']:
+                bar['ma112'] = bar['ma224'] = None
         if not diagnosis.get('large_historical_gap_review'):
             stats = backtest(history, asof)
             stats['zone_reaction'] = analyze_zone_reactions(history, asof)
+            if diagnosis.get('price_adjusted'):
+                stats['price_adjusted'] = True
+                stats['limitations'] = [
+                    'Documented corporate action normalized; other corporate actions may remain unverified'
+                    if 'Unadjusted EOD OHLCV' in note else note
+                    for note in stats.get('limitations', [])]
     return {'code':code,'day':asof,'diagnosis':diagnosis,'chart':chart,'stats':stats,
-            'source':source,'price_adjusted':False,
+            'source':source,'price_adjusted':bool(diagnosis.get('price_adjusted')),
             'quality_status':diagnosis.get('quality_status', 'UNADJUSTED_RESEARCH_ONLY')}
 
 
@@ -454,7 +498,10 @@ def main():
             allow_verified_fallback=args.daily_provider == "auto")
     else:
         upgraded, days, target_source = raw, [], "FinanceData/marcap daily"
-    rows, audit = scan_r08(upgraded, target.isoformat())
+    # Keep the independently date-verified raw candles intact. Adjust only
+    # the analysis working copy, with a traceable company-IR event registry.
+    analysis_raw, corporate_actions_audit = adjust_verified_actions(upgraded, target)
+    rows, audit = scan_r08(analysis_raw, target.isoformat())
     for row in rows:
         row["source"] = target_source
         row["data_frequency"] = "EOD_DAILY"
@@ -467,6 +514,7 @@ def main():
         "intraday_verified": False,
         "source_policy": "MARCAP_BASELINE_PLUS_EXACT_DATE_KRX; NEVER_INTRADAY; NO_SILENT_FALLBACK",
         "source_verified_at_kst": datetime.now(KST).isoformat(timespec="seconds"),
+        "corporate_actions": corporate_actions_audit,
     })
     if days:
         supplement = upgraded.loc[pd.to_datetime(upgraded.Date).dt.date.isin(
@@ -488,14 +536,14 @@ def main():
     except (ValueError, KeyError, TypeError) as exc:
         print('BLUE_SYMBOL_DIRECTORY_PENDING', type(exc).__name__)
     if args.diagnose_code:
-        diagnostic=diagnose_symbol(upgraded,target.isoformat(),args.diagnose_code.upper(),rows)
+        diagnostic=diagnose_symbol(analysis_raw,target.isoformat(),args.diagnose_code.upper(),rows)
         (Path(args.out)/'SYMBOL_DIAGNOSE.json').write_text(
             json.dumps(diagnostic,ensure_ascii=False,indent=2),encoding='utf-8')
-        snapshot=build_symbol_snapshot(upgraded,target.isoformat(),args.diagnose_code.upper(),rows,target_source)
+        snapshot=build_symbol_snapshot(analysis_raw,target.isoformat(),args.diagnose_code.upper(),rows,target_source)
         (Path(args.out)/'SYMBOL_ANALYSIS.json').write_text(
             json.dumps(snapshot,ensure_ascii=False,separators=(',',':'),allow_nan=False),encoding='utf-8')
         print('BLUE_SYMBOL_ASOF_DIAGNOSTIC',json.dumps(diagnostic,ensure_ascii=False))
-    count = generate_chart_research(upgraded, rows, target.isoformat(),
+    count = generate_chart_research(analysis_raw, rows, target.isoformat(),
                                     str(Path(args.out) / "chart_snapshots.jsonl"))
     if count != len(rows):
         raise ValueError("Incomplete chart snapshots: refusing partial publish")

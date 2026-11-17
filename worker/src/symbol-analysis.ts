@@ -83,6 +83,8 @@ export async function lookupSymbolAnalysis(db:D1Database,code:string,day:string)
       source:row.source,quality_status:row.quality_status,stored_at:row.created_at_utc,
       message:row.quality_status==='CORPORATE_ACTION_REVIEW_REQUIRED'
         ?'과거 가격 단절·주식병합 가능성이 있어 원본 차트만 참고하세요. 통계는 보류합니다.'
+        :row.quality_status==='VERIFIED_CORPORATE_ACTION_ADJUSTED'
+        ?'공식 주식병합 이력을 확인하고 가격·거래량을 동일 기준으로 보정했습니다. 연구용 결과이며 매매 신호로 확정되지 않았습니다.'
         :'미수정 일봉 기반 탐색적 분석이며 실제 매매 신호로 확정되지 않았습니다.'};
   }catch{return {status:'CORRUPT_STORED_ANALYSIS',message:'저장된 분석 무결성을 확인할 수 없습니다.'};}
 }

@@ -65,3 +65,44 @@ test('AI provider failure never fabricates candidate picks',async()=>{
   assert.equal(res.status,429);const j=await res.json();assert.equal(j.error,'AI_QUOTA');assert.equal(j.items,undefined);
  }finally{globalThis.fetch=old;}
 });
+test('Gemini INVALID_ARGUMENT retries once without structured-output configuration',async()=>{
+ const db=fakeDb(),old=globalThis.fetch;let calls=0;const requests=[];
+ globalThis.fetch=async(_url,options)=>{
+  calls++;requests.push(JSON.parse(options.body));
+  if(calls===1)return new Response(JSON.stringify({error:{status:'INVALID_ARGUMENT',message:'private provider error'}}),{status:400});
+  return new Response(JSON.stringify({candidates:[{content:{parts:[{text:'```json\n'+JSON.stringify({picks:[
+   {code:'005930',reason:'확정 일봉 관찰',risk:'신호 약화',watch:'거래량'}
+  ]})+'\n```'}]}}]}),{status:200});
+ };
+ try{
+  const res=await handleBasketAi(new Request('https://example.com/api/basket/ai',{method:'POST'}),{DB:db,GEMINI_API_KEY:'test-only'});
+  assert.equal(res.status,200);assert.equal((await res.json()).items[0].code,'005930');assert.equal(calls,2);
+  assert.equal(requests[0].generationConfig.responseMimeType,'application/json');
+  assert.equal(Object.hasOwn(requests[1].generationConfig,'responseMimeType'),false);
+  assert.deepEqual(requests[1].contents,requests[0].contents);
+ }finally{globalThis.fetch=old;}
+});
+test('Gemini FAILED_PRECONDITION returns safe diagnostic and does not retry',async()=>{
+ const db=fakeDb(),old=globalThis.fetch;let calls=0;
+ globalThis.fetch=async()=>{calls++;return new Response(JSON.stringify({error:{status:'FAILED_PRECONDITION',message:'private account details'}}),{status:400});};
+ try{
+  const res=await handleBasketAi(new Request('https://example.com/api/basket/ai',{method:'POST'}),{DB:db,GEMINI_API_KEY:'secret-test'});
+  assert.equal(res.status,502);const j=await res.json();
+  assert.equal(j.error,'AI_BAD_REQUEST');assert.equal(j.provider_status,'FAILED_PRECONDITION');
+  assert.equal(j.provider_http_status,400);assert.equal(j.items,undefined);assert.equal(calls,1);
+  assert.equal(db.cache.size,0);
+  assert.equal(JSON.stringify(j).includes('private account details'),false);
+  assert.equal(JSON.stringify(j).includes('secret-test'),false);
+ }finally{globalThis.fetch=old;}
+});
+test('repeated INVALID_ARGUMENT reports retry profile without storing picks',async()=>{
+ const db=fakeDb(),old=globalThis.fetch;let calls=0;
+ globalThis.fetch=async()=>{calls++;return new Response(JSON.stringify({error:{status:'INVALID_ARGUMENT'}}),{status:400});};
+ try{
+  const res=await handleBasketAi(new Request('https://example.com/api/basket/ai',{method:'POST'}),{DB:db,GEMINI_API_KEY:'fake'});
+  assert.equal(res.status,502);const j=await res.json();
+  assert.equal(j.error,'AI_BAD_REQUEST');assert.equal(j.provider_status,'INVALID_ARGUMENT');
+  assert.equal(j.provider_http_status,400);assert.equal(j.request_profile,'plain_text_fallback');
+  assert.equal(j.items,undefined);assert.equal(db.cache.size,0);assert.equal(calls,2);
+ }finally{globalThis.fetch=old;}
+});

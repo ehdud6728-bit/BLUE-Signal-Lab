@@ -280,7 +280,12 @@ export default function SmartBasket({quickAddRequest,onItemsChange,active=true,r
   try{const r=await fetch(API+'/api/basket/ai',{method:'POST',credentials:'include',
    headers:{'Content-Type':'text/plain;charset=UTF-8'},body:'{}',cache:'no-store'});
    const d=await r.json() as AiResult;
-   if(!r.ok)throw Error(`${d.message||'AI 후보 생성 실패'}${d.error?' ('+d.error+')':''} · HTTP ${r.status}`);
+   if(!r.ok){
+    const detail=d as AiResult&{provider_status?:string;provider_http_status?:number;request_profile?:string};
+    throw Error(`${d.message||'AI 후보 생성 실패'}${d.error?' ('+d.error+')':''}`+
+      `${detail.provider_http_status?` · Gemini ${detail.provider_http_status}/${detail.provider_status||'UNKNOWN'}`:''}`+
+      `${detail.request_profile?` · ${detail.request_profile}`:''} · 앱 API ${r.status}`);
+   }
     setAi(d);
     if(d.status==='READY'){
      // R157_AI_AUTO_ADD: only server-verified picks, never invent a basket item.

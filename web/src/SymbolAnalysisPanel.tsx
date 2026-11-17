@@ -5,12 +5,13 @@ import './symbol-analysis.css';
 const API=(import.meta.env.VITE_API_BASE||'https://blue-signal-lab-api-v2.ehdud6728.workers.dev').replace(/\/+$/,'');
 type Diagnosis={code:string;name?:string;asof:string;matched:boolean;selected_signals:string;reason:string;
  quality_status?:string;large_historical_gap_review?:boolean;non_adjusted_history?:boolean;
+ corporate_action?:{first_session:string;old_shares_per_new_share:number;source:string}|null;
  open?:number|null;high?:number|null;low?:number|null;close?:number|null;
  ma20?:number|null;ma40?:number|null;ma112?:number|null;ma224?:number|null;
  env20_lower_20pct?:number|null;amount_krw?:number|null;
  research_features?:{prior_45_day_high?:number|null;prior_55_day_high?:number|null;
   amount_ratio_prior20?:number|null;close_position_in_day_range?:number|null};
- signal_predicates?:Record<string,boolean>;additional_predicates?:Record<string,boolean|null>};
+ signal_predicates?:Record<string,boolean|null>;additional_predicates?:Record<string,boolean|null>};
 type Result={status:string;message?:string;diagnosis?:Diagnosis;quality_status?:string;
  chart?:{bars:unknown[]}|null;stored_at?:string;source?:string};
 type SymbolMatch={code:string;name:string;market:string};
@@ -250,7 +251,8 @@ export default function SymbolAnalysisPanel({defaultDate}:{defaultDate:string}){
      <strong>{price(d.close)}</strong>
     </div>
     {quality==='CORPORATE_ACTION_REVIEW_REQUIRED'&&<p className="symbol-analysis-warning" role="alert">주식병합·분할 등 과거 가격 단절 검토가 필요합니다. 신호와 장기 이동평균은 미확정이며 과거 성과 통계를 숨겼습니다.</p>}
-    {quality!=='CORPORATE_ACTION_REVIEW_REQUIRED'&&<p className="symbol-analysis-hint">미수정 일봉 기반 탐색적 분석입니다. 실제 매매 근거로 확정되지 않았습니다.</p>}
+    {quality==='VERIFIED_CORPORATE_ACTION_ADJUSTED'&&<p className="symbol-analysis-hint">공식 주식병합 내역{d.corporate_action?` (${d.corporate_action.first_session} 첫 거래일 · ${d.corporate_action.old_shares_per_new_share}:1 병합)`:''}을 반영해 과거 가격·거래량을 같은 주식수 기준으로 비교합니다. 연구 결과의 수익률을 보장하지 않습니다.</p>}
+    {quality==='UNADJUSTED_RESEARCH_ONLY'&&<p className="symbol-analysis-hint">미수정 일봉 기반 탐색적 분석입니다. 실제 매매 근거로 확정되지 않았습니다.</p>}
     <div className="symbol-analysis-facts">
      <span>시가 {price(d.open)}</span><span>고가 {price(d.high)}</span><span>저가 {price(d.low)}</span>
      <span>MA20 {price(d.ma20)}</span><span>ENV20 하단 {price(d.env20_lower_20pct)}</span>
@@ -259,7 +261,7 @@ export default function SymbolAnalysisPanel({defaultDate}:{defaultDate:string}){
     </div>
     <details className="symbol-analysis-conditions" open><summary>조건별 판정과 누락 이유</summary>
       <div>{Object.entries(predicates).map(([key,value])=><div key={key}><span>{labels[key]||key}</span>
-       <strong className={value===true?'yes':value===false?'no':'unknown'}>{value===true?'충족':value===false?'미충족':'자료 부족'}</strong></div>)}</div>
+       <strong className={value===true?'yes':value===false?'no':'unknown'}>{value===true?'충족':value===false?'미충족':quality==='CORPORATE_ACTION_REVIEW_REQUIRED'?'검증 대기':'자료 부족'}</strong></div>)}</div>
     </details>
     {d.research_features&&<details className="symbol-analysis-conditions"><summary>종가베팅·45/55일 돌파 단서 (검증 전 가설)</summary>
       <p className="symbol-analysis-hint">직전 거래일까지만 계산한 기준선과 당일 확정 거래대금입니다. 장마감 동시호가 체결 가능성이나 다음 날 수익률을 의미하지 않습니다.</p>

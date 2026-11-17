@@ -301,6 +301,10 @@ def backtest(history:pd.DataFrame,asof:str):
 
 def chart_rows(history:pd.DataFrame,asof:str,points=180):
     hist=history.loc[history.date.le(pd.Timestamp(asof))].sort_values('date').reset_index(drop=True)
+    action_status = (str(hist.ActionAdjustmentStatus.iloc[-1])
+                     if len(hist) and 'ActionAdjustmentStatus' in hist.columns else '')
+    price_adjusted = action_status in ('VERIFIED_CORPORATE_ACTION_ADJUSTED',
+                                       'VERIFIED_SOURCE_ALREADY_ADJUSTED')
     d=enrich(hist).tail(points).reset_index(drop=True)
     all_close=hist.close.astype(float)
     macd_all=all_close.ewm(span=12,adjust=False,min_periods=12).mean()-all_close.ewm(span=26,adjust=False,min_periods=26).mean()
@@ -318,7 +322,8 @@ def chart_rows(history:pd.DataFrame,asof:str,points=180):
           'bb40':fnum(row.BB40_UPPER,2),
            'ma112':fnum(row.ma112,2),'ma224':fnum(row.ma224,2)})
     return {'version':'R10_CHART_V1','asof':asof,'data_frequency':'EOD_DAILY',
-            'price_adjusted':False,'bars':records}
+            'price_adjusted':price_adjusted,
+            'corporate_action_status':action_status,'bars':records}
 
 
 def generate(raw:pd.DataFrame,matched:list[dict],asof:str,dest:str):
@@ -334,6 +339,14 @@ def generate(raw:pd.DataFrame,matched:list[dict],asof:str,dest:str):
             code=item['code'];h=groups.get(code)
             if h is None or h.empty or h.date.iloc[-1]!=target:continue
             stats=backtest(h,asof)
+            if ('ActionAdjustmentStatus' in h.columns and
+                str(h.ActionAdjustmentStatus.iloc[-1]) in (
+                    'VERIFIED_CORPORATE_ACTION_ADJUSTED', 'VERIFIED_SOURCE_ALREADY_ADJUSTED')):
+                stats['price_adjusted'] = True
+                stats['limitations'] = [
+                    'Documented corporate action normalized; other corporate actions may remain unverified'
+                    if 'Unadjusted EOD OHLCV' in note else note
+                    for note in stats.get('limitations', [])]
             stats['zone_reaction']=analyze_zone_reactions(h,asof)
             data={'code':code,'day':asof,'chart':chart_rows(h,asof),'stats':stats}
             out.write(json.dumps(data,ensure_ascii=False,separators=(',',':'),allow_nan=False)+'\n')
