@@ -28,7 +28,10 @@ import requests
 from market_scan import load_marcap, normalise, enrich, export
 from market_scan_r08 import SourcePending, krx_day, COLS
 from market_scan_r08_diagnostics import scan_r08
-from chart_research_r10 import generate as generate_chart_research
+from chart_research_r10 import (generate as generate_chart_research, chart_rows,
+                                backtest)
+from zone_reaction_r15111 import analyze_zone_reactions
+from market_scan_r08_diagnostics import macd_metrics
 
 KST = timezone(timedelta(hours=9))
 EOD_MIN_TIME_KST = time(15, 40)
@@ -284,7 +287,9 @@ def diagnose_symbol(raw: pd.DataFrame, asof: str, code: str, matches: list[dict]
                    "open": value("open"), "high": value("high"),
                    "low": value("low"), "close": value("close"),
                    "ma20": value("ma20"), "ma40": value("ma40"),
-                   "ma60": value("ma60"), "ma224": value("ma224"),
+                   "ma60": value("ma60"), "ma112": value("ma112"),
+                   "ma224": value("ma224"),
+                   "amount_krw": value("amount"),
                    "env20_mid": value("ENV20_MID"),
                    "env20_lower_20pct": value("ENV20_LOWER_20PCT"),
                    "previous_low": round(float(prev.low), 5) if prev is not None else None,
@@ -304,7 +309,68 @@ def diagnose_symbol(raw: pd.DataFrame, asof: str, code: str, matches: list[dict]
     # a corporate action. Never infer the adjustment factor automatically.
     recent=d.tail(224)
     result["large_historical_gap_review"] = bool(recent.gap_abs_pct.ge(40).any())
+    result["quality_status"] = ("CORPORATE_ACTION_REVIEW_REQUIRED"
+        if result["large_historical_gap_review"] else "UNADJUSTED_RESEARCH_ONLY")
+    prev112 = float(prev.ma112) if prev is not None and pd.notna(prev.ma112) else None
+    prev224 = float(prev.ma224) if prev is not None and pd.notna(prev.ma224) else None
+    macd = macd_metrics(d)
+    # Hypotheses for the closing-auction / breakout research track, NOT verified
+    # entry rules. High breakouts use only the prior 45/55 completed sessions.
+    prior45 = d.high.shift(1).rolling(45,min_periods=45).max().iloc[-1]
+    prior55 = d.high.shift(1).rolling(55,min_periods=55).max().iloc[-1]
+    prior_amount20 = d.amount.shift(1).rolling(20,min_periods=20).mean().iloc[-1]
+    range_today = float(now.high-now.low)
+    close_position = ((float(now.close-now.low)/range_today)
+                      if range_today>0 else None)
+    result['research_features'] = {
+        'prior_45_day_high': round(float(prior45),5) if pd.notna(prior45) else None,
+        'prior_55_day_high': round(float(prior55),5) if pd.notna(prior55) else None,
+        'amount_ratio_prior20': (round(float(now.amount/prior_amount20),3)
+             if pd.notna(prior_amount20) and prior_amount20>0 and pd.notna(now.amount) else None),
+        'close_position_in_day_range': round(close_position,3) if close_position is not None else None,
+    }
+    result["additional_predicates"] = {
+        "MA_INVERSE": bool(now.ma20 < now.ma40 < now.ma60)
+            if all(pd.notna(now.get(f"ma{n}")) for n in (20,40,60)) else None,
+        "MA112_CROSS": bool(prev.close <= prev112 and now.close > now.ma112)
+            if prev112 is not None and pd.notna(now.ma112) else None,
+        "MA224_CROSS": bool(prev.close <= prev224 and now.close > now.ma224)
+            if prev224 is not None and pd.notna(now.ma224) else None,
+        "AMOUNT_500_EOK": bool(now.amount >= 50_000_000_000)
+            if pd.notna(now.amount) else None,
+        "RSI_GC": bool(now.rsi_gc) if pd.notna(now.rsi) and pd.notna(now.rsi_signal) else None,
+        "SLOW_14_3_3_GC": bool(now.slow_14_3_3_gc)
+            if pd.notna(now.slow_14_3_3_k) and pd.notna(now.slow_14_3_3_d) else None,
+        "MACD_GC": macd['macd_gc'] if macd['macd_12_26_9'] != '' else None,
+        "BREAK_45_PRIOR_HIGH": bool(now.close>prior45) if pd.notna(prior45) else None,
+        "BREAK_55_PRIOR_HIGH": bool(now.close>prior55) if pd.notna(prior55) else None,
+        "CLOSE_IN_TOP_20PCT": bool(close_position>=.8) if close_position is not None else None,
+        "AMOUNT_OVER_2X_PRIOR20": bool(now.amount>=2*prior_amount20)
+            if pd.notna(prior_amount20) and prior_amount20>0 and pd.notna(now.amount) else None,
+    }
     return result
+
+
+def build_symbol_snapshot(raw: pd.DataFrame, asof: str, code: str,
+                          matches: list[dict], source: str) -> dict:
+    """Independent as-of snapshot, including symbols that failed the scanner.
+
+    Historical statistics are not shown when an unadjusted corporate action
+    may have contaminated long moving averages and prior event returns.
+    """
+    diagnosis = diagnose_symbol(raw, asof, code, matches)
+    clean = normalise(raw)
+    history = clean[(clean.code == code) & (clean.date.le(pd.Timestamp(asof)))]
+    chart = None
+    stats = None
+    if not history.empty and history.date.iloc[-1].strftime('%Y-%m-%d') == asof:
+        chart = chart_rows(history, asof)
+        if not diagnosis.get('large_historical_gap_review'):
+            stats = backtest(history, asof)
+            stats['zone_reaction'] = analyze_zone_reactions(history, asof)
+    return {'code':code,'day':asof,'diagnosis':diagnosis,'chart':chart,'stats':stats,
+            'source':source,'price_adjusted':False,
+            'quality_status':diagnosis.get('quality_status', 'UNADJUSTED_RESEARCH_ONLY')}
 
 
 def main():
@@ -355,6 +421,9 @@ def main():
         diagnostic=diagnose_symbol(upgraded,target.isoformat(),args.diagnose_code.upper(),rows)
         (Path(args.out)/'SYMBOL_DIAGNOSE.json').write_text(
             json.dumps(diagnostic,ensure_ascii=False,indent=2),encoding='utf-8')
+        snapshot=build_symbol_snapshot(upgraded,target.isoformat(),args.diagnose_code.upper(),rows,target_source)
+        (Path(args.out)/'SYMBOL_ANALYSIS.json').write_text(
+            json.dumps(snapshot,ensure_ascii=False,separators=(',',':'),allow_nan=False),encoding='utf-8')
         print('BLUE_SYMBOL_ASOF_DIAGNOSTIC',json.dumps(diagnostic,ensure_ascii=False))
     count = generate_chart_research(upgraded, rows, target.isoformat(),
                                     str(Path(args.out) / "chart_snapshots.jsonl"))

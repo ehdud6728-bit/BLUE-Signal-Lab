@@ -48,6 +48,27 @@ def load_metadata(db, appkey: str):
     return rows[0] if rows else None
 
 
+def cache_diagnostic(db, appkey: str, appsecret: str, now: datetime) -> tuple[str, str | None]:
+    """Read-only state of the *usable* token, not merely its expiry metadata.
+
+    A valid expiry in D1 cannot prove the collector can decrypt the token.
+    This intentionally returns only fixed reason codes and a timestamp.
+    """
+    state, expiry = evaluate(load_metadata(db, appkey), now)
+    if state != 'TOKEN_VALID':
+        return state, expiry
+    try:
+        cached = db.get(appkey, appsecret)
+    except vault_mod.VaultError as exc:
+        if str(exc) == 'DECRYPT_FAILED':
+            return 'TOKEN_CACHE_DECRYPT_FAILED', expiry
+        # Read failures are NOT permission to issue a replacement token.
+        raise
+    if not cached:
+        return 'TOKEN_CACHE_INCONSISTENT', expiry
+    return 'TOKEN_VALID', expiry
+
+
 def evaluate(metadata, now: datetime) -> tuple[str, str | None]:
     if metadata is None:
         return 'MISSING_TOKEN', None
@@ -109,21 +130,13 @@ def maintain(db, appkey: str, appsecret: str, *, now: datetime,
         raise ValueError('timezone required')
     if not appkey or not appsecret:
         raise vault_mod.VaultError('KIS_SECRETS_MISSING')
-    metadata = load_metadata(db, appkey)
-    state, expiry = evaluate(metadata, now)
+    state, expiry = cache_diagnostic(db, appkey, appsecret, now)
     if not issue_enabled:
         return {'status':'CHECK_ONLY', 'token_state':state, 'expiry_utc':expiry}
     if state == 'TOKEN_VALID':
-        # A timestamp alone does not prove that the encrypted cache is readable.
-        # Never issue on a corrupt cache or D1 read failure; fail closed.
-        try:
-            cached = db.get(appkey,appsecret)
-        except vault_mod.VaultError:
-            return {'status':'TOKEN_CACHE_DECRYPT_FAILED', 'issued':False}
-        if not cached:
-            return {'status':'TOKEN_CACHE_INCONSISTENT', 'issued':False}
         return {'status':'TOKEN_VALID', 'expiry_utc':expiry, 'issued':False}
-    if state in ('WAIT_24H_FROM_LAST_SAVED','INVALID_TOKEN_METADATA'):
+    if state in ('WAIT_24H_FROM_LAST_SAVED','INVALID_TOKEN_METADATA',
+                 'TOKEN_CACHE_DECRYPT_FAILED','TOKEN_CACHE_INCONSISTENT'):
         return {'status':state, 'expiry_utc':expiry, 'issued':False}
     # Metadata says expired/missing; the one-time endpoint may now be used.
     scope = vault_mod.scope_for(appkey)
