@@ -1,7 +1,7 @@
 /**
- * Manually opt-in Turso-only pilot using the very same verified EOD symbol
- * directory artifact that the D1 importer consumes. Never queries D1 or KIS.
- * This is a bounded smoke test, NOT a complete dual-DB mirror.
+ * Manually opt-in Turso-only symbol-name directory import using the verified
+ * EOD research artifact. dry_run / apply_12 / apply_all; never queries D1 or KIS.
+ * Even apply_all imports ONLY names, NOT a complete dual-DB mirror.
  */
 import {readFile} from 'node:fs/promises';
 import {createClient} from '@libsql/client';
@@ -31,7 +31,7 @@ export function prepareDirectory(audit,directory){
   const symbols=[];
   for(const s of directory.symbols){
     const code=String(s?.code??''),name=String(s?.name??'').trim(),market=String(s?.market??'');
-    if(!CODE.test(code) || !name || name.length>100 ||
+    if(!CODE.test(code) || !name || name===code || name.length>100 ||
        !['KOSPI','KOSDAQ'].includes(market) || seen.has(code)) {
       throw Error('INVALID_EOD_SYMBOL_DIRECTORY');
     }
@@ -40,15 +40,17 @@ export function prepareDirectory(audit,directory){
   }
   // Validate the ENTIRE source before selecting a tiny deterministic pilot.
   symbols.sort((a,b)=>a.code.localeCompare(b.code));
-  return {asof:directory.asof,fullCount:symbols.length,sample:symbols.slice(0,PILOT_SIZE)};
+  return {asof:directory.asof,fullCount:symbols.length,
+    symbols,sample:symbols.slice(0,PILOT_SIZE)};
 }
 
 export async function runDirectoryPilot({audit,directory,mode='dry_run',env=process.env,
   clientFactory=createClient}={}){
-  if(!['dry_run','apply_12'].includes(mode))throw Error('INVALID_PILOT_MODE');
+  if(!['dry_run','apply_12','apply_all'].includes(mode))throw Error('INVALID_PILOT_MODE');
   const prepared=prepareDirectory(audit,directory);
   if(mode==='dry_run')return {status:'DRY_RUN',asof:prepared.asof,
     source_symbols:prepared.fullCount,stored:0};
+  const selected=mode==='apply_all'?prepared.symbols:prepared.sample;
   const url=String(env.TURSO_DATABASE_URL||'').trim();
   const authToken=String(env.TURSO_AUTH_TOKEN||'').trim();
   if(!/^libsql:\/\//.test(url) && !/^https:\/\//.test(url))throw Error('TURSO_URL_MISSING_OR_INVALID');
@@ -60,25 +62,32 @@ export async function runDirectoryPilot({audit,directory,mode='dry_run',env=proc
       asof_day TEXT NOT NULL, updated_at_utc TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     )`);
     await client.execute('CREATE INDEX IF NOT EXISTS idx_blue_symbol_directory_v1_name ON blue_symbol_directory_v1(name)');
-    const batch=prepared.sample.map(s=>({sql:`INSERT INTO blue_symbol_directory_v1(code,name,market,asof_day)
+    // Keep each transaction/read-back bounded. A failed run can be reattempted:
+    // same source is idempotent; older/same-day conflicting names are NOT overwritten.
+    for(let offset=0;offset<selected.length;offset+=50){
+      const part=selected.slice(offset,offset+50);
+      const batch=part.map(s=>({sql:`INSERT INTO blue_symbol_directory_v1(code,name,market,asof_day)
       VALUES(?,?,?,?) ON CONFLICT(code) DO UPDATE SET
       name=excluded.name,market=excluded.market,asof_day=excluded.asof_day,
       updated_at_utc=CURRENT_TIMESTAMP
-      WHERE excluded.asof_day>=blue_symbol_directory_v1.asof_day`,
+      WHERE excluded.asof_day>blue_symbol_directory_v1.asof_day
+        OR (excluded.asof_day=blue_symbol_directory_v1.asof_day
+          AND excluded.name=blue_symbol_directory_v1.name
+          AND excluded.market=blue_symbol_directory_v1.market)`,
       args:[s.code,s.name,s.market,s.asof]}));
-    await client.batch(batch,'write');
-    // Bounded read-back of the exact inserted keys; no full-table COUNT scan.
-    const check=await client.execute({sql:`SELECT code,name,market,asof_day FROM blue_symbol_directory_v1
-      WHERE code IN (${prepared.sample.map(()=>'?').join(',')})`,args:prepared.sample.map(s=>s.code)});
-    const byCode=new Map(check.rows.map(row=>[String(row.code),row]));
-    for(const s of prepared.sample){
-      const v=byCode.get(s.code);
-      if(!v || String(v.name)!==s.name || String(v.market)!==s.market || String(v.asof_day)!==s.asof){
-        throw Error('TURSO_EOD_READBACK_MISMATCH');
+      await client.batch(batch,'write');
+      const check=await client.execute({sql:`SELECT code,name,market,asof_day FROM blue_symbol_directory_v1
+        WHERE code IN (${part.map(()=>'?').join(',')})`,args:part.map(s=>s.code)});
+      const byCode=new Map(check.rows.map(row=>[String(row.code),row]));
+      for(const s of part){
+        const v=byCode.get(s.code);
+        if(!v || String(v.name)!==s.name || String(v.market)!==s.market || String(v.asof_day)!==s.asof){
+          throw Error('TURSO_EOD_READBACK_MISMATCH');
+        }
       }
     }
     return {status:'OK',asof:prepared.asof,
-      source_symbols:prepared.fullCount,stored:prepared.sample.length};
+      source_symbols:prepared.fullCount,stored:selected.length};
   }finally{client.close();}
 }
 

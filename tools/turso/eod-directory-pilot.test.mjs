@@ -19,6 +19,11 @@ test('validate every symbol before sampling (including outside first 12)',()=>{
   assert.throws(()=>prepareDirectory(audit(),d),/INVALID_EOD_SYMBOL_DIRECTORY/);
 });
 
+test('reject placeholder ticker codes masquerading as company names',()=>{
+  const d=directory();d.symbols[1600].name=d.symbols[1600].code;
+  assert.throws(()=>prepareDirectory(audit(),d),/INVALID_EOD_SYMBOL_DIRECTORY/);
+});
+
 test('reject unverified date, incomplete audit, and unverified same-day source',()=>{
   const a=audit();a.asof='2026-11-18';
   assert.throws(()=>prepareDirectory(a,directory()),/UNVERIFIED_EOD_DIRECTORY/);
@@ -60,4 +65,32 @@ test('apply_12 refuses absent credentials and unknown modes before DB access',as
   const opts={audit:audit(),directory:directory(),mode:'apply_12'};
   await assert.rejects(runDirectoryPilot({...opts,env:{}}),/TURSO_URL_MISSING_OR_INVALID/);
   await assert.rejects(runDirectoryPilot({...opts,mode:'full',env:{}}),/INVALID_PILOT_MODE/);
+});
+
+test('apply_all persists and reads back each of 1700 actual company names in bounded batches',async()=>{
+  let closed=0,writeCalls=0;const table=new Map();
+  const clientFactory=()=>({
+    async execute(q){
+      if(typeof q==='string')return {rows:[]};
+      assert.match(q.sql,/WHERE code IN/);
+      assert(q.args.length<=50);
+      return {rows:q.args.map(code=>table.get(code)).filter(Boolean)};
+    },
+    async batch(statements,mode){
+      assert.equal(mode,'write');assert(statements.length>0&&statements.length<=50);
+      writeCalls++;
+      for(const stmt of statements){
+        const [code,name,market,asof_day]=stmt.args;
+        assert.notEqual(name,code);
+        table.set(code,{code,name,market,asof_day});
+      }
+    },close(){closed++;}
+  });
+  const options={audit:audit(),directory:directory(),mode:'apply_all',
+    env:{TURSO_DATABASE_URL:'libsql://test.invalid',TURSO_AUTH_TOKEN:'REDACTED'},clientFactory};
+  const result=await runDirectoryPilot(options);
+  assert.deepEqual(result,{status:'OK',asof:'2026-11-17',source_symbols:1700,stored:1700});
+  assert.equal(writeCalls,34);
+  assert.equal(table.size,1700);
+  assert.equal(closed,1);
 });

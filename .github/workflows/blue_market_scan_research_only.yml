@@ -24,7 +24,7 @@ on:
         default: ''
         type: string
       turso_directory_mode:
-        description: 'Turso-only validated directory pilot: off(default), dry_run(no DB), apply_12(Turso 12 rows; no D1 SQL)'
+        description: 'Turso names: off(default), dry_run, apply_12 or apply_all (all verified source names; no D1 SQL)'
         required: true
         default: 'off'
         type: choice
@@ -32,6 +32,7 @@ on:
           - 'off'
           - 'dry_run'
           - 'apply_12'
+          - 'apply_all'
 
 permissions:
   contents: read
@@ -68,6 +69,16 @@ jobs:
           fi
           if [[ "$PUBLISH_SYMBOL" == 'true' && ! "$CODE" =~ ^[0-9A-Z]{6}$ ]]; then
             echo 'Isolated diagnostic requires exactly one 6-character stock code.'
+            exit 1
+          fi
+      - name: Block D1 publication during full Turso name repair
+        if: ${{ inputs.turso_directory_mode == 'apply_all' }}
+        env:
+          PUBLISH_ALL: ${{ inputs.publish_to_d1 }}
+          PUBLISH_SYMBOL: ${{ inputs.publish_diagnostic_only }}
+        run: |
+          if [[ "$PUBLISH_ALL" != 'false' || "$PUBLISH_SYMBOL" != 'false' ]]; then
+            echo 'Full Turso name repair must not publish to D1.'
             exit 1
           fi
       - name: Checkout BLUE Signal Lab
@@ -116,16 +127,16 @@ jobs:
                 audit['matched_stocks'],audit.get('data_phase'),audit['target_day_source'])
           PY
       - name: Setup Node for opt-in Turso directory pilot
-        if: ${{ inputs.turso_directory_mode == 'dry_run' || inputs.turso_directory_mode == 'apply_12' }}
+        if: ${{ inputs.turso_directory_mode == 'dry_run' || inputs.turso_directory_mode == 'apply_12' || inputs.turso_directory_mode == 'apply_all' }}
         uses: actions/setup-node@v4
         with:
           node-version: '22'
       - name: Install Turso client for opt-in pilot
-        if: ${{ inputs.turso_directory_mode == 'dry_run' || inputs.turso_directory_mode == 'apply_12' }}
+        if: ${{ inputs.turso_directory_mode == 'dry_run' || inputs.turso_directory_mode == 'apply_12' || inputs.turso_directory_mode == 'apply_all' }}
         working-directory: tools/turso
         run: npm install --no-audit --no-fund --ignore-scripts --no-package-lock
-      - name: Test and import at most 12 verified EOD directory rows to Turso (opt-in)
-        if: ${{ inputs.turso_directory_mode == 'dry_run' || inputs.turso_directory_mode == 'apply_12' }}
+      - name: Test and import selected verified EOD names to Turso (manual opt-in)
+        if: ${{ inputs.turso_directory_mode == 'dry_run' || inputs.turso_directory_mode == 'apply_12' || inputs.turso_directory_mode == 'apply_all' }}
         env:
           TURSO_EOD_MODE: ${{ inputs.turso_directory_mode }}
           TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}

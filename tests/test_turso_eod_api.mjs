@@ -4,7 +4,7 @@ import {InvalidEodQuery,tursoEodDates,tursoEodSearch} from '../worker/src/turso-
 
 const env={TURSO_DATABASE_URL:'libsql://test.invalid',TURSO_AUTH_TOKEN:'example-token'};
 
-function mockDb({failure=false,audit=true,actualCount='1'}={}){
+function mockDb({failure=false,audit=true,actualCount='1',hasDirectory=false}={}){
   const calls=[];let closed=0;
   const factory=()=>({
     async execute(stmt){
@@ -17,8 +17,10 @@ function mockDb({failure=false,audit=true,actualCount='1'}={}){
         return {rows:[{day:'2026-11-18',rows:'2660',source:'KRX_PYKRX_EXACT_DAY_VERIFIED'}]};
       if(sql.includes('FROM blue_eod_ingest_audit_v1'))
         return {rows:audit?[{row_count:'2660',source:'KRX_PYKRX_EXACT_DAY_VERIFIED'}]:[]};
+      if(sql.includes('FROM sqlite_master'))return {rows:hasDirectory?[{ok:1}]:[]};
       if(sql.includes('COUNT(*) AS n'))return {rows:[{n:actualCount}]};
-      return {rows:[{day:'2026-11-18',code:'005930',name:'삼성전자',market:'KOSPI',
+      return {rows:[{day:'2026-11-18',code:'005930',name:hasDirectory?'삼성전자':'',
+        name_asof_day:hasDirectory?'2026-11-18':null,market:'KOSPI',
         open:'80000',high:'81000',low:'79000',close:'80500',volume:'12000000',
         amount:'960000000000',source:'KRX_PYKRX_EXACT_DAY_VERIFIED'}]};
     },close(){closed++;}});
@@ -42,14 +44,25 @@ test('returns historical daily prices and keeps KRW turnover as a precise string
   assert.equal(out.items[0].close,80500);
   assert.equal(out.items[0].amount_krw,'960000000000');
   assert.equal(out.total,1);
-  assert.deepEqual(db.calls[2].args,['2026-11-18','%삼성%','%삼성%',50,0]);
+  assert.equal(out.items[0].name,'');
+  assert.deepEqual(db.calls[3].args,['2026-11-18','%삼성%','%삼성%',50,0]);
   assert.equal(db.closed,1);
+});
+
+test('joins audited Turso company-name directory for visible name and name query, not D1',async()=>{
+  const db=mockDb({hasDirectory:true});
+  const out=await tursoEodSearch(env,new URLSearchParams({day:'2026-11-18',q:'삼성'}),db.factory);
+  assert.equal(out.items[0].name,'삼성전자');
+  assert.equal(out.items[0].name_asof_day,'2026-11-18');
+  assert.match(db.calls[2].sql,/LEFT JOIN blue_symbol_directory_v1 n/);
+  assert.match(db.calls[2].sql,/n\.name/);
+  assert.equal(db.calls.every(c=>/^SELECT\b/.test(c.sql)),true);
 });
 
 test('escapes SQL LIKE wildcard input and does not interpolate user text',async()=>{
   const db=mockDb();
   await tursoEodSearch(env,new URLSearchParams({day:'2026-11-18',q:'A%_\\'}),db.factory);
-  assert.deepEqual(db.calls[1].args,['2026-11-18','%A\\%\\_\\\\%','%A\\%\\_\\\\%']);
+  assert.deepEqual(db.calls[2].args,['2026-11-18','%A\\%\\_\\\\%','%A\\%\\_\\\\%']);
   assert.equal(db.calls.every(c=>!c.sql.includes('A%_')),true);
 });
 

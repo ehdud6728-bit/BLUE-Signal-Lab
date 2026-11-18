@@ -4,7 +4,7 @@ import './turso-eod-recovery.css';
 
 export type TursoDay={day:string;rows:number;source:string};
 type PriceRow={day:string;code:string;name:string;market:string;open:number;high:number;
-  low:number;close:number;volume:string;amount_krw:string;source:string};
+  low:number;close:number;volume:string;amount_krw:string;source:string;name_asof_day?:string|null};
 type SearchResult={storage:string;data_status:string;day:string;q:string;page:number;limit:number;
   total:number;items:PriceRow[]};
 
@@ -90,7 +90,7 @@ export default function TursoEodRecovery({api,dates,onUnavailable}:{api:string;d
     {result&&result.data_status==='VERIFIED_EOD_ONLY'&&<>
       <div className="turso-eod-list">
         {result.items.map(item=><div className="turso-eod-row" key={item.code}>
-          <div className="turso-eod-stock"><div><b>{item.name||item.code}</b> <span>{item.code}</span></div>
+          <div className="turso-eod-stock"><div><b>{item.name||'종목명 미등록'}</b> <span>{item.code}</span></div>
             <small>{item.market} · {item.day}</small></div>
           <div className="turso-eod-close"><b>{price(item.close)}원</b><small>확정 종가</small></div>
           <div className="turso-eod-ohlc"><span>시가 {price(item.open)}</span><span>고가 {price(item.high)}</span>
@@ -105,6 +105,6 @@ export default function TursoEodRecovery({api,dates,onUnavailable}:{api:string;d
         <button type="button" disabled={page>=Math.ceil(result.total/50)||busy} onClick={()=>setPage(p=>p+1)}>다음</button>
       </div>}
     </>}
-    <p className="turso-eod-caption">출처: KRX 일자별 검증·Turso 저장 후 재조회 통과 데이터. 거래대금은 검증된 원화 기준입니다.</p>
+    <p className="turso-eod-caption">가격·거래대금: KRX 거래일 검증 일봉. 종목명: 별도 검증 디렉터리의 기준일 이름으로, 과거 상호 변경은 반영되지 않을 수 있습니다. 종목명이 없는 경우 임의로 만들지 않습니다.</p>
   </section>;
 }
