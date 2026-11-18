@@ -1,5 +1,7 @@
 import {useEffect,useState} from 'react';
+import {ShoppingBasket} from 'lucide-react';
 import StockChart from './StockChart';
+import type {BasketQuickItem} from './SmartBasket';
 import './symbol-analysis.css';
 
 const API=(import.meta.env.VITE_API_BASE||'https://blue-signal-lab-api-v2.ehdud6728.workers.dev').replace(/\/+$/,'');
@@ -43,7 +45,11 @@ const labels:Record<string,string>={
  AMOUNT_OVER_2X_PRIOR20:'거래대금이 이전 20거래일 평균의 2배 이상(연구)'
 };
 const price=(n:number|null|undefined)=>typeof n==='number'&&Number.isFinite(n)?n.toLocaleString('ko-KR',{maximumFractionDigits:2})+'원':'미계산';
-export default function SymbolAnalysisPanel({defaultDate}:{defaultDate:string}){
+export default function SymbolAnalysisPanel({defaultDate,onAddToBasket,isInBasket}: {
+ defaultDate:string;
+ onAddToBasket?:(item:BasketQuickItem,analysisMatched:boolean)=>void;
+ isInBasket?:(code:string,day:string)=>boolean;
+}){
  const [term,setTerm]=useState('225190');const [code,setCode]=useState('225190');
  const [chosen,setChosen]=useState(false);const [name,setName]=useState('');
  const [matches,setMatches]=useState<SymbolMatch[]>([]);
@@ -191,6 +197,16 @@ export default function SymbolAnalysisPanel({defaultDate}:{defaultDate:string}){
  const displayName=(d?.name||name||'').trim();
  const fullName=displayName?`${displayName} (${d?.code||code})`:(d?.code||code);
  const predicates={...(d?.signal_predicates||{}),...(d?.additional_predicates||{})};
+ const canAddAnalyzed=!!d&&result?.status==='READY'&&/^\d{6}$/.test(d.code)&&
+  d.asof===day&&d.code===code&&quality!=='CORPORATE_ACTION_REVIEW_REQUIRED'&&
+  typeof d.close==='number'&&Number.isFinite(d.close)&&d.close>0;
+ const addedAlready=!!d&&isInBasket?.(d.code,d.asof)===true;
+ const addAnalyzed=()=>{
+  if(!canAddAnalyzed||!d||!onAddToBasket||addedAlready)return;
+  onAddToBasket({code:d.code,name:displayName||d.code,day:d.asof,close_price:d.close!,
+   // Persist only verified signals actually satisfied on this historical day.
+   signals:d.matched?d.selected_signals.split(',').map(x=>x.trim()).filter(Boolean):[]},d.matched);
+ };
  return <section className="symbol-analysis-panel" aria-label="종목 정밀분석">
    <div className="symbol-analysis-intro"><h2>🔎 종목 정밀분석</h2><small>전체 종목명·코드 검색 · 과거 기준일 선택</small></div>
    <p className="symbol-analysis-hint">종목명 또는 코드로 찾을 수 있습니다. 먼저 저장된 분석을 조회하고, 기록이 없을 때 분석을 요청하세요.</p>
@@ -249,6 +265,13 @@ export default function SymbolAnalysisPanel({defaultDate}:{defaultDate:string}){
     <div className="symbol-analysis-head">
      <div><strong>{fullName} · {d.asof}</strong><span>{d.matched?'검색 신호 적중':'검색 미적중'} · {d.reason}</span></div>
      <strong>{price(d.close)}</strong>
+    </div>
+    <div className="symbol-analysis-basket-actions">
+     <button type="button" disabled={!canAddAnalyzed||addedAlready||!onAddToBasket} onClick={addAnalyzed}>
+      <ShoppingBasket size={17}/>{addedAlready?'이미 장바구니에 담김':'분석 후 직접 선택 · 장바구니 담기'}
+     </button>
+     <small>사용자 직접 선택으로 기록합니다. 분석 기준일의 확정 종가를 사용하며 AI 후보 선정과 구분됩니다.
+      {!d.matched?' 이 날짜에는 검색 신호를 충족하지 않았지만 개인 관찰용으로 담을 수 있습니다.':''}</small>
     </div>
     {quality==='CORPORATE_ACTION_REVIEW_REQUIRED'&&<p className="symbol-analysis-warning" role="alert">주식병합·분할 등 과거 가격 단절 검토가 필요합니다. 신호와 장기 이동평균은 미확정이며 과거 성과 통계를 숨겼습니다.</p>}
     {quality==='VERIFIED_CORPORATE_ACTION_ADJUSTED'&&<p className="symbol-analysis-hint">공식 주식병합 내역{d.corporate_action?` (${d.corporate_action.first_session} 첫 거래일 · ${d.corporate_action.old_shares_per_new_share}:1 병합)`:''}을 반영해 과거 가격·거래량을 같은 주식수 기준으로 비교합니다. 연구 결과의 수익률을 보장하지 않습니다.</p>}

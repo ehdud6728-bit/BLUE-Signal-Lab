@@ -25,3 +25,4 @@
 .basket-insight{background:#f7f9ff;padding:8px;border-radius:7px;font-size:11px;color:#5a7090}.basket-memo{display:block;font-size:10px;color:#7b8ba2;margin-top:9px}.basket-memo input{box-sizing:border-box;display:block;width:100%;border:1px solid #e0e8f3;border-radius:7px;padding:8px;font-size:12px;color:#294568;background:#fff;margin-top:4px}
 .basket-foot{border-top:1px solid #e9eef9;padding-top:12px;margin-top:14px}
 @media(max-width:700px){.blue-basket{padding:12px}.basket-head h2{font-size:16px}.basket-pickers{grid-template-columns:1fr}.basket-kpis strong{font-size:16px}.basket-record-stats{grid-template-columns:1fr 1fr}.basket-record-stats>div:last-child{grid-column:span 2}.basket-ai-results{max-height:330px}}
+.basket-selection-note{margin:4px 0 10px;padding:8px 10px;border-radius:8px;background:#eef4ff;color:#3d628f;font-size:12px;line-height:1.5}

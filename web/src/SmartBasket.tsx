@@ -45,11 +45,15 @@ const API=(import.meta.env.VITE_API_BASE||'https://blue-signal-lab-api-v2.ehdud6
 // R158_LONGTERM: separate storage quotas; this is cleanup protection, not cloud backup.
 const STORE='blue_r15_basket_v1';
 const MAX_REGULAR=100, MAX_PROTECTED=20;
-type SearchRow={code:string;name:string|null;day:string;close_price:number|null;signals:string[];extras?:Record<string,unknown>};
+export type BasketSelectionOrigin='SEARCH'|'ANALYSIS';
+export type BasketQuickItem={code:string;name:string|null;day:string;close_price:number|null;signals:string[];extras?:Record<string,unknown>};
+export type BasketQuickAddRequest={serial:number;item:BasketQuickItem;selectionOrigin?:BasketSelectionOrigin;analysisMatched?:boolean};
+type SearchRow=BasketQuickItem;
 type AiPick={code:string;name:string;day:string;close_price:number;signals:string[];reason:string;risk:string;watch:string;source:'AI'};
 type AiResult={status:string;asof?:string;items?:AiPick[];generated_at?:string;model?:string;cached?:boolean;message?:string;error?:string};
 type BasketItem={id:string;source:'MANUAL'|'AI';code:string;name:string;day:string;baseline:number;
   added_at:string;signals:string[];memo:string;reason?:string;risk?:string;watch?:string;
+  selectionOrigin?:BasketSelectionOrigin;analysisMatched?:boolean;
   protected?:boolean;protected_at?:string;
   patternUp10d?:number;patternN10d?:number;patternLabel10d?:string;patternDays10d?:string[];
   stopMethod?:StopMethod; supplyRecord?:BasketSupplyRecord; supplyMemo?:string};
@@ -76,6 +80,8 @@ function validItem(x:any):x is BasketItem{
  return x&&typeof x==='object'&&validCode(x.code)&&validDay(x.day)&&
   (x.source==='MANUAL'||x.source==='AI')&&Number.isFinite(x.baseline)&&x.baseline>0&&
   typeof x.id==='string'&&x.id===`${x.source}:${x.code}:${x.day}`&&
+  (x.selectionOrigin===undefined||(x.source==='MANUAL'&&['SEARCH','ANALYSIS'].includes(x.selectionOrigin)))&&
+  (x.analysisMatched===undefined||(x.selectionOrigin==='ANALYSIS'&&typeof x.analysisMatched==='boolean'))&&
   (x.protected===undefined||typeof x.protected==='boolean')&&
   (x.protected_at===undefined||typeof x.protected_at==='string')&&
    (x.stopMethod===undefined||(['SUPPORT','ATR','MA20','TRAILING'] as string[]).includes(x.stopMethod))&&
@@ -109,7 +115,7 @@ function baselineReturn(item:BasketItem,quote:Quote|undefined):number|null{
 }
 // R151_QUICK_ADD: controlled one-tap requests from the search results list.
 export default function SmartBasket({quickAddRequest,onItemsChange,active=true,refreshKey=0,patternHighlightMin=70,patternSampleMin=8}: {
- quickAddRequest?:{serial:number;item:SearchRow}|null;
+ quickAddRequest?:BasketQuickAddRequest|null;
  onItemsChange?:(ids:string[])=>void;
  active?:boolean;
  refreshKey?:number;
@@ -227,7 +233,7 @@ export default function SmartBasket({quickAddRequest,onItemsChange,active=true,r
  },[active,idsKey,patternSampleMin]);
  useEffect(()=>{onItemsChange?.(items.map(x=>x.id));},[items,onItemsChange]);
  useEffect(()=>{
-  if(quickAddRequest)add(quickAddRequest.item,'MANUAL');
+  if(quickAddRequest)add(quickAddRequest.item,'MANUAL',quickAddRequest.selectionOrigin||'SEARCH',quickAddRequest.analysisMatched);
   // Only react to new requests, not unrelated changes to basket items.
  },[quickAddRequest]);
  useEffect(()=>{try{localStorage.setItem(STORE,JSON.stringify(items));}catch{setError('이 기기 저장 공간이 부족합니다. JSON 백업을 내려받아 주세요.');}},[items]);
@@ -260,7 +266,7 @@ export default function SmartBasket({quickAddRequest,onItemsChange,active=true,r
   }catch{/* Chart unavailable, Access blocked or data missing: preserve search-time fallback. */}
   finally{supplyLoading.current.delete(id);setSupplyBusy(list=>list.filter(x=>x!==id));}
  }
- function add(data:SearchRow|AiPick,source:'MANUAL'|'AI'){
+ function add(data:SearchRow|AiPick,source:'MANUAL'|'AI',selectionOrigin:BasketSelectionOrigin='SEARCH',analysisMatched?:boolean){
   if(!validCode(data.code)||!validDay(data.day)||!Number.isFinite(data.close_price)||!data.close_price||data.close_price<=0){
    setError('확정 종가와 거래일이 있는 종목만 담을 수 있습니다.');return;
   }
@@ -271,6 +277,7 @@ export default function SmartBasket({quickAddRequest,onItemsChange,active=true,r
   const initialSupply=source==='MANUAL'?supplyFromSearchExtras((data as SearchRow).extras,data.day):undefined;
   setItems(prev=>[{id,source,code:data.code,name:data.name||data.code,day:data.day,
     baseline:data.close_price as number,added_at:new Date().toISOString(),signals:data.signals||[],memo:'',
+    ...(source==='MANUAL'?{selectionOrigin,...(selectionOrigin==='ANALYSIS'&&typeof analysisMatched==='boolean'?{analysisMatched}:{})}:{}),
     reason:p?.reason,risk:p?.risk,watch:p?.watch,...patternEvidence(data),
     ...(initialSupply?{supplyRecord:initialSupply}:{}),supplyMemo:''},...prev]);
   void captureSupply(id,data.code,data.day,data.close_price as number);
@@ -501,7 +508,7 @@ export default function SmartBasket({quickAddRequest,onItemsChange,active=true,r
      const pending=!pr||['QUEUED','NOT_REGISTERED','HISTORY_PARTIAL'].includes(pr.status);
      const state=pr?statusText(pr.status):'등록 확인 중';
     return <article className={"basket-record"+(isHot(it)?" r1591-basket-tomato":"")} key={it.id}>
-     <div className="basket-record-head"><div><span className={`basket-src ${it.source==='AI'?'ai':''}`}>{it.source==='AI'?'AI 선택':'직접 선택'}</span>
+     <div className="basket-record-head"><div><span className={`basket-src ${it.source==='AI'?'ai':''}`}>{it.source==='AI'?'AI 선택':it.selectionOrigin==='ANALYSIS'?'사용자 선택 · 정밀분석':'사용자 선택 · 검색'}</span>
        <strong>{it.name}</strong> <small>{it.code}</small>{it.protected&&<span className="r158-locked">장기 관찰</span>}</div>
        <div className="r158-record-actions">
         <button type="button" className={'r158-protect '+(it.protected?'active':'')} aria-pressed={it.protected===true}
@@ -511,10 +518,11 @@ export default function SmartBasket({quickAddRequest,onItemsChange,active=true,r
           disabled={it.protected===true} aria-label={`${it.name} 제거`}
           onClick={()=>setItems(old=>old.filter(x=>x.protected||x.id!==it.id))}><Trash2 size={16}/></button>
        </div></div>
-     <div className="basket-discovery-primary" aria-label="종목 발견가격">
-       <div className="basket-discovery-value"><span>발견가</span><strong>{cash(it.baseline)}원</strong></div>
-       <small>{it.day} · 발견일 확정 종가</small>
+     <div className="basket-discovery-primary" aria-label="종목 선택 기준가격">
+       <div className="basket-discovery-value"><span>{it.selectionOrigin==='ANALYSIS'?'분석 기준가':'발견가'}</span><strong>{cash(it.baseline)}원</strong></div>
+       <small>{it.day} · {it.selectionOrigin==='ANALYSIS'?'분석 기준일':'발견일'} 확정 종가</small>
      </div>
+      {it.selectionOrigin==='ANALYSIS'&&<p className="basket-selection-note">정밀분석 후 사용자가 직접 담았습니다.{it.analysisMatched===false?' 해당 기준일 검색 신호는 미충족입니다.':''}</p>}
       {isHot(it)&&<div className="r1591-basket-evidence" title={it.patternLabel10d||'실제 과거 일봉 패턴 검증'}>
        과거 10일 상승 {it.patternUp10d!.toFixed(1)}% · 표본 {it.patternN10d}건 · 탐색적 결과
       </div>}
@@ -535,10 +543,10 @@ export default function SmartBasket({quickAddRequest,onItemsChange,active=true,r
        <div className="basket-price-return"><span>현재수익률 <small>발견가 기준</small></span><b className={growth==null?'':growth>=0?'basket-rise':'basket-fall'}>{pctText(growth)}</b>
          <small>{maxHigh&&shownRecent?`최고가 대비 ${pctText(pctChange(shownRecent,maxHigh))}`:state}</small></div>
      </div>
-     <div className="basket-discovery-signals" aria-label="발견 당시 기술 신호">
-       <span className="basket-discovery-signals-title">발견 당시 기술 신호</span>
+     <div className="basket-discovery-signals" aria-label="선택 기준일 기술 신호">
+       <span className="basket-discovery-signals-title">{it.selectionOrigin==='ANALYSIS'?'분석 기준일 기술 신호':'발견 당시 기술 신호'}</span>
        <div className="basket-discovery-signals-list">{signalChips.length?signalChips.map(t=><span className="basket-discovery-signal-chip" key={t}>{t}</span>):
-         <small className="r154-no-signal">원본 신호 확인 불가</small>}</div>
+         <small className="r154-no-signal">{it.selectionOrigin==='ANALYSIS'&&it.analysisMatched===false?'검색 신호 미충족 · 사용자 직접 선택':'원본 신호 확인 불가'}</small>}</div>
      </div>
      <StopLossRow active={active} code={it.code} day={it.day} baseline={it.baseline}
        signals={signalChips} highestObserved={maxHigh} highestDay={maxHighDay}
