@@ -23,6 +23,15 @@ on:
         required: false
         default: ''
         type: string
+      turso_directory_mode:
+        description: 'Turso-only validated directory pilot: off(default), dry_run(no DB), apply_12(Turso 12 rows; no D1 SQL)'
+        required: true
+        default: off
+        type: choice
+        options:
+          - off
+          - dry_run
+          - apply_12
 
 permissions:
   contents: read
@@ -106,6 +115,24 @@ jobs:
           print('BLUE_R11_EOD_AUDIT_OK',audit['asof'],audit['observed_stocks'],
                 audit['matched_stocks'],audit.get('data_phase'),audit['target_day_source'])
           PY
+      - name: Setup Node for opt-in Turso directory pilot
+        if: ${{ inputs.turso_directory_mode != 'off' && inputs.turso_directory_mode != '' }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install Turso client for opt-in pilot
+        if: ${{ inputs.turso_directory_mode != 'off' && inputs.turso_directory_mode != '' }}
+        working-directory: tools/turso
+        run: npm install --no-audit --no-fund --ignore-scripts --no-package-lock
+      - name: Test and import at most 12 verified EOD directory rows to Turso (opt-in)
+        if: ${{ inputs.turso_directory_mode != 'off' && inputs.turso_directory_mode != '' }}
+        env:
+          TURSO_EOD_MODE: ${{ inputs.turso_directory_mode }}
+          TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
+          TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
+        run: |
+          node --test tools/turso/eod-directory-pilot.test.mjs
+          node tools/turso/eod-directory-pilot.mjs --mode="$TURSO_EOD_MODE" --input-dir=output
       - name: Generate D1 SQL and remove transaction statements
         run: |
           python scripts/csv_to_d1.py \

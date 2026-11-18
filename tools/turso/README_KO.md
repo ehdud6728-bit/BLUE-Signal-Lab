@@ -100,3 +100,16 @@ Actions URL: https://github.com/ehdud6728-bit/BLUE-Signal-Lab/actions/workflows/
 4. `PAUSED_NO_FRESH_CANDIDATES`면 후보 원천/일봉 증빙 갱신, `PAUSED_TOKEN_EXPIRED_OR_MISSING`면 토큰 만료/캐시, `NO_VALID_QUOTES`면 KIS 응답 검증, `COLLECTOR_ERROR`면 DB 쓰기 등 수집 오류, `BLUE_TURSO_MIRROR_WRITE_FAILED`면 Turso 비동기 쓰기를 우선 조사합니다. 로그가 없으면 Cron과 관측 시간을 재확인합니다.
 
 **안전:** 이 Actions는 Cloudflare에 배포하지 않고 D1/KIS/Turso에 SQL·시세 요청을 보내지 않습니다. 구독/조회하는 로그도 사전에 지정한 상태·숫자 필드만 출력하므로 KIS 키, URL, SQL, 원시 시세 payload를 노출하지 않습니다. Cloudflare Worker Tail 권한이 없다면 실패 메시지만 출력하고 종료합니다. 계정의 Workers 로그 수집/쿼터 설정은 별도이며, 7분간 GitHub Actions 실행 시간을 소비합니다.
+
+## 8. 장외 검증된 일봉 → Turso 종목 디렉터리 소량 파일럿
+
+최종 목표는 **Turso 주 DB + D1 보조 DB**입니다. 그러나 종전 KIS 시세 파일럿은 야간에는 데이터를 생성하지 않아 Turso가 0행인지 연결 이상인지 구분하기 어려웠습니다. 별도 새 API 호출/가짜 종목 없이 **기존 EOD 스캔이 만든 검증된 종목 디렉터리**를 활용해 Turso 실데이터 저장을 따로 검증합니다.
+
+수동 실행: https://github.com/ehdud6728-bit/BLUE-Signal-Lab/actions/workflows/blue_market_scan_research_only.yml
+
+1. `asof_date=latest`, `publish_to_d1=false`, `publish_diagnostic_only=false`, `turso_directory_mode=dry_run`으로 시작합니다. KRX/과거 일봉 소스 검증과 전체 종목명 디렉터리 검증에 성공해야 합니다. 이 단계는 **Turso·D1 SQL 실행 없음**입니다.
+2. 실제 쓰기 허용을 원할 때만 같은 EOD 작업을 `turso_directory_mode=apply_12`로 다시 실행합니다. 검증된 전체 디렉터리 중 코드 순 12개 종목명·시장·기준일만 `blue_symbol_directory_v1`에 업서트한 후 **같은 12개 키를 Turso에서 다시 읽어 값/기준일을 검증**합니다. D1 SQL은 실행하지 않습니다.
+3. `TURSO_EOD_DIRECTORY_OK ... written=12`는 **12개 검증 행의 Turso 입출력 성공**만 뜻합니다. 오늘 KIS 실시간 시세, 과거 전량, D1과의 완전 일치 및 지속 복제를 증명하지 않습니다.
+4. `publish_to_d1=true`는 기존 D1 전체 일봉 운영 저장을 실행하는 **별도 옵션**으로, Turso 파일럿을 위한 조건이 아닙니다. 먼저 D1 사용량을 고려하고 별도로 결정합니다.
+
+이 수동 경로의 기본값은 `off`이므로 Cloudflare EOD Cron이 기존 스캔을 호출해도 Turso 쓰기가 자동으로 켜지지 않습니다. 현재 API·Collector·D1 저장 경로는 변경하지 않았습니다.
