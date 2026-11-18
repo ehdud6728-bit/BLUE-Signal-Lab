@@ -5,6 +5,7 @@
 ## 2026-11-18 (KST) — Turso 연결 성공 / 병행 저장 파일럿 코드 준비
 
 - **검증 성공:** [GitHub Actions #44276186275](https://github.com/ehdud6728-bit/BLUE-Signal-Lab/actions/runs/44276186275)에서 `TURSO_CONNECTION_OK` 확인. `SELECT 1` 실행 성공, GitHub Secrets 인식, D1 SQL 없음.
+- **작업 PR:** [#13 — Turso 병행 저장 파일럿 준비](https://github.com/ehdud6728-bit/BLUE-Signal-Lab/pull/13). 이 기록 시점은 **미병합/미배포**이며, 실제 상태는 PR과 Actions를 확인할 것.
 - **이번 변경:** `collector/src/turso-mirror.mjs`(5분 전체 수집분을 Turso에 idempotent UPSERT + INSERT OR IGNORE), `collector/src/handler.mjs`/`core.mjs`(D1 저장 완료 후 별도 비동기 작업), `collector/wrangler.jsonc`(Turso 복제 OFF 기본값), `tools/turso/mirror-schema.sql` 및 수동 생성 워크플로 추가.
 - **안전 범위:** 운영 D1 쓰기 로직과 KIS 수집 경로는 계속 원본. Turso 쓰기 실패는 D1 성공을 취소하지 않음. Cloudflare 배포, Turso 스키마 생성, 실제 병행 복제는 **아직 실행하지 않음**.
 - **검증:** 수집기 Node 테스트 37/37 통과; Wrangler `deploy --dry-run` 성공; 인메모리 SQLite에서 Turso 테이블 DDL을 두 번 실행해도 성공(재실행 안전).
