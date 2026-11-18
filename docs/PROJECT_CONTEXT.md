@@ -28,16 +28,16 @@
 ## DB 방향 — 확정된 사용자 결정
 
 1. D1을 당장 버리지 않고 **Turso를 병행 연결**합니다.
-2. 2026-11-18에 Turso **libSQL** DB에 대한 비파괴 연결 검사가 성공했습니다([Actions #44276186275](https://github.com/ehdud6728-bit/BLUE-Signal-Lab/actions/runs/44276186275)). GitHub Actions Secrets는 설정됐지만 Cloudflare Worker의 Turso 인증/복제 활성화 여부는 별도입니다.
-3. 다음은 Turso에만 테스트 테이블을 생성 → 5분 전체 수집 결과를 선택적으로 best-effort 복제 → 복구·재처리·건수/시각/값 일치 검증 → 제한된 읽기 전환 순서입니다. **복구 기능 검증 전 Turso 데이터를 완전한 보관본으로 취급하지 않습니다.**
+2. 2026-11-18에 Turso **libSQL** DB에 대한 비파괴 연결 검사가 성공했습니다([Actions #44276186275](https://github.com/ehdud6728-bit/BLUE-Signal-Lab/actions/runs/44276186275)). Turso 스키마 생성([#44278060936](https://github.com/ehdud6728-bit/BLUE-Signal-Lab/actions/runs/44278060936)), Cloudflare Collector Worker에 Turso Secrets 설치([#44279139920](https://github.com/ehdud6728-bit/BLUE-Signal-Lab/actions/runs/44279139920)), Collector 실배포([#44279762372](https://github.com/ehdud6728-bit/BLUE-Signal-Lab/actions/runs/44279762372))도 성공했지만 **복제 기본값은 OFF**입니다.
+3. 제한된 병행 저장을 위한 수동 파일럿은 **15분/30분 자동 만료 + 5분 수집당 최대 2종목**으로 설계합니다. 실제 적용은 파일럿 코드 병합·재배포 후 수동 Actions 실행이 필요합니다. 이후 복구·재처리·건수/시각/값 일치 검증 → 제한된 읽기 전환 순서입니다. **복구 기능 검증 전 Turso 데이터를 완전한 보관본으로 취급하지 않습니다.**
 4. 장기 원시 데이터/대용량 아카이브는 Google 등 별도 스토리지도 검토 중이나, **선정·배포 완료 상태가 아닙니다**. Cloudflare R2를 무료라고 가정하지 않습니다.
 5. 주요 이력은 `docs/WORK_LOG.md`와 GitHub PR/Actions에 보존하여 새 채팅에서도 이어갑니다.
 
 ## 바로 다음 작업
 
-1. 연결 검사는 **성공**함. 병행 저장 파일럿 PR을 검토하고 병합하더라도 `TURSO_MIRROR_ENABLED=false`를 유지합니다.
-2. `BLUE Turso Mirror Schema Init (MANUAL)`가 [Actions #44278060936](https://github.com/ehdud6728-bit/BLUE-Signal-Lab/actions/runs/44278060936)에서 성공했습니다. Turso에 두 테이블 생성 확인, 시세 행 없음.
-3. 수집기 Worker에 Turso Secrets를 설치할 수동 Actions 및 Turso만 읽는 상태 점검 Actions를 준비합니다. **기본 복제 OFF 유지**. 실제 데이터 전송은 별도 승인 및 검증 후 활성화합니다.
+1. Secrets 설치와 Collector 실제 재배포까지 성공했습니다. 단, [Mirror Status #44279543275](https://github.com/ehdud6728-bit/BLUE-Signal-Lab/actions/runs/44279543275)의 0행은 복제 OFF 상태에서의 결과로 정상입니다.
+2. `blue_turso_mirror_pilot.yml`을 병합하고 **최신 Collector 코드를 다시 배포**한 후, 사용자가 수동으로 15분/30분 파일럿을 시작합니다. `TURSO_MIRROR_ENABLED=false`는 그대로 유지합니다. 종료 시각이 지나면 추가 복제는 자동 차단됩니다.
+3. 수집기가 동작하는 장중에 파일럿 실행 → Turso-only Mirror Status로 소량 저장 확인 → 필요하면 같은 Actions `stop`으로 즉시 만료시킵니다. 실제 실행 여부·성공 여부는 Actions 로그에서 확인해야 합니다.
 4. D1 대비 데이터 건수·시각·가격을 **소량 검증**하고 장기 누락을 막을 재처리 정책을 구현하기 전에는 운영 데이터의 주 저장소로 전환하지 않습니다.
 5. D1 읽기 행 사용량을 UTC 기준 매일 비교하고 쿼리/인덱스 최적화 전후 차이를 관찰합니다.
 
