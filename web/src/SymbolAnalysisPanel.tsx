@@ -193,7 +193,7 @@ export default function SymbolAnalysisPanel({defaultDate,onAddToBasket,isInBaske
   }
   finally{setBusy(false);}
  }
- const d=result?.diagnosis,quality=result?.quality_status;
+ const d=result?.diagnosis,quality=result?.quality_status||result?.diagnosis?.quality_status;
  const displayName=(d?.name||name||'').trim();
  const fullName=displayName?`${displayName} (${d?.code||code})`:(d?.code||code);
  const predicates={...(d?.signal_predicates||{}),...(d?.additional_predicates||{})};
@@ -201,6 +201,13 @@ export default function SymbolAnalysisPanel({defaultDate,onAddToBasket,isInBaske
   d.asof===day&&d.code===code&&quality!=='CORPORATE_ACTION_REVIEW_REQUIRED'&&
   typeof d.close==='number'&&Number.isFinite(d.close)&&d.close>0;
  const addedAlready=!!d&&isInBasket?.(d.code,d.asof)===true;
+ const basketDisabledReason=addedAlready?'이 종목과 분석 기준일은 이미 사용자 장바구니에 담겨 있습니다.':
+  !onAddToBasket?'장바구니 연결이 준비되지 않았습니다.':
+  !d||result?.status!=='READY'?'해당 날짜의 저장된 확정 일봉 분석이 필요합니다.':
+  !/^\d{6}$/.test(d.code)?'종목코드가 확인되지 않았습니다.':
+  d.asof!==day||d.code!==code?'현재 선택한 종목·날짜와 분석 기록이 다릅니다. 분석을 다시 조회해 주세요.':
+  quality==='CORPORATE_ACTION_REVIEW_REQUIRED'?'주식병합·분할에 따른 가격 단절을 확인하기 전에는 기준가를 확정할 수 없습니다.':
+  typeof d.close!=='number'||!Number.isFinite(d.close)||d.close<=0?'확정 종가가 없거나 유효하지 않아 기준가격을 기록할 수 없습니다.':'';
  const addAnalyzed=()=>{
   if(!canAddAnalyzed||!d||!onAddToBasket||addedAlready)return;
   onAddToBasket({code:d.code,name:displayName||d.code,day:d.asof,close_price:d.close!,
@@ -267,11 +274,13 @@ export default function SymbolAnalysisPanel({defaultDate,onAddToBasket,isInBaske
      <strong>{price(d.close)}</strong>
     </div>
     <div className="symbol-analysis-basket-actions">
-     <button type="button" disabled={!canAddAnalyzed||addedAlready||!onAddToBasket} onClick={addAnalyzed}>
+     <button type="button" disabled={!canAddAnalyzed||addedAlready||!onAddToBasket}
+      title={basketDisabledReason||'확정 일봉 분석 기준가격으로 사용자 직접 선택'} onClick={addAnalyzed}>
       <ShoppingBasket size={17}/>{addedAlready?'이미 장바구니에 담김':'분석 후 직접 선택 · 장바구니 담기'}
      </button>
-     <small>사용자 직접 선택으로 기록합니다. 분석 기준일의 확정 종가를 사용하며 AI 후보 선정과 구분됩니다.
-      {!d.matched?' 이 날짜에는 검색 신호를 충족하지 않았지만 개인 관찰용으로 담을 수 있습니다.':''}</small>
+     <small role={basketDisabledReason?'status':undefined}>{basketDisabledReason?`담기 비활성화 이유: ${basketDisabledReason}`:
+      '사용자 직접 선택으로 기록합니다. 분석 기준일의 확정 종가를 사용하며 AI 후보 선정과 구분됩니다.'}
+      {!basketDisabledReason&&!d.matched?' 이 날짜에는 검색 신호를 충족하지 않았지만 개인 관찰용으로 담을 수 있습니다.':''}</small>
     </div>
     {quality==='CORPORATE_ACTION_REVIEW_REQUIRED'&&<p className="symbol-analysis-warning" role="alert">주식병합·분할 등 과거 가격 단절 검토가 필요합니다. 신호와 장기 이동평균은 미확정이며 과거 성과 통계를 숨겼습니다.</p>}
     {quality==='VERIFIED_CORPORATE_ACTION_ADJUSTED'&&<p className="symbol-analysis-hint">공식 주식병합 내역{d.corporate_action?` (${d.corporate_action.first_session} 첫 거래일 · ${d.corporate_action.old_shares_per_new_share}:1 병합)`:''}을 반영해 과거 가격·거래량을 같은 주식수 기준으로 비교합니다. 연구 결과의 수익률을 보장하지 않습니다.</p>}
