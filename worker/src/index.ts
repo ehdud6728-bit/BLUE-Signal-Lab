@@ -10,6 +10,7 @@ import {lookupSymbolAnalysis,lookupSymbolDirectory,validAnalysisCode} from './sy
 import {lookupSymbolLive,requestSymbolLive,validLiveCode} from './symbol-live';
 import {runEodCloudflareCron} from './eod-cron';
 import {InvalidEodQuery,tursoEodDates,tursoEodSearch,tursoEodCompare} from './turso-eod';
+import {InvalidResearchQuery,tursoResearchDates,tursoResearchSearch,tursoResearchChart} from './turso-research';
 interface Env {
   DB: D1Database;
   TURSO_DATABASE_URL?:string;
@@ -115,6 +116,24 @@ export default {
     // An Origin header alone never grants permission to dispatch a GitHub workflow.
     const access = (ctx as ExecutionContext & { access?: unknown } | undefined)?.access;
     try {
+      // Independently audited research snapshots: no D1 queries, KIS requests,
+      // or API-side writes. The existing /api/search remains the D1 fallback.
+      if(p==='/api/research/dates'&&request.method==='GET'){
+        try{return respond(await tursoResearchDates(env));}
+        catch{return respond({error:'TURSO_RESEARCH_UNAVAILABLE',fallback:'D1'},503);}
+      }
+      if(p==='/api/research/search'&&request.method==='GET'){
+        try{return respond(await tursoResearchSearch(env,u.searchParams));}
+        catch(e){if(e instanceof InvalidResearchQuery)return respond({error:e.message},400);
+          return respond({error:'TURSO_RESEARCH_UNAVAILABLE',fallback:'D1'},503);}
+      }
+      if(p==='/api/research/chart'&&request.method==='GET'){
+        try{
+          const chart=await tursoResearchChart(env,u.searchParams);
+          return respond(chart,chart.status==='READY'?200:404);
+        }catch(e){if(e instanceof InvalidResearchQuery)return respond({error:e.message},400);
+          return respond({error:'TURSO_RESEARCH_CHART_UNAVAILABLE'},503);}
+      }
       // Fully independent of D1. A successful, audited EOD read has no implied
       // technical signals; the PWA switches to the existing D1 UI on failure.
       if(p==='/api/eod/dates'&&request.method==='GET'){

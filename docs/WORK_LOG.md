@@ -2,6 +2,14 @@
 
 새 채팅에서 프로젝트를 이어가기 위한 **결정/구현/검증 이력**입니다. 대화 전체를 저장하지 않고 실제 개발에 필요한 내용만 보존합니다. 최신 항목을 위에 추가하고, 결과가 달라지면 추측 대신 검증된 상태로 수정합니다.
 
+## 2026-11-19 (KST) — Turso 감사 연구 신호 직접 검색·차트, D1 보조 읽기 PR
+
+- **실제 전 단계 증빙:** [GitHub Actions #44351153148](https://github.com/ehdud6728-bit/BLUE-Signal-Lab/actions/runs/44351153148)에서 `BLUE_TURSO_SIGNAL_SNAPSHOT_OK day=2026-11-18 records=189 written=189` 확인. **2026-11-18 하루의 189개 신호**가 Turso에서 검증 저장된 것이며 이전 날짜 전체 이관·D1 완전 복제·운영 읽기 배포 성공을 의미하지 않음.
+- **이번 API:** 새 `worker/src/turso-research.ts`의 읽기 전용 `/api/research/dates`, `/api/research/search`, `/api/research/chart`에서 Turso 연구 신호/차트 스냅샷과 날짜별 완료 감사를 직접 사용. DB 전체 개수·원본 파일 해시 일치를 확인하고 불완전하면 실패 처리; 검색어/코드/신호/골든크로스/112선·역배열 등의 기술 필터/거래대금/과거 패턴 승률/정렬/페이지네이션 지원. D1은 이 경로의 직접 또는 암묵적인 입력이 아님. 종목 상세 차트는 정확한 검색일의 Turso 기록만 출력하며 다른 날짜 차트로 대체하지 않음.
+- **이번 PWA:** `기술 패턴 찾기`의 기본 조회는 Turso 직접 연구 API. 명시적 `D1 과거 자료 보기`와 Turso HTTP 5xx 시 기존 D1 보조 검색은 그대로 유지. 검색 스냅샷에는 근거 차트를 연결하고 이후 최고·최저가는 저장된 후속 감사 일봉 구간의 **부분 관측**임을 명시. 기존 Turso 전체 EOD 조회, D1 운영 자료, 장바구니·KIS 수집 경로 유지.
+- **검증:** `node --test tests/test_turso_research_api.mjs` **8/8**, 웹 `npm --prefix web run build`, Worker `wrangler deploy --dry-run` 성공. 새 테스트를 수동 API 배포 Workflow 검사 단계에 추가. 실제 Turso 원격 검색/차트 HTTP 검증, Cloudflare Worker 및 웹 운영 배포, D1 장애 통합 검사는 **미실행**.
+- **병합 후 수동 순서:** API 배포 Workflow `blue_turso_api_eod_deploy.yml`의 `verify_only` → `deploy_api`를 명시적으로 실행하고, 기존 웹 안전 배포 Workflow를 따로 실행. 휴대폰 `기술 패턴 찾기`에서 `2026-11-18`과 선택 종목 차트, D1 전환을 직접 확인. 더 오래된 날짜는 별도 감사 완료 Turso 데이터 적용 필요. KIS 장중 15분 파일럿은 별도 일정.
+
 ## 2026-11-19 (KST) — D1 장애에도 독립적으로 저장 가능한 Turso 연구 신호·차트 미러링 1단계
 
 - **확인/결정:** 사용자 PR #26 기술 패턴 UI 복원은 이미 병합([PR #26](https://github.com/ehdud6728-bit/BLUE-Signal-Lab/pull/26), merge `33e13bcd2ac9e89cd8ab26cbc53621aef0ac10e5`). D1 기반 패턴 검색으로는 D1 한도 초과 재발 시 서비스를 지킬 수 없음. 최종 우선순위는 Turso 주 DB/D1 보조 DB의 **동일한 검증 데이터 저장·복구 가능성**. 현재 둘은 아직 불완전하게 동기화되어 있으며 전환·자동 복구가 성공했다고 주장하지 않음.
