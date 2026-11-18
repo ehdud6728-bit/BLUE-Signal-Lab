@@ -359,6 +359,19 @@ export default {
           if (!/^[A-Za-z0-9._-]{1,24}$/.test(code)) return respond({error:'Invalid code'},400);
           filters.push('code=?'); args.push(code);
         }
+        // A name/code lookup applies to the complete D1 result set BEFORE
+        // LIMIT/OFFSET. Never silently search only the 100 visible browser rows.
+        const nameQuery=(u.searchParams.get('q')||'').trim();
+        if(nameQuery.length>60)return respond({error:'INVALID_STOCK_QUERY'},400);
+        if(nameQuery){
+          const escaped=nameQuery.replace(/[\\%_]/g,'\\$&');
+          filters.push(`(code LIKE ? ESCAPE '\\' OR
+            (CASE WHEN json_valid(extras_json) THEN
+              COALESCE(CAST(json_extract(extras_json,'$.name') AS TEXT),
+                CAST(json_extract(extras_json,'$.Name') AS TEXT),'') ELSE '' END)
+              LIKE ? ESCAPE '\\')`);
+          args.push('%'+escaped+'%','%'+escaped+'%');
+        }
         const tags = normalizedSignals(u.searchParams.get('signals'));
         if (tags.some(tag => !ALLOWED.has(tag))) return respond({error:'Unsupported signal'},400);
         const logic = u.searchParams.get('logic') || 'any';
@@ -436,13 +449,51 @@ export default {
         if(technicalWhere===null)return respond({error:'INVALID_TECH_FILTER'},400);
         if(technicalWhere)filters.push(technicalWhere);
         const where = filters.join(' AND ');
+        const order=(u.searchParams.get('sort')||'recent').trim();
+        if(!['recent','highest_gain','lowest_return','amount_surge','amount_decline'].includes(order))
+          return respond({error:'INVALID_RESULT_SORT'},400);
+        // Chart-derived high/low is an *observed portion*, not proof that every
+        // intervening trading session has been captured. A missing chart is NULL.
+        // Select only the latest independently verified, later EOD chart.
+        // Include isolated symbol analyses too: an un-matched stock can have a
+        // verified newer chart without any later *search-signal* chart row.
+        const laterChart=`(SELECT latest.chart_json FROM (
+          SELECT cs.chart_json,cs.day,cr.created_at AS stamped FROM chart_snapshots cs
+            JOIN runs cr ON cr.run_id=cs.run_id WHERE cs.code=signals.code
+              AND cs.day>signals.day AND cr.is_demo=0 AND cr.latest_price_date=cs.day
+          UNION ALL
+          SELECT sa.chart_json,sa.day,sa.created_at_utc AS stamped FROM blue_symbol_analysis_v1 sa
+            WHERE sa.code=signals.code AND sa.day>signals.day
+              AND sa.quality_status<>'CORPORATE_ACTION_REVIEW_REQUIRED'
+        ) latest ORDER BY latest.day DESC,latest.stamped DESC LIMIT 1)`;
+        const chartMax=`(SELECT MAX(CAST(json_extract(b.value,'$.h') AS REAL))
+          FROM json_each(${laterChart},'$.bars') b
+          WHERE json_extract(b.value,'$.t')>signals.day AND
+            CAST(json_extract(b.value,'$.h') AS REAL)>0)`;
+        const chartMin=`(SELECT MIN(CAST(json_extract(b.value,'$.l') AS REAL))
+          FROM json_each(${laterChart},'$.bars') b
+          WHERE json_extract(b.value,'$.t')>signals.day AND
+            CAST(json_extract(b.value,'$.l') AS REAL)>0)`;
+        const amountRatio=`(CASE WHEN json_valid(extras_json) THEN
+          CAST(json_extract(extras_json,'$.amount_ratio20') AS REAL) ELSE NULL END)`;
+        const safeGain=(value:string)=>`(CASE WHEN close_price>0
+          THEN ROUND(100*((${value})/close_price-1),3) ELSE NULL END)`;
+        const metricColumn=order==='highest_gain'?`${safeGain(chartMax)} AS observed_high_pct,`:
+          order==='lowest_return'?`${safeGain(chartMin)} AS observed_low_pct,`:
+          order==='amount_surge'||order==='amount_decline'?`${amountRatio} AS amount_ratio20_sort,`:'';
+        const ordering=order==='highest_gain'?'observed_high_pct DESC NULLS LAST,day DESC,code':
+          order==='lowest_return'?'observed_low_pct ASC NULLS LAST,day DESC,code':
+          order==='amount_surge'?'amount_ratio20_sort DESC NULLS LAST,day DESC,code':
+          order==='amount_decline'?'amount_ratio20_sort ASC NULLS LAST,day DESC,code':
+          'day DESC,code';
         const limit = Math.min(500, Math.max(1, Math.floor(Number(u.searchParams.get('limit')) || 100)));
         const page = Math.min(10000, Math.max(1, Math.floor(Number(u.searchParams.get('page')) || 1)));
         const total = await env.DB.prepare('SELECT COUNT(*) AS n FROM signals WHERE ' + where)
           .bind(...args).first<{ n:number }>();
         const rows = await env.DB.prepare(`SELECT run_id,code,day,signal_names,close_price,supply_distance_pct,extras_json,
+          ${metricColumn}
           ${bestSetupSql} AS verified_pattern_setup_json
-          FROM signals WHERE ${where} ORDER BY day DESC,code LIMIT ? OFFSET ?`)
+          FROM signals WHERE ${where} ORDER BY ${ordering} LIMIT ? OFFSET ?`)
           .bind(...args,limit,(page-1)*limit).all();
         const countFilter = runId ? 'run_id=?' : `run_id IN (
           SELECT r.run_id FROM runs r WHERE r.is_demo=0 AND r.latest_price_date=daily_counts.day
@@ -477,7 +528,7 @@ export default {
           return { ...record, name:extras.name || extras.Name || null,
             signals:String(x.signal_names || '').split(',').filter(Boolean), extras };
         });
-        return respond({mode,start,end,total:total?.n || 0,page,limit,items,
+        return respond({mode,start,end,q:nameQuery,sort:order,total:total?.n || 0,page,limit,items,
           daily_counts:counts.results,data_status:counts.results.length ? 'AVAILABLE' : 'NOT_IMPORTED',
           note:'Missing source days are never silently replaced by another trading day.'});
       }

@@ -12,12 +12,12 @@ on:
         description: 'If deploying, type exactly blue-signal-lab.'
         type: string
         required: false
-        default: ''
+        default: 'blue-signal-lab'
       confirm_static_type:
         description: 'If deploying, type exactly STATIC_ASSETS_ONLY after checking Cloudflare dashboard.'
         type: string
         required: false
-        default: ''
+        default: 'STATIC_ASSETS_ONLY'
 
 permissions:
   contents: read

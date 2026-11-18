@@ -21,6 +21,10 @@
 .symbol-analysis-head{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;margin-top:15px;margin-bottom:10px}
 .symbol-analysis-head div{display:grid;gap:5px}.symbol-analysis-head div span{font-size:12px;color:#6b7e96}
 .symbol-analysis-head>strong{font-size:21px;color:#143868}
+.symbol-analysis-basket-actions{margin:10px 14px 14px;padding:12px;border:1px solid #bad0ed;border-radius:11px;background:#f3f7ff;display:grid;gap:7px}
+.symbol-analysis-basket-actions button{display:flex;align-items:center;justify-content:center;gap:8px;width:100%;min-height:44px;border:1px solid #2464c7;border-radius:9px;background:#2464c7;color:#fff;font-size:13px;font-weight:800;cursor:pointer}
+.symbol-analysis-basket-actions button:disabled{opacity:.6;cursor:default;background:#edf3fc;color:#40618c}
+.symbol-analysis-basket-actions small{font-size:11px;line-height:1.6;color:#657b99}
 .symbol-analysis-warning{margin:10px 14px;padding:10px 12px;border-radius:9px;background:#fff3e3;color:#88511d;font-size:12px;line-height:1.65}
 .symbol-analysis-facts{display:grid;grid-template-columns:repeat(auto-fit,minmax(125px,1fr));gap:7px}
 .symbol-analysis-facts span{background:#f4f7fc;padding:9px;border-radius:7px;font-size:12px}

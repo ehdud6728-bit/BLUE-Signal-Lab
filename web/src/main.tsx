@@ -1,6 +1,6 @@
 import StockChart from './StockChart';
 import LiveMarket from './LiveMarket';
-import SmartBasket from './SmartBasket';
+import SmartBasket, {type BasketQuickAddRequest} from './SmartBasket';
 import PriceCompareMini from './PriceCompareMini';
 import SymbolAnalysisPanel from './SymbolAnalysisPanel';
 import {requestSearchPriority} from './search-priority';
@@ -29,17 +29,20 @@ import './r1591-evidence-basket.css';
 import './r1594-refresh.css';
 import './r1599-pattern-filters.css';
 import './r15116-technical-filters.css';
+import './r15125-result-tools.css';
 // R1581_SCAN_RESUME: persistent scan status across tabs and reloads.
 import './r1581-scan-monitor.css';
 
 // Keep the existing production API and Cloudflare Access cookies.
 const API = (import.meta.env.VITE_API_BASE || 'https://blue-signal-lab-api-v2.ehdud6728.workers.dev').replace(/\/+$/, '');
-type Signal = {code:string;name:string|null;day:string;signals:string[];close_price:number|null;supply_distance_pct:number|null;extras:Record<string,unknown>};
+type Signal = {code:string;name:string|null;day:string;signals:string[];close_price:number|null;supply_distance_pct:number|null;extras:Record<string,unknown>;
+ observed_high_pct?:number|null;observed_low_pct?:number|null;amount_ratio20_sort?:number|null};
 type Day = {day:string;observed_stocks:number;signal_events:number;matched_stocks:number};
 type ScanStatus = 'READY'|'NOT_IMPORTED'|'PENDING'|'FAILED'|'';
 type Line = {signal:string;price:number;gap_from_close_pct:number;slope_pct:number|null;status:string};
 type GcKey='rsi'|'slow14'|'slow12'|'slow20'|'macd';
 type TechKey='inverse'|'ma112'|'ma224';
+type ResultSort='recent'|'highest_gain'|'lowest_return'|'amount_surge'|'amount_decline';
 const TECH_OPTIONS:{key:TechKey;label:string}[]=[
   {key:'inverse',label:'역배열 (20<40<60)'},
   {key:'ma112',label:'112일선 상향 돌파'},
@@ -98,6 +101,9 @@ function App(){
   const [error,setError]=useState('');
   const [selected,setSelected]=useState<Signal|null>(null);
   const [localQuery,setLocalQuery]=useState('');
+  const [appliedNameQuery,setAppliedNameQuery]=useState('');
+  const [resultSort,setResultSort]=useState<ResultSort>('recent');
+  const [appliedSort,setAppliedSort]=useState<ResultSort>('recent');
   const [gcFields,setGcFields]=useState<GcKey[]>([]);
   const [gcLogic,setGcLogic]=useState<'any'|'all'>('any');
   const [techFields,setTechFields]=useState<TechKey[]>([]);
@@ -146,7 +152,7 @@ function App(){
     }catch{return [];}
   });
   const basketSequence=useRef(0);
-  const [basketRequest,setBasketRequest]=useState<{serial:number;item:Signal}|null>(null);
+  const [basketRequest,setBasketRequest]=useState<BasketQuickAddRequest|null>(null);
   const [status,setStatus]=useState('');
   const [dataStatus,setDataStatus]=useState<ScanStatus>('');
   const [requestBusy,setRequestBusy]=useState(false);
@@ -265,9 +271,11 @@ function App(){
     }catch(e){setError(String(e));}
     finally{setRequestBusy(false);}
   }
-  async function search(p=1,scroll=true,selectedGc:GcKey[]=gcFields,selectedGcLogic:'any'|'all'=gcLogic,requestedDay?:string,patternOverride?:{enabled?:boolean;threshold?:number|null;minSamples?:number;amountEok?:number},selectedTech:TechKey[]=techFields,selectedTechLogic:'any'|'all'=techLogic){
+  async function search(p=1,scroll=true,selectedGc:GcKey[]=gcFields,selectedGcLogic:'any'|'all'=gcLogic,requestedDay?:string,patternOverride?:{enabled?:boolean;threshold?:number|null;minSamples?:number;amountEok?:number},selectedTech:TechKey[]=techFields,selectedTechLogic:'any'|'all'=techLogic,queryOverride?:{q?:string;sort?:ResultSort}){
     const serial=++searchVersion.current;
     const queryAmountEok=patternOverride?.amountEok??amountEok;
+    const queryName=(queryOverride?.q??appliedNameQuery).trim();
+    const querySort=queryOverride?.sort??appliedSort;
     if(!Number.isInteger(queryAmountEok)||queryAmountEok<0||queryAmountEok>50000){
       setError('거래대금은 0~50,000억원 사이 정수로 입력하세요.');return;
     }
@@ -280,6 +288,8 @@ function App(){
       if(queryMode==='single')u.searchParams.set('date',queryDate);
       else {u.searchParams.set('start',start);u.searchParams.set('end',end);}
       u.searchParams.set('signals',signals.join(','));u.searchParams.set('logic',logic);u.searchParams.set('page',String(p));
+      if(queryName)u.searchParams.set('q',queryName);
+      u.searchParams.set('sort',querySort);
       if(selectedGc.length){u.searchParams.set('gc',selectedGc.join(','));u.searchParams.set('gc_logic',selectedGcLogic);}
       if(selectedTech.length){u.searchParams.set('tech',selectedTech.join(','));u.searchParams.set('tech_logic',selectedTechLogic);}
       u.searchParams.set('min_amount_eok',String(queryAmountEok));
@@ -295,11 +305,16 @@ function App(){
       const r=await fetch(u.toString(),{credentials:'include',cache:'no-store'});
       const d=await r.json();
       if(!r.ok)throw new Error(d.error||`검색 오류: ${r.status}`);
+      // An older API silently ignores q/sort and would show an incorrect
+      // page-local-looking result; require the new server to echo both values.
+      if(d.q!==queryName||d.sort!==querySort)
+        throw new Error('전체페이지 종목명 검색·정렬용 API Worker가 아직 배포되지 않았습니다. API 배포 후 다시 검색해 주세요.');
       if(serial!==searchVersion.current)return;
       // No imported daily candles is NOT a genuine zero-signal scan.
       setRows(d.items||[]);setDays(d.daily_counts||[]);
       setTotal(d.data_status==='NOT_IMPORTED'?null:d.total);
-      setPage(p);setSelected(null);setLocalQuery('');setDataStatus(d.data_status||'');
+      setPage(p);setSelected(null);setDataStatus(d.data_status||'');
+      setAppliedNameQuery(queryName);setAppliedSort(querySort);
       setAppliedAmountEok(queryAmountEok);
       if(scroll){setFilterOpen(false);requestAnimationFrame(()=>resultRef.current?.scrollIntoView({behavior:'smooth',block:'start'}));}
       if(d.data_status==='NOT_IMPORTED'){
@@ -386,6 +401,20 @@ function App(){
   };
   const amountLabel=(r:Signal)=>{const n=num(r,'traded_amount_krw');
     return n===null?'거래대금 미저장':`거래대금 ${(n/100000000).toLocaleString('ko-KR',{maximumFractionDigits:1})}억원`;};
+  const amountChange=(r:Signal):string=>{
+    const ratio=num(r,'amount_ratio20');
+    if(ratio===null||ratio<0)return '20일 평균 대비 미계산';
+    const pct=(ratio-1)*100;
+    const amount=num(r,'traded_amount_krw');
+    const avg=amount!==null&&ratio>0?`직전 20일 평균 약 ${(amount/ratio/1e8).toLocaleString('ko-KR',{maximumFractionDigits:1})}억원 대비 `:'20일 평균 대비 ';
+    return `${avg}${pct>0?'+':''}${pct.toFixed(1)}% (${ratio.toFixed(2)}배)`;
+  };
+  const sortedPercent=(r:Signal):string|null=>{
+    const value=appliedSort==='highest_gain'?r.observed_high_pct:
+      appliedSort==='lowest_return'?r.observed_low_pct:null;
+    if(value===undefined||value===null||!Number.isFinite(value))return null;
+    return `${appliedSort==='highest_gain'?'후속 확인 일봉 최고':'후속 확인 일봉 최저'} ${value>0?'+':''}${value.toFixed(2)}%`;
+  };
   // R1591_SEARCH_BADGES: verified EOD indicators only, never inferred from absent data.
   const techBadges=(r:Signal):string[]=>{
     const out:string[]=[];const a=num(r,'ma20'),b=num(r,'ma40'),c=num(r,'ma60');
@@ -412,14 +441,16 @@ function App(){
     return <span className={'r15108-supply-grade r15108-supply-'+tone}
       title={'일봉 H-L 균등분배 추정 · 이 가격대 '+money(num(r,'supply_volume_est_shares'))+'주 · 전체 중 '+fmt(r,'supply_bin_share_pct',2)+'% · 최대 구간 대비 '+fmt(r,'supply_strength_relative_pct',1)+'% · 매도잔량 아님'}>상단물량 {grade}</span>;};
   const displayName=(r:Signal)=>r.name||String(r.extras?.name||r.extras?.Name||'종목명 미등록');
-  const visibleRows=rows.filter(r=>(displayName(r)+' '+r.code).toLocaleLowerCase().includes(localQuery.trim().toLocaleLowerCase()));
+  // The API searches and sorts *before* paging, so every returned row belongs
+  // to the complete filtered dataset, not a browser-only page subset.
+  const visibleRows=rows;
   const changeGc=(next:GcKey[],mode:'any'|'all'=gcLogic)=>{
-    setGcFields(next);setGcLogic(mode);setLocalQuery('');
+    setGcFields(next);setGcLogic(mode);
     // Search in D1 across all stored result pages, not only the 100 rows currently loaded.
     if(total!==null)void search(1,false,next,mode);
   };
   const changeTech=(next:TechKey[],mode:'any'|'all'=techLogic)=>{
-    setTechFields(next);setTechLogic(mode);setLocalQuery('');
+    setTechFields(next);setTechLogic(mode);
     // Rerun server-side search before pagination; not just the visible 100 rows.
     if(total!==null)void search(1,false,gcFields,gcLogic,undefined,undefined,next,mode);
   };
@@ -589,7 +620,12 @@ function App(){
       </aside>
       <section className="content">
         <div className={'r152-analysis-content '+(activeView==='analysis'?'':'r151-hidden')}>
-          <SymbolAnalysisPanel key={analysisRefresh} defaultDate={date}/>
+          <SymbolAnalysisPanel key={analysisRefresh} defaultDate={date}
+            isInBasket={(code,day)=>basketIds.includes(`MANUAL:${code}:${day}`)}
+            onAddToBasket={(item,analysisMatched)=>{
+              setBasketRequest({serial:++basketSequence.current,item,selectionOrigin:'ANALYSIS',analysisMatched});
+              nav('basket');
+            }}/>
         </div>
         <div className={'r151-basket-content '+(activeView==='basket'?'':'r151-hidden')}>
           <SmartBasket quickAddRequest={basketRequest} onItemsChange={setBasketIds} active={activeView==='basket'} refreshKey={r1594BasketRefresh} patternHighlightMin={highlightMin} patternSampleMin={patternSampleMin}/>
@@ -628,6 +664,7 @@ function App(){
           <div className="result-heading"><h2><BarChart3 size={18}/> 검색된 종목 <small>{dataStatus==='NOT_IMPORTED'?'일봉 미수집':total===null?'검색 전':total+'건'}</small></h2><span className="eod-pill"><Clock3 size={13}/> EOD</span></div>
           <p className="r1599-active-filters">검색 결과 기준 · 거래대금 {(appliedAmountEok??amountEok)>0?(appliedAmountEok??amountEok).toLocaleString('ko-KR')+'억원 이상':'전체'} · 토마토 강조 {highlightMin===null?'꺼짐':highlightMin+'% 이상 · 표본 '+patternSampleMin+'건 이상'}{onlyPattern&&highlightMin!==null?' · 해당 종목만 보기':''}{appliedAmountEok!==null&&appliedAmountEok!==amountEok?' · 거래대금 변경 미적용(검색 버튼을 누르세요)':''}</p>
           <p className="result-hint">검색일 확정 종가와 이후 D1 저장 시세·기간 고가를 구분해 표시합니다. 가격이 없으면 미수집으로 표시합니다.</p>
+          {total===0&&(appliedAmountEok??amountEok)>0&&<p className="r15125-result-scope" role="status">현재 거래대금 최소 {(appliedAmountEok??amountEok).toLocaleString('ko-KR')}억원 조건으로는 검색 대상이 없습니다. 저거래대금 하단 터치 종목도 찾으려면 거래대금을 ‘전체(0억원)’로 바꾸고 검색해 보세요.</p>}
           {r1593Error&&<p className="r1593-comparison-status" role="status">가격 비교: {r1593Error}</p>}
           {r1595RequestNote&&<p className="r1595-request-status" role="status">{r1595RequestNote}</p>}
           {rows.length>0&&<p className="r1594-quote-note" role="status">{r1594QueueStatus} · 수집 가능한 시장 시간에만 KIS 가격이 갱신됩니다.</p>}
@@ -694,11 +731,41 @@ function App(){
             </div>
             <p className="gc-filter-note">GC는 당일 발생 기준 · 토마토는 과거 10거래일 상승 관측 비율과 선택한 최소 표본 수를 함께 충족해야 합니다. 표본 3~7건은 소표본으로 통계적 신뢰도가 낮으며 미래 수익을 보장하지 않습니다.</p>
           </div>
-          {rows.length>0&&<label className="result-quick-search"><Search size={16}/><span className="sr-only">현재 페이지 종목명 또는 코드 찾기</span><input type="search" value={localQuery} onChange={e=>setLocalQuery(e.target.value)} placeholder="현재 페이지에서 종목명 · 코드 찾기" aria-label="현재 페이지에서 종목명 또는 코드 찾기"/></label>}
+          <div className="r15125-result-tools" role="search" aria-label="전체 검색 결과 종목명 검색 및 정렬">
+            <label className="result-quick-search"><Search size={16}/><span className="sr-only">전체 페이지에서 종목명 또는 코드 찾기</span>
+              <input type="search" value={localQuery} onChange={e=>setLocalQuery(e.target.value)}
+                onKeyDown={e=>{if(e.key==='Enter'){e.preventDefault();void search(1,false,gcFields,gcLogic,undefined,undefined,techFields,techLogic,{q:localQuery});}}}
+                placeholder="선택한 날짜·기간의 전체 페이지에서 찾기" aria-label="전체 검색 결과에서 종목명 또는 코드 찾기"/>
+            </label>
+            <button type="button" disabled={busy} className="r15125-result-run"
+              onClick={()=>{void search(1,false,gcFields,gcLogic,undefined,undefined,techFields,techLogic,{q:localQuery});}}>
+              <Search size={15}/>{busy?'검색 중':'전체 찾기'}
+            </button>
+            <label className="r15125-result-sort"><span>전체 검색 결과 정렬</span>
+              <select value={resultSort} disabled={busy} onChange={e=>{
+                const next=e.target.value as ResultSort;setResultSort(next);
+                if(total!==null)void search(1,false,gcFields,gcLogic,undefined,undefined,techFields,techLogic,{sort:next});
+              }}>
+                <option value="recent">최신 발견일순</option>
+                <option value="highest_gain">발견가 대비 확인 최고 수익률순</option>
+                <option value="lowest_return">발견가 대비 확인 최저 수익률순</option>
+                <option value="amount_surge">20일 평균 거래대금 증가율 높은순</option>
+                <option value="amount_decline">20일 평균 거래대금 감소율 큰순</option>
+              </select>
+            </label>
+          </div>
+          {(appliedNameQuery||localQuery!==appliedNameQuery||appliedSort!=='recent')&&
+            <p className="r15125-result-scope" role="status">저장된 전체 검색 결과에서 필터·정렬한 {total===null?'미확인':total.toLocaleString()+'건'}을 페이지별로 표시합니다.
+              {appliedNameQuery?` · 종목 검색: ${appliedNameQuery}`:''}
+              {localQuery!==appliedNameQuery?' · 입력한 종목명은 ‘전체 찾기’를 눌러 적용하세요.':''}
+            </p>}
+          {(appliedSort==='highest_gain'||appliedSort==='lowest_return')&&
+            <p className="r15125-result-scope">최고·최저 수익률은 발견일 이후 저장된 검증 일봉 중 확인된 구간만 사용합니다. 후속 일봉이 없는 종목은 정렬 뒤쪽에 표시되며, 전체 보유기간 최저·최고를 보장하지 않습니다.</p>}
           <div className="desktop-results tablewrap"><table><thead><tr><th>날짜</th><th>종목명 / 코드</th><th>신호</th><th>검색일 종가 / 최근 확인가 / 기간 최고가</th><th>RSI / GC</th><th>Slow(14,3,3) / GC</th><th>MACD / GC</th><th>돌파선 후보</th><th>상단 매물대</th></tr></thead><tbody>
             {visibleRows.length?visibleRows.map((r,i)=><tr key={`${r.code}-${r.day}-${i}`} className={'clickable'+(patternUp(r)!==null?' r159-tomato-stock':'')} tabIndex={0} onClick={()=>openDetail(r)} onKeyDown={e=>{if(e.key==='Enter')openDetail(r);}}>
               <td>{r.day}</td><td><div className="r151-desktop-stock">
                  <div><b>{displayName(r)}</b><div className="small">{r.code} · {amountLabel(r)}</div>
+                 <div className="r15125-amount-change">{amountChange(r)}{sortedPercent(r)&&<span> · {sortedPercent(r)}</span>}</div>
                  {patternEvidenceBlock(r)}
                  {patternDays(r).length>0&&<div className="r1599-pattern-dates" title={patternDays(r).join(' · ')}>과거 신호일 {patternDays(r).slice(-3).join(' · ')}{patternDays(r).length>3?' 외':''}</div>}</div>
                  <button type="button" className={'r151-quick-add '+(inBasket(r)?'saved':'')}
@@ -731,6 +798,7 @@ function App(){
                 requestDisabled={!!r1595Requesting||r1595Timers.current.size>=3}/>
               <div className="stock-tags">{r.signals.slice(0,4).map(s=><span className="tag" key={s}>{showSignal(s)}</span>)}{r.signals.length>4&&<span className="tag tag-more">+{r.signals.length-4}</span>}{supplyTag(r)}</div>
               <div className="r1599-mobile-meta">{amountLabel(r)}</div>
+              <div className="r15125-amount-change">{amountChange(r)}{sortedPercent(r)&&<span> · {sortedPercent(r)}</span>}</div>
               {patternDays(r).length>0&&<div className="r1599-pattern-dates" title={patternDays(r).join(' · ')}>과거 신호일 {patternDays(r).slice(-3).join(' · ')}{patternDays(r).length>3?' 외':''}</div>}
               {techBadges(r).length>0&&<div className="r1591-mobile-tech">{techBadges(r).map(t=><span className="r1591-search-tech" key={t}>{t}</span>)}</div>}
                <div className="stock-quick"><div><small>RSI</small><strong>{fmt(r,'rsi',1)}</strong></div><div><small>Slow GC</small><strong className={flag(r,'slow_14_3_3_gc')?'positive':''}>{crossed(r,'slow_14_3_3_gc')}</strong></div><div><small>MACD GC</small><strong className={flag(r,'macd_gc')?'positive':''}>{crossed(r,'macd_gc')}</strong></div><div><small>매물대 기준가</small><strong>{supplyGrade(r)==='미확인'?'미확인':money(num(r,'supply_reference_price'))+'원'}</strong></div></div>
@@ -744,7 +812,7 @@ function App(){
                 <span>{inBasket(r)?'담김':'담기'}</span>
               </button>
               {/* Quote refresh is now visible directly beside the saved quote above. */}
-              </div>):<div className="mobile-empty"><Search size={30}/><strong>{localQuery?'현재 페이지에서 일치하는 종목이 없습니다.':total===0?'해당 조건의 종목이 없습니다.':'검색 조건을 선택해 주세요.'}</strong><p>{onlyPattern?'토마토 조건은 10거래일 패턴·최소 표본 수에 더해 선택한 골든크로스와 거래대금 조건도 모두 충족해야 합니다. GC 전체 종목 및 거래대금 전체로 비교해 보세요.':gcFields.length?'선택한 골든크로스 조건을 만족하는 종목이 없습니다.':'과거 거래일을 선택한 다음 검색 버튼을 누르세요.'}</p><button onClick={()=>nav('search')}>검색 조건 열기</button></div>}
+              </div>):<div className="mobile-empty"><Search size={30}/><strong>{appliedNameQuery?'전체 검색 결과에서 일치하는 종목이 없습니다.':total===0?'해당 조건의 종목이 없습니다.':'검색 조건을 선택해 주세요.'}</strong><p>{onlyPattern?'토마토 조건은 10거래일 패턴·최소 표본 수에 더해 선택한 골든크로스와 거래대금 조건도 모두 충족해야 합니다. GC 전체 종목 및 거래대금 전체로 비교해 보세요.':gcFields.length?'선택한 골든크로스 조건을 만족하는 종목이 없습니다.':'과거 거래일을 선택한 다음 검색 버튼을 누르세요.'}</p><button onClick={()=>nav('search')}>검색 조건 열기</button></div>}
           </div>
           {total!==null&&total>100&&<div className="pager"><button disabled={busy||page===1} onClick={()=>{void search(page-1,false);}}>이전</button><span>{page} / {Math.ceil(total/100)}</span><button disabled={busy||page>=Math.ceil(total/100)} onClick={()=>{void search(page+1,false);}}>다음</button></div>}
         </section>
