@@ -1,0 +1,109 @@
+name: BLUE Turso Daily Verified EOD Auto (NO D1)
+
+on:
+  # 09:35 UTC = 18:35 KST. KRX confirmed EOD is checked after the regular session.
+  # GitHub may delay cron dispatch; each run validates the exact trade date.
+  schedule:
+    - cron: '35 9 * * 1-5'
+  workflow_dispatch:
+    inputs:
+      trade_day:
+        description: 'Exact KST trading day YYYY-MM-DD; blank means KST today.'
+        type: string
+        required: false
+        default: ''
+      mode:
+        description: 'dry_run only verifies; apply inserts audited EOD into Turso.'
+        type: choice
+        required: true
+        default: dry_run
+        options:
+          - dry_run
+          - apply
+
+permissions:
+  contents: read
+
+concurrency:
+  group: blue-turso-verified-eod-writer
+  cancel-in-progress: false
+
+jobs:
+  daily_eod:
+    # Scheduled runs apply only VERIFIED EOD. Manual runs are safe by default.
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      INPUT_DAY: ${{ github.event_name == 'workflow_dispatch' && inputs.trade_day || '' }}
+      MODE: ${{ github.event_name == 'schedule' && 'apply' || inputs.mode }}
+    steps:
+      - name: Verify repository and select exact Korea trading date
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REPOSITORY" = 'ehdud6728-bit/BLUE-Signal-Lab'
+          python3 - <<'PY'
+          from datetime import date, datetime
+          from zoneinfo import ZoneInfo
+          import os, re
+          today = datetime.now(ZoneInfo('Asia/Seoul')).date()
+          raw = os.getenv('INPUT_DAY', '').strip()
+          if raw:
+              if not re.fullmatch(r'20\d{2}-\d{2}-\d{2}', raw):
+                  raise SystemExit('INVALID_TRADE_DAY_FORMAT')
+              day = date.fromisoformat(raw)
+          else:
+              day = today
+          if day > today or day.weekday() > 4:
+              raise SystemExit('NOT_A_PAST_OR_PRESENT_KST_WEEKDAY')
+          mode = os.getenv('MODE', '')
+          if mode not in ('apply', 'dry_run'):
+              raise SystemExit('INVALID_MODE')
+          with open(os.environ['GITHUB_ENV'], 'a') as out:
+              out.write(f'TRADE_DAY={day.isoformat()}\n')
+          print(f'BLUE_TURSO_AUTO_EOD_REQUEST day={day.isoformat()} mode={mode}')
+          print('No D1 query, no KIS token issuance, and no intraday price claims.')
+          PY
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install KRX exact-day data validation dependencies
+        run: python -m pip install pandas numpy pyarrow requests 'cryptography>=43,<48' 'pykrx==1.2.9'
+      - name: Validate exact-day source logic before collection
+        run: python -m unittest discover -s tests -p 'test_turso_verified_eod_range.py' -v
+      - name: Fetch one exact KRX trading day and validate market coverage
+        env:
+          KRX_AUTH_KEY: ${{ secrets.KRX_AUTH_KEY }}
+          KRX_ID: ${{ secrets.KRX_DATA_ID || secrets.KRX_ID }}
+          KRX_PW: ${{ secrets.KRX_DATA_PW || secrets.KRX_PW }}
+          KRX_DATA_ID: ${{ secrets.KRX_DATA_ID || secrets.KRX_ID }}
+          KRX_DATA_PW: ${{ secrets.KRX_DATA_PW || secrets.KRX_PW }}
+        run: |
+          python scripts/turso_verified_eod_range.py \
+            --start "$TRADE_DAY" --end "$TRADE_DAY" --provider auto \
+            --out output/turso_daily_eod
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install isolated Turso importer
+        working-directory: tools/turso
+        run: npm install --no-audit --no-fund --ignore-scripts --no-package-lock
+      - name: Test strict idempotent Turso writer
+        run: node --test tools/turso/eod-range-import.test.mjs
+      - name: Validate manifest and daily source hashes without DB access
+        run: node tools/turso/eod-range-import.mjs --mode=dry_run --input-dir=output/turso_daily_eod
+      - name: Write verified KRX EOD into Turso only and audit read-back
+        if: ${{ env.MODE == 'apply' }}
+        env:
+          TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
+          TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
+        run: node tools/turso/eod-range-import.mjs --mode=apply --input-dir=output/turso_daily_eod
+      - name: Retain exact-date proof (even on errors)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: BLUE_TURSO_DAILY_EOD_${{ github.run_id }}
+          path: output/turso_daily_eod/
+          if-no-files-found: ignore
+          retention-days: 14
