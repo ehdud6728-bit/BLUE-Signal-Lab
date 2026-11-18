@@ -2,16 +2,18 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   kstParts,marketsFor,ageDays,vaultScope,decryptVault,cachedToken,inspectCachedToken,
-  normalizeCandidate,candidateSelection,parseQuote,batchStatements,collect,MAX_STOCKS
+  normalizeCandidate,candidateSelection,parseQuote,batchStatements,ensureTables,collect,MAX_STOCKS
 } from '../src/core.mjs';
 
 const at=(h,m=0,s=0,day='2026-11-11')=>new Date(`${day}T${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}+09:00`);
-function fakeDb({snapshots=[],dbSignals=[],runDay=null,tokenRow=null}={}) {
+function fakeDb({snapshots=[],dbSignals=[],runDay=null,tokenRow=null,firstSeenRows=false}={}) {
   const calls=[];
+  let hasFirstSeen=firstSeenRows;
   const db={calls,
     prepare(sql){
       const entry={sql,args:[],bind(...args){this.args=args;return this;},async first(){
         calls.push({type:'first',sql,args:this.args});
+        if(sql.includes('FROM blue_kis_first_seen_r154 LIMIT 1'))return hasFirstSeen?{present:1}:null;
         if(sql.includes('blue_kis_token_vault_v1'))return tokenRow;
         if(sql.includes('FROM runs WHERE is_demo=0'))return runDay?{run_id:22,latest_price_date:runDay}:null;
         return null;
@@ -21,7 +23,11 @@ function fakeDb({snapshots=[],dbSignals=[],runDay=null,tokenRow=null}={}) {
         if(sql.includes('FROM blue_kis_live_quotes_r141'))return {results:snapshots.map(x=>({payload_json:JSON.stringify(x)}))};
         if(sql.includes('FROM signals WHERE'))return {results:dbSignals};
         return {results:[]};
-      },async run(){calls.push({type:'run',sql,args:this.args});return {meta:{changes:1}};}};
+      },async run(){
+        calls.push({type:'run',sql,args:this.args});
+        if(sql.includes('INSERT OR IGNORE INTO blue_kis_first_seen_r154') && sql.includes('SELECT market,code'))hasFirstSeen=true;
+        return {meta:{changes:1}};
+      }};
       return entry;
     },
     async batch(statements){calls.push({type:'batch',statements});return statements.map(()=>({meta:{changes:1}}));}
@@ -146,6 +152,28 @@ test('collector disabled produces no D1, GitHub, token, or KIS calls',async()=>{
 test('collector outside market produces no database writes',async()=>{
   const db=fakeDb();const state=await collect({DB:db,COLLECTOR_ENABLED:'true'},at(22));
   assert.equal(state.status,'OUTSIDE_MARKET_WINDOW');assert.equal(db.calls.length,0);
+});
+
+test('historical first-seen backfill is not repeated in a populated database',async()=>{
+  const fresh=fakeDb();
+  await ensureTables(fresh);
+  await ensureTables(fresh);
+  assert.equal(fresh.calls.filter(x=>x.type==='run'&&x.sql.includes("FROM blue_kis_live_history_r141 GROUP BY")).length,1);
+
+  const populated=fakeDb({firstSeenRows:true});
+  await ensureTables(populated);
+  assert.equal(populated.calls.filter(x=>x.type==='run'&&x.sql.includes("FROM blue_kis_live_history_r141 GROUP BY")).length,0);
+  assert.equal(populated.calls.filter(x=>x.type==='first'&&x.sql.includes('FROM blue_kis_first_seen_r154')).length,1);
+});
+
+test('collector run retention pruning is daily, not every collector call',async()=>{
+  const regular=fakeDb({snapshots:[seed('005930','2026-11-01')]});
+  await collect({DB:regular,COLLECTOR_ENABLED:'true'},at(10));
+  assert.equal(regular.calls.filter(x=>x.type==='run'&&x.sql.includes('DELETE FROM blue_kis_collector_runs_r142')).length,0);
+
+  const daily=fakeDb({snapshots:[seed('005930','2026-11-01')]});
+  await collect({DB:daily,COLLECTOR_ENABLED:'true'},at(9,0,0));
+  assert.equal(daily.calls.filter(x=>x.type==='run'&&x.sql.includes('DELETE FROM blue_kis_collector_runs_r142')).length,1);
 });
 
 test('collector lacks current candidate -> pauses without network use',async()=>{
