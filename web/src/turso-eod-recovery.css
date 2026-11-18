@@ -1,0 +1,28 @@
+.app-main.eod-recovery-active {display:block;max-width:1180px;margin:0 auto;width:100%}
+.app-main.eod-recovery-active>.search-panel {display:none!important}
+.app-main.eod-recovery-active .r151-research-content>:not(.turso-eod-recovery) {display:none!important}
+.turso-eod-recovery {background:var(--panel,#fff);color:var(--text,#20293d);border:1px solid #cbd5e1;border-radius:16px;padding:clamp(14px,3vw,24px);margin-bottom:20px}
+.turso-eod-title {display:flex;justify-content:space-between;gap:12px;align-items:start;flex-wrap:wrap}
+.turso-eod-title h2 {display:flex;align-items:center;gap:8px;font-size:1.2rem;margin:0}
+.turso-eod-title p {margin:6px 0 0;font-size:.9rem;opacity:.75}
+.turso-eod-source {color:#fff;background:#155ab1;border-radius:999px;padding:5px 10px;white-space:nowrap;font-size:.8rem;font-weight:700}
+.turso-eod-notice {display:flex;gap:9px;align-items:flex-start;background:#fff8e8;border:1px solid #e7bb6b;color:#653c08;border-radius:12px;padding:12px;margin:16px 0}
+.turso-eod-notice svg {flex:none}.turso-eod-notice p {margin:4px 0 0;font-size:.85rem;line-height:1.55}
+.turso-eod-form {display:flex;gap:10px;align-items:end;flex-wrap:wrap}
+.turso-eod-form label {display:flex;flex-direction:column;gap:5px;font-size:.85rem;font-weight:650;flex:1 1 170px}
+.turso-eod-form input,.turso-eod-form select {min-height:42px;border-radius:8px;border:1px solid #94a3b8;padding:8px;color:#182236;background:#fff;width:100%}
+.turso-eod-form button {display:inline-flex;align-items:center;justify-content:center;gap:6px;border:0;border-radius:8px;background:#155ab1;color:#fff;min-height:42px;padding:0 19px;font-weight:700}
+.turso-eod-meta {display:flex;align-items:center;gap:12px;flex-wrap:wrap;font-size:.83rem;margin:18px 0 10px;color:inherit}
+.turso-eod-meta span {opacity:.8}.turso-eod-meta svg {vertical-align:middle}
+.turso-eod-list {display:grid;gap:9px}.turso-eod-row {display:grid;grid-template-columns:minmax(150px,1.3fr) minmax(100px,.8fr);gap:9px 12px;padding:13px;border:1px solid #dbe3ec;border-radius:11px;background:#f8fafc;color:#1e293b}
+.turso-eod-stock {min-width:0}.turso-eod-stock b {font-size:1rem}.turso-eod-stock span,.turso-eod-stock small {color:#64748b;font-size:.76rem}.turso-eod-stock small {display:block;margin-top:4px}
+.turso-eod-close {text-align:right}.turso-eod-close b {display:block;font-size:1.17rem;color:#0f53a2}.turso-eod-close small {display:block;color:#64748b}
+.turso-eod-ohlc {display:flex;gap:5px 13px;flex-wrap:wrap;font-size:.8rem;color:#475569}
+.turso-eod-amount {text-align:right;font-size:.82rem;color:#475569}.turso-eod-amount b {color:#1e293b}
+.turso-eod-pagination {display:flex;justify-content:center;align-items:center;gap:14px;margin:16px 0}.turso-eod-pagination button {padding:9px 15px;border-radius:7px;border:1px solid #94a3b8;background:#fff;color:#1e293b}.turso-eod-pagination button:disabled {opacity:.4}
+.turso-eod-error {color:#a52819;margin:13px 0}.turso-eod-empty {text-align:center;padding:28px 5px;color:#64748b}
+.turso-eod-caption {font-size:.76rem;opacity:.7;margin:18px 0 0}
+.turso-fallback-banner,.turso-unavailable-banner {margin:8px 18px;padding:10px 14px;border-radius:9px;background:#e9f3ff;color:#124b90;font-size:.86rem}
+.turso-unavailable-banner {background:#fff1e5;color:#8f2c10;display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap}
+.turso-unavailable-banner button {padding:7px 12px;border:1px solid #8f2c10;border-radius:6px;background:transparent;color:inherit}
+@media(max-width:560px){.turso-eod-ohlc {grid-column:1/-1}.turso-eod-amount {grid-column:1/-1;text-align:left}.turso-eod-row {gap:8px}}

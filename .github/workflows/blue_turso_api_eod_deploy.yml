@@ -1,0 +1,89 @@
+name: BLUE Turso EOD API Deploy (MANUAL, D1 FALLBACK)
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: 'verify_only makes NO Cloudflare changes. deploy_api installs Turso Worker secrets and deploys the existing API Worker.'
+        type: choice
+        options: [verify_only, deploy_api]
+        required: true
+        default: verify_only
+      confirm_worker:
+        description: 'For deploy_api, type exactly blue-signal-lab-api-v2.'
+        type: string
+        default: ''
+        required: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: blue-turso-api-eod-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Confirm fixed repository and deployment scope
+        shell: bash
+        env:
+          MODE: ${{ inputs.mode }}
+          CONFIRM_WORKER: ${{ inputs.confirm_worker }}
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REPOSITORY" = 'ehdud6728-bit/BLUE-Signal-Lab'
+          if [[ "$MODE" != 'verify_only' && "$MODE" != 'deploy_api' ]]; then exit 1; fi
+          if [[ "$MODE" = 'deploy_api' && "$CONFIRM_WORKER" != 'blue-signal-lab-api-v2' ]]; then
+            echo 'Confirmation mismatch. No deployment.'; exit 1
+          fi
+          echo 'Target: existing blue-signal-lab-api-v2 only.'
+          echo 'D1 binding and existing signals endpoints remain unchanged.'
+          if [[ "$MODE" = 'verify_only' ]]; then echo 'VERIFY ONLY. No secrets, SQL, or Worker changes.'; fi
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install Worker dependencies
+        working-directory: worker
+        run: npm install --no-package-lock --no-audit --no-fund
+      - name: Turso API module tests (no network/DB)
+        run: node --test tests/test_turso_eod_api.mjs
+      - name: Bundle API Worker locally without deploying
+        working-directory: worker
+        run: npx wrangler deploy --dry-run --outdir ../output/turso-api-eod-dryrun
+      - name: Install the two Turso secrets to the existing API Worker
+        if: inputs.mode == 'deploy_api'
+        working-directory: worker
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_WORKER_DEPLOY_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
+          TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [[ -z "${CLOUDFLARE_API_TOKEN:-}" || -z "${CLOUDFLARE_ACCOUNT_ID:-}" || -z "${TURSO_DATABASE_URL:-}" || -z "${TURSO_AUTH_TOKEN:-}" ]]; then
+            echo 'Missing Cloudflare/Turso GitHub Actions secrets.'; exit 1
+          fi
+          if ! grep -q '"name": "blue-signal-lab-api-v2"' wrangler.jsonc; then
+            echo 'Wrong API Worker configuration. Stopping.'; exit 1
+          fi
+          printf '%s' "$TURSO_DATABASE_URL" | npx wrangler secret put TURSO_DATABASE_URL --name blue-signal-lab-api-v2
+          printf '%s' "$TURSO_AUTH_TOKEN" | npx wrangler secret put TURSO_AUTH_TOKEN --name blue-signal-lab-api-v2
+          echo 'BLUE_TURSO_EOD_API_SECRETS_INSTALLED (values hidden)'
+      - name: Deploy API Worker (existing D1 stays bound)
+        if: inputs.mode == 'deploy_api'
+        working-directory: worker
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_WORKER_DEPLOY_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          npx wrangler deploy
+          echo 'BLUE_TURSO_EOD_API_DEPLOYED'
+      - name: Report verification-only completion
+        if: inputs.mode == 'verify_only'
+        run: echo 'BLUE_TURSO_EOD_API_VERIFIED_ONLY (no Cloudflare changes)'

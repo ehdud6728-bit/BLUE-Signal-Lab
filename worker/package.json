@@ -8,6 +8,9 @@
     "db:local": "wrangler d1 execute blue-signal-lab --local --file=schema.sql",
     "db:remote": "wrangler d1 execute blue-signal-lab --remote --file=schema.sql"
   },
+  "dependencies": {
+    "@libsql/client": "0.18.0"
+  },
   "devDependencies": {
     "wrangler": "^4.0.0",
     "typescript": "^5.7.0",

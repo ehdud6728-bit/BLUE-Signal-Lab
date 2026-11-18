@@ -3,11 +3,12 @@ import LiveMarket from './LiveMarket';
 import SmartBasket, {type BasketQuickAddRequest} from './SmartBasket';
 import PriceCompareMini from './PriceCompareMini';
 import SymbolAnalysisPanel from './SymbolAnalysisPanel';
+import TursoEodRecovery, {type TursoDay} from './TursoEodRecovery';
 import {requestSearchPriority} from './search-priority';
 import {comparisonKey,fetchCompared,type PriceCompare} from './price-compare';
 import './r1595-group-price.css';
 import AiWidget from './AiWidget';
-import React, {useEffect, useRef, useState} from 'react';
+import React, {useCallback,useEffect, useRef, useState} from 'react';
 import {createRoot} from 'react-dom/client';
 import {Search, CalendarDays, BarChart3, AlertCircle, RefreshCw, SlidersHorizontal, ListFilter, X, ChevronRight, Download, ArrowLeft, Activity, Clock3, Database, CheckCircle2, ShoppingBasket, Radar, ScanSearch} from 'lucide-react';
 import './style.css';
@@ -86,6 +87,11 @@ const showSignal=(t:string)=>({
 const money=(n:number|null|undefined)=>n==null?'—':n.toLocaleString('ko-KR');
 
 function App(){
+  // Turso is the primary source for verified EOD. D1 is the fallback for
+  // its pre-existing signal interface, never a substitute for full EOD rows.
+  const [storageMode,setStorageMode]=useState<'checking'|'turso'|'d1'|'unavailable'>('checking');
+  const [tursoDays,setTursoDays]=useState<TursoDay[]>([]);
+  const [eodRefresh,setEodRefresh]=useState(0);
   const [mode,setMode]=useState<'single'|'range'>('single');
   const [date,setDate]=useState(todayKST());
   const [start,setStart]=useState(todayKST());
@@ -233,14 +239,40 @@ function App(){
     if(installPrompt){await installPrompt.prompt();await installPrompt.userChoice;setInstallPrompt(null);}
     else setInstallGuide(v=>!v);
   }
-  async function loadDates():Promise<string|null>{
-    const r=await fetch(API+'/api/dates',{credentials:'include',cache:'no-store'});
-    if(!r.ok)throw new Error(`날짜 API 오류: ${r.status}`);
-    const d=await r.json();
-    setLatest(d.latest||null);
-    return d.latest||null;
-  }
-  useEffect(()=>{loadDates().then(d=>{if(d){setDate(watchDate||d);setStart(d);setEnd(d);}}).catch(e=>setError(`검색 가능 날짜 확인 실패: ${String(e)}`));},[]);
+  const fallbackToD1=useCallback(async(message='Turso 조회 불가'):Promise<string|null>=>{
+    try{
+      const response=await fetch(API+'/api/dates',{credentials:'include',cache:'no-store'});
+      if(!response.ok)throw Error(`D1 조회 오류 ${response.status}`);
+      const body=await response.json() as {latest?:string};
+      if(typeof body.latest!=='string'||!/^20\d{2}-\d{2}-\d{2}$/.test(body.latest))
+        throw Error('D1 분석 데이터 없음');
+      setStorageMode('d1');setTursoDays([]);setLatest(body.latest);
+      setDate(body.latest);setStart(body.latest);setEnd(body.latest);
+      setError(`${message} · 기존 D1 분석 데이터로 전환했습니다. D1에도 일부 기능 제한이 있을 수 있습니다.`);
+      return body.latest;
+    }catch(e){
+      setStorageMode('unavailable');setTursoDays([]);setLatest(null);
+      setError(`Turso와 D1 모두 조회할 수 없습니다. ${e instanceof Error?e.message:'연결 확인 필요'}. 두 DB의 데이터는 변경하지 않았습니다.`);
+      return null;
+    }
+  },[]);
+  const loadDates=useCallback(async():Promise<'turso'|'d1'|'unavailable'>=>{
+    try{
+      const response=await fetch(API+'/api/eod/dates',{credentials:'include',cache:'no-store'});
+      if(!response.ok)throw Error(`Turso EOD 날짜 API ${response.status}`);
+      const body=await response.json() as {storage?:string;items?:TursoDay[]};
+      if(body.storage!=='TURSO'||!Array.isArray(body.items)||!body.items.length||
+        !body.items.every(d=>/^20\d{2}-\d{2}-\d{2}$/.test(d.day)&&Number.isInteger(d.rows)&&d.rows>=1700))
+        throw Error('Turso 검증 완료 날짜 없음');
+      setStorageMode('turso');setTursoDays(body.items);setError('');setEodRefresh(x=>x+1);
+      return 'turso';
+    }catch(e){
+      const last=await fallbackToD1(e instanceof Error?e.message:'Turso 연결 오류');
+      return last?'d1':'unavailable';
+    }
+  },[fallbackToD1]);
+  const onTursoUnavailable=useCallback((message:string)=>{void fallbackToD1(message);},[fallbackToD1]);
+  useEffect(()=>{void loadDates();},[loadDates]);
 
   // R1581_SCAN_RESUME: refresh/reopen must not silently lose the server-side scan.
   useEffect(()=>{
@@ -334,7 +366,7 @@ function App(){
   }
   // R1581_SCAN_RESUME: keep polling while navigating; persist and resume after reload.
   useEffect(()=>{
-    if(!watchDate)return;
+    if(!watchDate||storageMode!=='d1')return;
     let cancelled=false,inFlight=false;
     const poll=async()=>{
       if(inFlight)return;
@@ -371,7 +403,7 @@ function App(){
     return()=>{cancelled=true;window.clearInterval(timer);
       document.removeEventListener('visibilitychange',onVisible);
       window.removeEventListener('focus',onFocus);};
-  },[watchDate,mode,date,gcFields,gcLogic]);
+  },[watchDate,mode,date,gcFields,gcLogic,storageMode]);
 
   const extra=(r:Signal,k:string):unknown=>r.extras?.[k];
   const num=(r:Signal,k:string):number|null=>{const v=extra(r,k);if(v==null||v==='')return null;const n=Number(v);return Number.isFinite(n)?n:null;};
@@ -468,6 +500,10 @@ function App(){
       return;
     }
     setActiveView('research');
+    if(storageMode==='turso'){
+      window.setTimeout(()=>window.scrollTo({top:0,behavior:'smooth'}),20);
+      return;
+    }
     if(target==='search'){
       setFilterOpen(true);
       window.setTimeout(()=>formRef.current?.scrollIntoView({behavior:'smooth',block:'start'}),35);
@@ -480,8 +516,7 @@ function App(){
   const refreshCurrentView=()=>{
     if(activeView==='research'){
       setR1594Refresh(v=>v+1);
-      void loadDates().catch(e=>setR1593Error(String(e)));
-      if(total!==null)void search(page,false);
+      void loadDates().then(source=>{if(source==='d1'&&total!==null)void search(page,false);});
     }else if(activeView==='tracking')setR1594TrackingRefresh(v=>v+1);
     else if(activeView==='basket')setR1594BasketRefresh(v=>v+1);
     else if(activeView==='analysis')setAnalysisRefresh(v=>v+1);
@@ -543,7 +578,9 @@ function App(){
       <button type="button" disabled={activeView==='research'&&(busy||requestBusy)}
         onClick={refreshCurrentView}><RefreshCw size={16}/> 새로고침</button>
     </div>
-    {(watchDate||completedDate||scanInfo)&&<div className="r1581-scan-monitor" role="status">
+    {storageMode==='d1'&&<div className="turso-fallback-banner" role="status">보조 DB · D1 분석 모드 {error&&'· Turso 일봉 조회 불가'} · 상단 새로고침으로 Turso 재연결 시도</div>}
+    {storageMode==='unavailable'&&<div className="turso-unavailable-banner" role="alert">{error}<button type="button" onClick={()=>{void loadDates();}}>다시 연결</button></div>}
+    {storageMode==='d1'&&(watchDate||completedDate||scanInfo)&&<div className="r1581-scan-monitor" role="status">
       <RefreshCw size={16} className={watchDate?'r1581-pending':''}/>
       <div className="r1581-scan-text">
         <strong>{watchDate?`${watchDate} 검색 분석 중`:completedDate?`${completedDate} 분석 완료`:'검색 분석 안내'}</strong>
@@ -563,7 +600,7 @@ function App(){
       <p><a href="/pwa-check.html" target="_blank" rel="noopener noreferrer">PWA 설치 진단 열기</a></p>
       <small>Cloudflare Access 로그인 페이지가 manifest·아이콘을 대신 반환하면 설치할 수 없을 수 있습니다. 접근 제어를 해제하지 말고 진단 결과를 확인하세요.</small>
     </div>}
-    <main className={"app-main "+(activeView!=='research'?'r152-full-mode':'')}>
+    <main className={"app-main "+(activeView!=='research'?'r152-full-mode':'')+(storageMode==='turso'&&activeView==='research'?' eod-recovery-active':'')}>
       <aside className={'panel search-panel '+(filterOpen?'filter-open':'filter-closed')} ref={formRef} id="search-panel">
         <div className="search-heading"><h2><SlidersHorizontal size={18}/> 검색 조건</h2><button type="button" className="filter-toggle" onClick={()=>setFilterOpen(v=>!v)} aria-expanded={filterOpen} aria-controls="filter-body">{filterOpen?'조건 접기':'조건 변경'} <ListFilter size={16}/></button></div>
         <div className="filter-body" id="filter-body">
@@ -620,31 +657,32 @@ function App(){
       </aside>
       <section className="content">
         <div className={'r152-analysis-content '+(activeView==='analysis'?'':'r151-hidden')}>
-          <SymbolAnalysisPanel key={analysisRefresh} defaultDate={date}
+          {(storageMode==='d1'||(storageMode==='turso'&&activeView==='analysis'))&&<SymbolAnalysisPanel key={analysisRefresh} defaultDate={date}
             isInBasket={(code,day)=>basketIds.includes(`MANUAL:${code}:${day}`)}
             onAddToBasket={(item,analysisMatched)=>{
               setBasketRequest({serial:++basketSequence.current,item,selectionOrigin:'ANALYSIS',analysisMatched});
               nav('basket');
-            }}/>
+            }}/>}
         </div>
         <div className={'r151-basket-content '+(activeView==='basket'?'':'r151-hidden')}>
-          <SmartBasket quickAddRequest={basketRequest} onItemsChange={setBasketIds} active={activeView==='basket'} refreshKey={r1594BasketRefresh} patternHighlightMin={highlightMin} patternSampleMin={patternSampleMin}/>
+          {(storageMode==='d1'||(storageMode==='turso'&&activeView==='basket'))&&<SmartBasket quickAddRequest={basketRequest} onItemsChange={setBasketIds} active={activeView==='basket'} refreshKey={r1594BasketRefresh} patternHighlightMin={highlightMin} patternSampleMin={patternSampleMin}/>}
         </div>
         <div className={'r152-tracking-content '+(activeView==='tracking'?'':'r151-hidden')}>
-          <LiveMarket active={activeView==='tracking'} refreshKey={r1594TrackingRefresh}/>
+          {(storageMode==='d1'||(storageMode==='turso'&&activeView==='tracking'))&&<LiveMarket active={activeView==='tracking'} refreshKey={r1594TrackingRefresh}/>}
         </div>
         <div className={'r152-ai-content '+(activeView==='ai'?'':'r151-hidden')}>
           {mode==='single'&&latest&&date>latest&&<p className="r159-data-note">{date}에는 저장된 확정 일봉이 없어, AI 시황은 최근 저장일 {latest} 기준으로 조회합니다.</p>}
-          <section ref={aiRef} id="ai-panel" className="r152-ai-section">
+          {(storageMode==='d1'||(storageMode==='turso'&&activeView==='ai'))&&<section ref={aiRef} id="ai-panel" className="r152-ai-section">
             <AiWidget key={'market-'+aiReportDay+'-'+r1594AiRefresh} kind="market"
               date={aiReportDay}
               observed={mode==='single'?days.find(d=>d.day===aiReportDay)?.observed_stocks:null}
               matched={mode==='single'?days.find(d=>d.day===aiReportDay)?.matched_stocks:null}
               events={mode==='single'?days.find(d=>d.day===aiReportDay)?.signal_events:null}
               searchMatched={rows}/>
-          </section>
+          </section>}
         </div>
         <div className={'r151-research-content '+(activeView==='research'?'':'r151-hidden')}>
+        {storageMode==='turso'&&<TursoEodRecovery key={eodRefresh} api={API} dates={tursoDays} onUnavailable={onTursoUnavailable}/>}
         <div className="stats" ref={summaryRef} id="summary-panel">
           <div className="metric"><span>검색 결과</span><strong>{total==null?'—':total.toLocaleString()}</strong><small>종목</small></div>
           <div className="metric"><span>검색 거래일</span><strong>{total==null?'—':days.length}</strong><small>저장된 날짜</small></div>

@@ -2,6 +2,15 @@
 
 새 채팅에서 프로젝트를 이어가기 위한 **결정/구현/검증 이력**입니다. 대화 전체를 저장하지 않고 실제 개발에 필요한 내용만 보존합니다. 최신 항목을 위에 추가하고, 결과가 달라지면 추측 대신 검증된 상태로 수정합니다.
 
+## 2026-11-18 (KST) — Turso 확정 일봉 조회·D1 장애 폴백 준비
+
+- **요청/결정:** D1 무료 읽기 제한 중 앱을 최대한 활용하도록 Turso에 들어 있는 검증된 자료부터 PWA에서 조회. **Turso 우선**, Turso 장애 시 기존 **D1 분석 UI로 자동 폴백**; D1도 실패하면 양쪽 모두 장애로 알림. 하나의 DB가 정상이더라도 두 DB의 데이터 완전 일치라고 표시하지 않음.
+- **실제 선행 결과:** [EOD 수동 적용 #44310029226](https://github.com/ehdud6728-bit/BLUE-Signal-Lab/actions/runs/44310029226)은 2026-11-09~18의 **8거래일·21,296건** 정확한 KRX 일봉을 Turso에 `apply`해 날짜별 read-back에 성공(`BLUE_TURSO_EOD_RANGE_OK`). D1 변경 없음.
+- **이번 코드:** API에 `/api/eod/dates`, `/api/eod/search` 읽기 전용 추가, 감사 완료된 날짜만 검색·정확한 종가/시가/고가/저가·거래량·원화 거래대금 제공. 기존 `/api/search` 및 D1 바인딩 변경 없음. 웹에는 별도 Turso 확정 일봉 검색 화면을 제공하고, Turso 실패/미설치 시 기존 D1 검색으로 폴백. 전용 화면은 신호·패턴 승률·이동평균선 계산을 제공하지 않으며 다른 탭은 D1 의존임.
+- **배포 안전:** 새 `.github/workflows/blue_turso_api_eod_deploy.yml`은 기본 `verify_only`, 명시 `deploy_api`+정확한 Worker 이름 재입력 시에만 기존 API Worker에 두 개의 Turso 비밀값 설치 및 배포. 웹은 기존 검증형 정적 배포 Actions를 별도 수행. 운영 DB SQL·수집기·Cloudflare 배포는 **이 PR에서 실행하지 않음**.
+- **로컬 검증:** 새 Turso 읽기 테스트 **7/7** 통과. API Worker Wrangler 번들 `deploy --dry-run` 성공(D1·KIS 서비스 바인딩 보존 확인), 웹 `npm run build` 성공, YAML 파싱·`git diff --check` 성공. 기존 전체 Node 회귀 **80/81** 통과: `tests/test_ai_api.mjs`의 SQL mock 미지원은 `worker/src/ai.ts`/해당 테스트를 이번에 변경하지 않았고, 수정 이전 별도 기존 worktree에서도 같은 오류로 재현됨. 기존 AI 테스트 실패를 신규 Turso 변경 원인으로 오인하지 않음. Turso 이력을 224거래일 이상 확보하고 기술 지표/패턴/추적 관련 데이터를 이관하기 전까지 정상 분석 전체 복구를 주장하지 않음.
+- **다음:** PR 병합 → `verify_only` 실행 → 확인 후 `deploy_api` 실행 → API의 Turso 날짜/종목 조회 확인 → 웹 안전 배포 → 휴대폰에서 Turso 우선 및 장애 시 D1 폴백 검증. 이후 정확한 과거 일봉 범위 확장과 신호 엔진 이전.
+
 ## 2026-11-18 (KST) — Turso 일봉 11월 9~18일 전체 종목 저장 경로 준비
 
 - **사용자 우선순위 변경:** 현재는 D1/Turso 값 일치 검사보다 **주 DB 예정 Turso에 검증된 일봉을 누락 없이 저장**하는 데 집중. 기존 D1 읽기/쓰기 경로는 유지하며 Turso 우선 읽기·복제 전환은 후순위로 둠.

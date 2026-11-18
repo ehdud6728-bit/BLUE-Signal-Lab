@@ -9,8 +9,11 @@ import {validChartCode} from './chart-query';
 import {lookupSymbolAnalysis,lookupSymbolDirectory,validAnalysisCode} from './symbol-analysis';
 import {lookupSymbolLive,requestSymbolLive,validLiveCode} from './symbol-live';
 import {runEodCloudflareCron} from './eod-cron';
+import {InvalidEodQuery,tursoEodDates,tursoEodSearch} from './turso-eod';
 interface Env {
   DB: D1Database;
+  TURSO_DATABASE_URL?:string;
+  TURSO_AUTH_TOKEN?:string;
   KIS_COLLECTOR?: {collectNow(code:string):Promise<{status:string;code?:string}>};
   CORS_ORIGIN?: string;
   GITHUB_TOKEN?: string;
@@ -112,6 +115,19 @@ export default {
     // An Origin header alone never grants permission to dispatch a GitHub workflow.
     const access = (ctx as ExecutionContext & { access?: unknown } | undefined)?.access;
     try {
+      // Fully independent of D1. A successful, audited EOD read has no implied
+      // technical signals; the PWA switches to the existing D1 UI on failure.
+      if(p==='/api/eod/dates'&&request.method==='GET'){
+        try{return respond(await tursoEodDates(env));}
+        catch{return respond({error:'TURSO_EOD_UNAVAILABLE',fallback:'D1',
+          message:'Turso 확정 일봉 조회 실패. 기존 D1 조회를 시도하세요.'},503);}
+      }
+      if(p==='/api/eod/search'&&request.method==='GET'){
+        try{return respond(await tursoEodSearch(env,u.searchParams));}
+        catch(e){if(e instanceof InvalidEodQuery)return respond({error:e.message},400);
+          return respond({error:'TURSO_EOD_UNAVAILABLE',fallback:'D1',
+            message:'Turso 확정 일봉 조회 실패. 기존 D1 조회를 시도하세요.'},503);}
+      }
       // Current KIS quote research is independent of today's confirmed KRX EOD.
       // The saved quote is always available immediately. The optional private
       // RPC call refreshes it synchronously, without sending KIS keys to API.

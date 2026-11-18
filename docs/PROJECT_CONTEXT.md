@@ -10,6 +10,10 @@
 
 ## 현재 주요 구성
 
+**2026-11-18 Turso 일봉 수집 확정:** [GitHub Actions #44310029226](https://github.com/ehdud6728-bit/BLUE-Signal-Lab/actions/runs/44310029226)에서 11월 9~18일 중 8거래일 총 **21,296개 KRX 검증 일봉**이 Turso `blue_eod_daily_v1`에 저장되고, 날짜별 read-back 및 감사 테이블 검증에 성공. 단 112·224일선, 신호, 매물대·과거 패턴·장바구니 이력은 이 테이블에 포함되지 않음.
+
+**새 복구 원칙:** 검증된 KRX *일봉 검색*은 Turso를 먼저 조회. Turso 인증·연결·검색 오류 시 기존 **D1 신호 검색 UI**로 전환하고 데이터 영역의 차이를 명시함. 이는 두 DB에 같은 이력이 들어 있다는 뜻이 아니며, D1도 한도 초과면 명확히 이중 장애를 표시. 기존 D1 업무 데이터 및 Worker 바인딩은 보존. 앱의 다른 분석 탭은 여전히 D1 의존이며, 전체 Turso 주 DB 전환은 별도의 후속 단계.
+
 | 구성 | 저장소 경로 | 내용 |
 | --- | --- | --- |
 | API Worker | `worker/` | Cloudflare Workers API, D1 `DB` 바인딩 및 KIS 수집기 서비스 바인딩 |
@@ -44,6 +48,8 @@
 - 권장 수동 순서: `asof_date=latest`, `publish_to_d1=false`, `publish_diagnostic_only=false`, `turso_directory_mode=dry_run` → 검증 성공 및 감사 수치 확인 → 별도 사용자 승인으로 `apply_12` 실행 → Turso 결과 12개 검증. `apply_12`를 선택해도 D1은 건드리지 않습니다. `publish_to_d1=true`는 별도의 운영 쓰기 선택입니다.
 
 ## 바로 다음 작업
+
+- **Turso 읽기 복구 단계:** `worker/src/turso-eod.ts`, `/api/eod/dates`, `/api/eod/search` 및 PWA의 전용 확정 일봉 화면. 먼저 수동 API Actions `verify_only` 후 `deploy_api`를 명시적으로 선택해 `blue-signal-lab-api-v2`에 Turso URL/토큰 Worker Secrets 두 개를 설치·배포. 이후 기존 웹 안전 배포 Actions를 따로 실행. PR만 병합하면 운영에 자동 적용되지 않음. 다른 탭의 112/224일선·패턴/AI·장바구니는 기존 D1 의존 상태임.
 
 0. **신규 사용자 우선순위(2026-11-18):** 우선 2026-11-09~11-18의 정확한 KRX 일봉 전 종목을 Turso에 채운다. `.github/workflows/blue_turso_verified_eod_range.yml`에서 먼저 `dry_run`으로 8개 평일의 KRX 정확한 날짜·OHLCV·건수·해시를 검증한다. 날짜 하나라도 불확실하면 저장하지 않음. 검증 후 명시적 `apply` 선택으로만 `blue_eod_daily_v1`에 멱등 삽입 및 read-back 완료 기록. **D1/Turso 전체 일치 검사와 주 DB 전환은 이 단계의 선행조건이 아님.** 기존 D1 기능·데이터를 보존한다.
 1. Secrets 설치와 Collector 실제 재배포까지 성공했습니다. 단, [Mirror Status #44279543275](https://github.com/ehdud6728-bit/BLUE-Signal-Lab/actions/runs/44279543275)의 0행은 복제 OFF 상태에서의 결과로 정상입니다.
