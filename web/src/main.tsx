@@ -92,13 +92,14 @@ function App(){
   const [storageMode,setStorageMode]=useState<'checking'|'turso'|'d1'|'unavailable'>('checking');
   const [tursoDays,setTursoDays]=useState<TursoDay[]>([]);
   const [eodRefresh,setEodRefresh]=useState(0);
-  // The Turso EOD catalog is not a signal scanner. Keep the original D1
-  // research search visible while a verified long-history Turso scanner is built.
+  // Turso EOD candles alone cannot recreate signals. The separately audited
+  // research snapshots serve patterns; the legacy D1 search remains fallback.
   const [searchSource,setSearchSource]=useState<'patterns'|'daily'>('patterns');
   const [patternStatus,setPatternStatus]=useState<'checking'|'ready'|'unavailable'>('checking');
+  const [patternBackend,setPatternBackend]=useState<'turso'|'d1'>('turso');
   const [patternSourceError,setPatternSourceError]=useState('');
   const patternDatesInitialized=useRef(false);
-  const patternSearchActive=storageMode==='d1'||(storageMode==='turso'&&searchSource==='patterns');
+  const patternSearchActive=(storageMode==='d1'||(storageMode==='turso'&&searchSource==='patterns'))&&patternBackend==='d1';
   const [mode,setMode]=useState<'single'|'range'>('single');
   const [date,setDate]=useState(todayKST());
   const [start,setStart]=useState(todayKST());
@@ -207,7 +208,9 @@ function App(){
   // R1594: submit at most eight verified visible search symbols to the server queue.
   // This does NOT block the D1 search and NEVER calls KIS from the browser.
   useEffect(()=>{
-    if(activeView!=='research'||!rows.length)return;
+    // Turso research records alone are not proof of D1 queue enrollment.
+    // Avoid implicit D1 writes/expensive reads while the D1 backend is down.
+    if(activeView!=='research'||!rows.length||patternBackend==='turso')return;
     const ctrl=new AbortController();let count=0;let timer=0;
     const priority=rows.filter(x=>/^\d{6}$/.test(x.code)&&x.close_price!==null&&x.close_price>0)
       .filter((x,i,a)=>a.findIndex(y=>y.code===x.code)===i).slice(0,8);
@@ -225,7 +228,7 @@ function App(){
       },12000);}
     }).catch(e=>{if(!ctrl.signal.aborted)setR1594QueueStatus(e instanceof Error?e.message:'우선 수집 요청 실패');});
     return ()=>{ctrl.abort();window.clearInterval(timer);};
-  },[rows,activeView,r1594Refresh]);
+  },[rows,activeView,r1594Refresh,patternBackend]);
 
   useEffect(()=>{
     const onBeforeInstall=(event:Event)=>{event.preventDefault();setInstallPrompt(event as InstallPrompt);};
@@ -254,6 +257,7 @@ function App(){
       if(typeof body.latest!=='string'||!/^20\d{2}-\d{2}-\d{2}$/.test(body.latest))
         throw Error('D1 분석 데이터 없음');
       setStorageMode('d1');setTursoDays([]);setLatest(body.latest);
+      setPatternBackend('d1');setPatternStatus('ready');
       setDate(body.latest);setStart(body.latest);setEnd(body.latest);
       setError(`${message} · 기존 D1 분석 데이터로 전환했습니다. D1에도 일부 기능 제한이 있을 수 있습니다.`);
       return body.latest;
@@ -278,19 +282,36 @@ function App(){
       return last?'d1':'unavailable';
     }
   },[fallbackToD1]);
-  const loadPatternDates=useCallback(async()=>{
+  const loadPatternDates=useCallback(async(forceD1=false)=>{
     setPatternStatus('checking');setPatternSourceError('');
     try{
-      const response=await fetch(API+'/api/dates',{credentials:'include',cache:'no-store'});
-      if(!response.ok)throw Error(`D1 분석 날짜 조회 오류 ${response.status}`);
-      const body=await response.json() as {latest?:string};
-      if(typeof body.latest!=='string'||!/^20\d{2}-\d{2}-\d{2}$/.test(body.latest))
-        throw Error('저장된 기술 패턴 분석 날짜가 없습니다.');
-      setLatest(body.latest);setDate(body.latest);setStart(body.latest);setEnd(body.latest);
+      let latestDay:string|null=null,source:'turso'|'d1'='turso';
+      let tursoError='';
+      if(!forceD1){
+        try{
+          const response=await fetch(API+'/api/research/dates',{credentials:'include',cache:'no-store'});
+          if(!response.ok)throw Error(`Turso 연구 분석 날짜 조회 오류 ${response.status}`);
+          const body=await response.json() as {storage?:string;latest?:string};
+          if(body.storage!=='TURSO'||typeof body.latest!=='string'||!/^20\d{2}-\d{2}-\d{2}$/.test(body.latest))
+            throw Error('Turso에 검증된 패턴 분석 날짜가 없습니다.');
+          latestDay=body.latest;
+        }catch(e){tursoError=e instanceof Error?e.message:'Turso 연결 오류';}
+      }
+      if(!latestDay){
+        const response=await fetch(API+'/api/dates',{credentials:'include',cache:'no-store'});
+        if(!response.ok)throw Error(`D1 분석 날짜 조회 오류 ${response.status}`);
+        const body=await response.json() as {latest?:string};
+        if(typeof body.latest!=='string'||!/^20\d{2}-\d{2}-\d{2}$/.test(body.latest))
+          throw Error('저장된 기술 패턴 분석 날짜가 없습니다.');
+        latestDay=body.latest;source='d1';
+      }
+      setPatternBackend(source);
+      setPatternSourceError(source==='d1'?tursoError:'');
+      setLatest(latestDay);setDate(latestDay);setStart(latestDay);setEnd(latestDay);
       setPatternStatus('ready');
     }catch(e){
       setPatternStatus('unavailable');
-      setPatternSourceError(e instanceof Error?e.message:'D1 분석 날짜를 조회하지 못했습니다.');
+      setPatternSourceError(e instanceof Error?e.message:'Turso/D1 분석 날짜를 조회하지 못했습니다.');
       setRows([]);setDays([]);setTotal(null);
     }
   },[]);
@@ -334,7 +355,7 @@ function App(){
   }
   async function search(p=1,scroll=true,selectedGc:GcKey[]=gcFields,selectedGcLogic:'any'|'all'=gcLogic,requestedDay?:string,patternOverride?:{enabled?:boolean;threshold?:number|null;minSamples?:number;amountEok?:number},selectedTech:TechKey[]=techFields,selectedTechLogic:'any'|'all'=techLogic,queryOverride?:{q?:string;sort?:ResultSort}){
     if(storageMode==='turso'&&patternStatus!=='ready'){
-      setError('기술 패턴 검색에 사용할 D1 분석 데이터 연결을 먼저 확인해 주세요.');
+      setError('기술 패턴 검색에 사용할 감사 완료 분석 데이터 연결을 먼저 확인해 주세요.');
       return;
     }
     const serial=++searchVersion.current;
@@ -348,7 +369,7 @@ function App(){
     const queryMode=requestedDay?'single':mode,queryDate=requestedDay||date;
     if(requestedDay){setMode('single');setDate(requestedDay);}
     try{
-      const u=new URL(API+'/api/search');
+      const u=new URL(API+(patternBackend==='turso'?'/api/research/search':'/api/search'));
       u.searchParams.set('mode',queryMode);
       if(queryMode==='single')u.searchParams.set('date',queryDate);
       else {u.searchParams.set('start',start);u.searchParams.set('end',end);}
@@ -367,7 +388,14 @@ function App(){
       if(effectiveOnlyPattern&&effectiveHighlightMin!==null){
         u.searchParams.set('only_pattern','1');u.searchParams.set('min_pattern_up',String(effectiveHighlightMin));
       }
-      const r=await fetch(u.toString(),{credentials:'include',cache:'no-store'});
+      let r=await fetch(u.toString(),{credentials:'include',cache:'no-store'});
+      // D1 is only a secondary path. An HTTP 400 means the query was invalid
+      // and must not silently turn into a different source/result.
+      if(patternBackend==='turso'&&r.status>=500){
+        u.pathname='/api/search';
+        r=await fetch(u.toString(),{credentials:'include',cache:'no-store'});
+        if(r.ok){setPatternBackend('d1');setPatternSourceError('Turso 패턴 검색 불가 · D1 보조 DB로 전환됨');}
+      }
       const d=await r.json();
       if(!r.ok)throw new Error(d.error||`검색 오류: ${r.status}`);
       // An older API silently ignores q/sort and would show an incorrect
@@ -384,7 +412,9 @@ function App(){
       if(scroll){setFilterOpen(false);requestAnimationFrame(()=>resultRef.current?.scrollIntoView({behavior:'smooth',block:'start'}));}
       if(d.data_status==='NOT_IMPORTED'){
         if(queryMode==='single'){
-          if(queryDate>todayKST()){
+          if(patternBackend==='turso'){
+            setStatus(`${queryDate}의 Turso 패턴 연구 스냅샷이 아직 등록되지 않았습니다. 검증된 원본을 저장해야 조회할 수 있습니다.`);
+          }else if(queryDate>todayKST()){
             setStatus('미래 날짜의 주가 데이터는 아직 존재하지 않습니다.');
           }else if(queryDate===todayKST()&&!eodRequestReadyKST()){
             setStatus('장중 전체시장 잠정 검색은 아직 지원되지 않습니다. 15:40 이후 확정 일봉 검증을 요청할 수 있습니다.');
@@ -617,10 +647,17 @@ function App(){
       <button type="button" className={searchSource==='daily'?'active':''} aria-pressed={searchSource==='daily'} onClick={()=>setSearchSource('daily')}><Database size={17}/> 확정 일봉 전체</button>
     </div>}
     {activeView==='research'&&storageMode==='turso'&&searchSource==='patterns'&&<div className="blue-pattern-source-note" role="status">
-      <strong>기술 패턴 검색 · 기존 D1 분석 자료</strong>
+      <strong>기술 패턴 검색 · {patternBackend==='turso'?'Turso 주 DB 검증 자료':'D1 보조 DB 분석 자료'}</strong>
       <span>BLUE20/30/40 · ENV20/40 중심선 · RSI/스토캐스틱/MACD · 112/224일선 · 과거 패턴 검증</span>
-      {patternStatus==='checking'?<p>저장된 분석 거래일을 확인 중입니다.</p>:patternStatus==='ready'?<p>최근 분석일: <b>{latest}</b> · Turso 확정 일봉 {tursoDays.length}거래일만으로 장기 기술지표를 계산할 수 없어 기존 D1 검색을 사용합니다. 오늘의 실시간 조건 검색은 아닙니다.</p>:
-        <p className="blue-pattern-source-error">D1 분석 조회 불가: {patternSourceError} <button type="button" onClick={()=>void loadPatternDates()}>다시 확인</button> · 확정 일봉 전체는 별도 조회할 수 있습니다.</p>}
+      {patternStatus==='checking'?<p>저장된 분석 거래일을 확인 중입니다.</p>:patternStatus==='ready'?<p>
+        최근 분석일: <b>{latest}</b> · {patternBackend==='turso'
+          ?'검증된 연구 신호를 Turso에서 직접 조회합니다. 과거 전체 이관은 아직 진행 중이며, 이후 최고·최저가 순위는 저장된 일봉 범위의 부분 관측입니다.'
+          :'Turso 조회 불가 또는 과거 날짜 조회를 위해 기존 D1 분석 결과를 사용합니다.'}
+        {' '}{patternSourceError&&<span className="blue-pattern-source-error">{patternSourceError} · </span>}
+        {patternBackend==='turso'?<button type="button" onClick={()=>void loadPatternDates(true)}>D1 과거 자료 보기</button>
+          :<button type="button" onClick={()=>void loadPatternDates()}>Turso 주 DB 다시 확인</button>}
+      </p>:
+        <p className="blue-pattern-source-error">패턴 분석 조회 불가: {patternSourceError} <button type="button" onClick={()=>void loadPatternDates()}>다시 확인</button></p>}
     </div>}
     {storageMode==='d1'&&<div className="turso-fallback-banner" role="status">보조 DB · D1 분석 모드 {error&&'· Turso 일봉 조회 불가'} · 상단 새로고침으로 Turso 재연결 시도</div>}
     {storageMode==='unavailable'&&<div className="turso-unavailable-banner" role="alert">{error}<button type="button" onClick={()=>{void loadDates();}}>다시 연결</button></div>}
@@ -745,11 +782,15 @@ function App(){
         <section className="panel result" ref={resultRef} id="results-panel">
           <div className="result-heading"><h2><BarChart3 size={18}/> 검색된 종목 <small>{dataStatus==='NOT_IMPORTED'?'일봉 미수집':total===null?'검색 전':total+'건'}</small></h2><span className="eod-pill"><Clock3 size={13}/> EOD</span></div>
           <p className="r1599-active-filters">검색 결과 기준 · 거래대금 {(appliedAmountEok??amountEok)>0?(appliedAmountEok??amountEok).toLocaleString('ko-KR')+'억원 이상':'전체'} · 토마토 강조 {highlightMin===null?'꺼짐':highlightMin+'% 이상 · 표본 '+patternSampleMin+'건 이상'}{onlyPattern&&highlightMin!==null?' · 해당 종목만 보기':''}{appliedAmountEok!==null&&appliedAmountEok!==amountEok?' · 거래대금 변경 미적용(검색 버튼을 누르세요)':''}</p>
-          <p className="result-hint">검색일 확정 종가와 이후 D1 저장 시세·기간 고가를 구분해 표시합니다. 가격이 없으면 미수집으로 표시합니다.</p>
+          <p className="result-hint">{patternBackend==='turso'
+            ?'검색일 Turso 검증 종가와 이후 저장된 확정 일봉 관측가를 구분합니다. 현재 후속 관측 기간은 불완전할 수 있습니다.'
+            :'검색일 확정 종가와 이후 D1 저장 시세·기간 고가를 구분해 표시합니다. 가격이 없으면 미수집으로 표시합니다.'}</p>
           {total===0&&(appliedAmountEok??amountEok)>0&&<p className="r15125-result-scope" role="status">현재 거래대금 최소 {(appliedAmountEok??amountEok).toLocaleString('ko-KR')}억원 조건으로는 검색 대상이 없습니다. 저거래대금 하단 터치 종목도 찾으려면 거래대금을 ‘전체(0억원)’로 바꾸고 검색해 보세요.</p>}
           {r1593Error&&<p className="r1593-comparison-status" role="status">가격 비교: {r1593Error}</p>}
           {r1595RequestNote&&<p className="r1595-request-status" role="status">{r1595RequestNote}</p>}
-          {rows.length>0&&<p className="r1594-quote-note" role="status">{r1594QueueStatus} · 수집 가능한 시장 시간에만 KIS 가격이 갱신됩니다.</p>}
+          {rows.length>0&&<p className="r1594-quote-note" role="status">{patternBackend==='turso'
+            ?'Turso 패턴 기록은 확정 일봉 스냅샷입니다. 현재가 비교는 별도 조회이며 장중 실시간 체결가를 뜻하지 않습니다.'
+            :r1594QueueStatus+' · 수집 가능한 시장 시간에만 KIS 가격이 갱신됩니다.'}</p>}
           <div className="gc-filter-panel r15102-unified-filter" aria-label="골든크로스 및 다중 조건 과거 패턴 필터">
               <div className="gc-filter-heading"><strong><ListFilter size={15}/> 골든크로스 필터</strong><span>검색 전체 결과에 적용 · 당일 발생만</span></div>
               <div className="gc-quick-actions">
@@ -933,7 +974,7 @@ function App(){
           requestDisabled={!!r1595Requesting||r1595Timers.current.size>=3}/>
         <div className="study-tags">{selected.signals.map(s=><span key={s}>{showSignal(s)}</span>)}</div>
         <StockChart key={'chart-'+selected.code+'-'+selected.day} code={selected.code}
-          day={selected.day} name={displayName(selected)}
+          day={selected.day} name={displayName(selected)} researchBackend={patternBackend}
           supplyPrice={num(selected,'supply_reference_price')}
           supplyGrade={supplyGrade(selected)}
           lineCandidates={validLines(selected).map(l=>({signal:l.signal,price:l.price}))} highlightThreshold={highlightMin} highlightSamplesMin={patternSampleMin}/>

@@ -1,0 +1,222 @@
+/** Read the independently audited Turso R1.1 research snapshots without D1.
+ * Historical indicators are imported scanner results, never recomputed from
+ * Turso's short EOD candle range. All methods are read-only.
+ */
+import {createClient} from '@libsql/client/web';
+import {technicalFilterWhere} from './technical-filters.ts';
+
+type ResearchEnv={TURSO_DATABASE_URL?:string;TURSO_AUTH_TOKEN?:string};
+type Client=Pick<ReturnType<typeof createClient>,'execute'|'close'>;
+type Factory=(args:{url:string;authToken:string;intMode:'string'})=>Client;
+const DATE=/^20\d{2}-\d{2}-\d{2}$/;
+const CODE=/^[0-9A-Z]{6}$/;
+const ALLOWED=new Set(['BB20','BB30','BB40','ENV20','ENV40',
+  'BB20_LOWER','BB30_LOWER','BB40_LOWER','BB20_ALT','BB30_ALT','BB40_ALT',
+  'BB20_LOWER_ALT','BB30_LOWER_ALT','BB40_LOWER_ALT','BB30_LOWER_RECLAIM',
+  'ENV20_LOWER_TOUCH']);
+const GC:Record<string,string>={rsi:'rsi_gc',slow14:'slow_14_3_3_gc',
+  slow12:'slow_12_5_5_gc',slow20:'slow_20_12_12_gc',macd:'macd_gc'};
+const SORT=new Set(['recent','highest_gain','lowest_return','amount_surge','amount_decline']);
+const FLOOR=new Set([3,4,5,6,7,8,10,15,20,30]);
+export class InvalidResearchQuery extends Error{constructor(){super('INVALID_TURSO_RESEARCH_QUERY');}}
+function dayValid(x:string){if(!DATE.test(x))return false;
+  const d=new Date(`${x}T00:00:00Z`);return Number.isFinite(d.getTime())&&d.toISOString().slice(0,10)===x;}
+function bad():never{throw new InvalidResearchQuery();}
+function intParam(s:string,min:number,max:number){if(!/^\d{1,7}$/.test(s))bad();
+  const n=Number(s);if(!Number.isSafeInteger(n)||n<min||n>max)bad();return n;}
+function tagNames(raw:string){return raw.split(',').map(s=>s.trim().toUpperCase())
+  .filter(Boolean).map(s=>s.startsWith('BLUE')?s.replace(/^BLUE/,'BB'):s);}
+function escapedLike(s:string){return `%${s.replace(/[\\%_]/g,'\\$&')}%`;}
+async function withClient<T>(env:ResearchEnv,fn:(client:Client)=>Promise<T>,factory:Factory=createClient){
+  const url=env.TURSO_DATABASE_URL?.trim()||'',authToken=env.TURSO_AUTH_TOKEN?.trim()||'';
+  if(!/^(libsql|https):\/\//.test(url)||!authToken)throw Error('TURSO_RESEARCH_NOT_CONFIGURED');
+  const client=factory({url,authToken,intMode:'string'});
+  try{return await fn(client);}finally{client.close();}
+}
+
+export async function tursoResearchDates(env:ResearchEnv,factory?:Factory){
+  return withClient(env,async client=>{
+    const result=await client.execute(`SELECT trade_day AS day,row_count AS matched_stocks,
+      observed_stocks,signal_events FROM blue_research_signal_audit_v1
+      ORDER BY trade_day DESC LIMIT 500`);
+    const items=result.rows.map(r=>({day:String(r.day),matched_stocks:Number(r.matched_stocks),
+      observed_stocks:Number(r.observed_stocks),signal_events:Number(r.signal_events)}));
+    if(items.some(r=>!dayValid(r.day)||!Number.isSafeInteger(r.matched_stocks)||
+      r.matched_stocks<0||r.observed_stocks<1700||r.matched_stocks>r.observed_stocks))
+      throw Error('TURSO_RESEARCH_INVALID_AUDIT');
+    return {storage:'TURSO',data_status:'VERIFIED_RESEARCH_SNAPSHOT',
+      latest:items[0]?.day||null,items};
+  },factory);
+}
+
+export async function tursoResearchSearch(env:ResearchEnv,p:URLSearchParams,factory?:Factory){
+  const mode=p.get('mode')||'single';if(!['single','range'].includes(mode))bad();
+  const start=mode==='single'?(p.get('date')||''):(p.get('start')||'');
+  const end=mode==='single'?start:(p.get('end')||'');
+  if(!dayValid(start)||!dayValid(end)||start>end)bad();
+  // Keep range searches bounded so a malformed request cannot scan a whole
+  // unbounded future archive. 370 days matches the old D1 count horizon.
+  if((Date.parse(end)-Date.parse(start))/86400000>370)bad();
+  const page=intParam(p.get('page')||'1',1,10000),limit=intParam(p.get('limit')||'100',1,500);
+  const q=(p.get('q')||'').trim();if(q.length>60||/[\u0000-\u001f]/.test(q))bad();
+  const code=(p.get('code')||'').trim().toUpperCase();if(code&&!CODE.test(code))bad();
+  const runId=(p.get('run_id')||'').trim();if(runId&&!/^blue_market_20\d{6}$/.test(runId))bad();
+  const signals=tagNames(p.get('signals')||'');
+  if(signals.length>20||signals.some(s=>!ALLOWED.has(s)))bad();
+  const logic=p.get('logic')||'any',gcLogic=p.get('gc_logic')||'any',techLogic=p.get('tech_logic')||'any';
+  if(!['any','all'].includes(logic)||!['any','all'].includes(gcLogic))bad();
+  const gcNames=(p.get('gc')||'').split(',').map(s=>s.trim()).filter(Boolean);
+  if(gcNames.length>5||new Set(gcNames).size!==gcNames.length||gcNames.some(k=>!GC[k]))bad();
+  const tech=technicalFilterWhere(p.get('tech')||'',techLogic);if(tech===null)bad();
+  const amount=intParam(p.get('min_amount_eok')||'0',0,50000);
+  const onlyPattern=p.get('only_pattern')||'0';if(!['0','1'].includes(onlyPattern))bad();
+  const threshold=intParam(p.get('min_pattern_up')||'70',60,90);
+  if(![60,70,80,90].includes(threshold))bad();
+  const floor=intParam(p.get('min_pattern_n')||'8',3,30);if(!FLOOR.has(floor))bad();
+  const sort=(p.get('sort')||'recent').trim();if(!SORT.has(sort))bad();
+  const nameArgs=[escapedLike(q),escapedLike(q),escapedLike(q)];
+  const filters=['day BETWEEN ? AND ?'];const args:(string|number)[]=[start,end];
+  if(runId){filters.push('run_id=?');args.push(runId);}
+  if(code){filters.push('code=?');args.push(code);}
+  if(q){filters.push(`(code LIKE ? ESCAPE '\\' OR
+    CAST(json_extract(extras_json,'$.name') AS TEXT) LIKE ? ESCAPE '\\' OR
+    CAST(json_extract(extras_json,'$.Name') AS TEXT) LIKE ? ESCAPE '\\')`);
+    args.push(...nameArgs);}
+  if(signals.length){filters.push('('+signals.map(()=>"(','||signal_names||',') LIKE ?")
+    .join(logic==='all'?' AND ':' OR ')+')');args.push(...signals.map(s=>`%,${s},%`));}
+  if(gcNames.length){filters.push('('+gcNames.map(k=>
+    `LOWER(CAST(json_extract(extras_json,'$.${GC[k]}') AS TEXT)) IN ('true','1')`)
+    .join(gcLogic==='all'?' AND ':' OR ')+')');}
+  if(tech)filters.push(tech);
+  if(amount>0){filters.push(`CAST(json_extract(extras_json,'$.traded_amount_krw') AS REAL)>=?`);
+    args.push(amount*100000000);}
+  const setupRows=`json_each(CASE WHEN json_valid(stats_json) THEN stats_json
+    ELSE '{"setups":[]}' END,'$.setups') setup`;
+  const setupN=`CAST(json_extract(setup.value,'$.horizons."10".n') AS INTEGER)`;
+  const setupUp=`CAST(json_extract(setup.value,'$.horizons."10".up_pct') AS REAL)`;
+  if(onlyPattern==='1'){
+    filters.push(`EXISTS (SELECT 1 FROM ${setupRows} WHERE
+      json_type(setup.value,'$.horizons."10".up_pct') IN ('integer','real')
+      AND ${setupN}>=? AND ${setupUp}>=?)`);
+    args.push(floor,threshold);
+  }
+  const base=`WITH verified AS (SELECT s.trade_day AS day,s.run_id,s.code,s.signal_names,
+    s.close_price,s.row_sha256,s.source_payload_sha256,s.record_json,
+    json_extract(s.record_json,'$.extras') AS extras_json,
+    json_extract(s.record_json,'$.stats') AS stats_json,
+    json_extract(s.record_json,'$.supply_distance_pct') AS supply_distance_pct
+    FROM blue_research_signals_v1 s INNER JOIN blue_research_signal_audit_v1 a
+    ON a.trade_day=s.trade_day AND a.source_payload_sha256=s.source_payload_sha256)`;
+  const where=filters.join(' AND ');
+  // Only later, independently audited EOD candles count as observed highs and
+  // lows. Turso currently has a short date range, never full-period coverage.
+  const later=(field:'high'|'low',aggregate:'MAX'|'MIN')=>
+    `(SELECT ${aggregate}(e.${field}) FROM blue_eod_daily_v1 e
+      JOIN blue_eod_ingest_audit_v1 a ON a.trade_day=e.trade_day AND a.row_count>=1700
+      WHERE e.code=verified.code AND e.trade_day>verified.day)`;
+  const high=`CASE WHEN close_price>0 THEN 100.0*(1.0*${later('high','MAX')}/close_price-1) END`;
+  const low=`CASE WHEN close_price>0 THEN 100.0*(1.0*${later('low','MIN')}/close_price-1) END`;
+  const ratio=`CAST(json_extract(extras_json,'$.amount_ratio20') AS REAL)`;
+  const ordering=sort==='highest_gain'?`observed_high_pct DESC NULLS LAST,day DESC,code`:
+    sort==='lowest_return'?`observed_low_pct ASC NULLS LAST,day DESC,code`:
+    sort==='amount_surge'?`amount_ratio20_sort DESC NULLS LAST,day DESC,code`:
+    sort==='amount_decline'?`amount_ratio20_sort ASC NULLS LAST,day DESC,code`:'day DESC,code';
+  return withClient(env,async client=>{
+    const audit=await client.execute({sql:`SELECT trade_day,row_count,observed_stocks,signal_events
+      FROM blue_research_signal_audit_v1 WHERE trade_day BETWEEN ? AND ?
+      ORDER BY trade_day DESC LIMIT 371`,args:[start,end]});
+    if(audit.rows.length>370)throw Error('TURSO_RESEARCH_AUDIT_RANGE_LIMIT');
+    if(audit.rows.length){
+      const found=await client.execute({sql:`SELECT s.trade_day,COUNT(*) AS n
+        FROM blue_research_signals_v1 s JOIN blue_research_signal_audit_v1 a
+          ON a.trade_day=s.trade_day AND a.source_payload_sha256=s.source_payload_sha256
+        WHERE s.trade_day BETWEEN ? AND ?
+        GROUP BY s.trade_day ORDER BY s.trade_day DESC`,args:[start,end]});
+      const counts=new Map(found.rows.map(r=>[String(r.trade_day),Number(r.n)]));
+      if(audit.rows.some(r=>counts.get(String(r.trade_day))!==Number(r.row_count)))
+        throw Error('TURSO_RESEARCH_INCOMPLETE_AUDITED_DAY');
+    }
+    const daily_counts=audit.rows.map(r=>({day:String(r.trade_day),
+      observed_stocks:Number(r.observed_stocks),signal_events:Number(r.signal_events),
+      matched_stocks:Number(r.row_count)}));
+    const total=await client.execute({sql:`${base} SELECT COUNT(*) AS n FROM verified WHERE ${where}`,args});
+    const n=Number(total.rows[0]?.n||0);
+    const metrics=sort==='highest_gain'?`${high} AS observed_high_pct,`:
+      sort==='lowest_return'?`${low} AS observed_low_pct,`:
+      sort==='amount_surge'||sort==='amount_decline'?`${ratio} AS amount_ratio20_sort,`:'';
+    const result=await client.execute({sql:`${base} SELECT run_id,code,day,signal_names,
+      close_price,supply_distance_pct,extras_json,stats_json,record_json,${metrics}
+      row_sha256 FROM verified WHERE ${where} ORDER BY ${ordering} LIMIT ? OFFSET ?`,
+      args:[...args,limit,(page-1)*limit]});
+    const items=result.rows.map(r=>{
+      const record=JSON.parse(String(r.record_json)) as {trade_day:string;code:string;close_price:number;
+        extras:Record<string,unknown>;stats:{setups?:Array<any>};chart:{asof:string}};
+      if(record.trade_day!==r.day||record.code!==r.code||record.close_price!==Number(r.close_price)||
+        record.chart?.asof!==r.day)throw Error('TURSO_RESEARCH_ROW_CONFLICT');
+      const extras={...record.extras};
+      const setups=Array.isArray(record.stats?.setups)?record.stats.setups:[];
+      const best=setups.filter(s=>{
+        const h=s?.horizons?.['10'];return Number.isInteger(Number(h?.n))&&Number(h.n)>=floor&&
+          typeof h.up_pct==='number'&&h.up_pct>=0&&h.up_pct<=100;
+      }).sort((a,b)=>Number(b.horizons['10'].up_pct)-Number(a.horizons['10'].up_pct)||
+        Number(b.horizons['10'].median_return_pct||0)-Number(a.horizons['10'].median_return_pct||0)||
+        Number(b.horizons['10'].mean_return_pct||0)-Number(a.horizons['10'].mean_return_pct||0)||
+        Number(b.horizons['10'].n)-Number(a.horizons['10'].n))[0];
+      if(best){const h=best.horizons['10'];
+        extras.r159_pattern_up_10d=h.up_pct;extras.r159_pattern_n_10d=h.n;
+        extras.r159_pattern_label_10d=String(best.label||'').slice(0,150);
+        extras.r159_pattern_signal_days_10d_json=JSON.stringify([...new Set(
+          (Array.isArray(h.cases)?h.cases:[]).map((c:any)=>c?.signal_day)
+            .filter((d:unknown):d is string=>typeof d==='string'&&dayValid(d)&&d<=String(r.day)))]
+          .sort().slice(-12));
+      }
+      return {run_id:String(r.run_id),code:String(r.code),day:String(r.day),
+        close_price:Number(r.close_price),supply_distance_pct:r.supply_distance_pct==null?
+          null:Number(r.supply_distance_pct),name:extras.name||extras.Name||null,
+        signals:String(r.signal_names).split(',').filter(Boolean),extras,
+        ...(sort==='highest_gain'?{observed_high_pct:r.observed_high_pct==null?null:Number(r.observed_high_pct)}:{}),
+        ...(sort==='lowest_return'?{observed_low_pct:r.observed_low_pct==null?null:Number(r.observed_low_pct)}:{}),
+        ...(sort==='amount_surge'||sort==='amount_decline'?{amount_ratio20_sort:r.amount_ratio20_sort==null?null:Number(r.amount_ratio20_sort)}:{})};
+    });
+    return {storage:'TURSO',data_status:daily_counts.length?'AVAILABLE':'NOT_IMPORTED',
+      mode,start,end,q,sort,total:n,page,limit,items,daily_counts,
+      high_complete:false,
+      note:'Turso 감사 완료 연구 신호만 조회합니다. 이후 최고·최저가는 현재 저장된 후속 KRX 일봉의 부분 관측이며, 장중 시세가 아닙니다.'};
+  },factory);
+}
+
+/** Chart and backtest evidence belong to the exact archived research day.
+ * Never reconstruct a chart from later prices or read the D1 chart table.
+ */
+export async function tursoResearchChart(env:ResearchEnv,p:URLSearchParams,factory?:Factory){
+  const day=p.get('date')||'',code=(p.get('code')||'').trim().toUpperCase();
+  if(!dayValid(day)||!CODE.test(code))bad();
+  return withClient(env,async client=>{
+    const audit=await client.execute({sql:`SELECT a.row_count,COUNT(s.code) AS actual
+      FROM blue_research_signal_audit_v1 a LEFT JOIN blue_research_signals_v1 s
+        ON s.trade_day=a.trade_day AND s.source_payload_sha256=a.source_payload_sha256
+      WHERE a.trade_day=? GROUP BY a.trade_day,a.row_count`,args:[day]});
+    if(!audit.rows.length)return {status:'NOT_AVAILABLE',
+      message:'Turso에 해당 거래일의 검증된 연구 기록이 없습니다.'};
+    if(Number(audit.rows[0].row_count)!==Number(audit.rows[0].actual))
+      throw Error('TURSO_RESEARCH_INCOMPLETE_AUDITED_DAY');
+    const result=await client.execute({sql:`SELECT s.record_json,s.close_price
+      FROM blue_research_signals_v1 s JOIN blue_research_signal_audit_v1 a
+        ON a.trade_day=s.trade_day AND a.source_payload_sha256=s.source_payload_sha256
+      WHERE s.trade_day=? AND s.code=? LIMIT 1`,args:[day,code]});
+    if(!result.rows.length)return {status:'NOT_AVAILABLE',
+      message:'해당 날짜에 연구 신호가 등록된 종목이 아닙니다. 다른 날짜의 차트를 대체하지 않습니다.'};
+    const record=JSON.parse(String(result.rows[0].record_json)) as {
+      trade_day:string;code:string;close_price:number;chart?:{
+        asof:string;bars?:Array<{t:string;c:number}>};stats?:unknown};
+    const bars=record.chart?.bars;
+    if(record.trade_day!==day||record.code!==code||
+      record.close_price!==Number(result.rows[0].close_price)||
+      record.chart?.asof!==day||!Array.isArray(bars)||!bars.length||
+      bars[bars.length-1].t!==day||bars[bars.length-1].c!==record.close_price||
+      bars.some((b,i)=>!dayValid(b.t)||b.t>day||(i>0&&b.t<=bars[i-1].t)))
+      throw Error('TURSO_RESEARCH_CHART_CONFLICT');
+    return {status:'READY',chart:record.chart,stats:record.stats,
+      message:'Turso 감사 완료 연구 스냅샷의 기준일 차트입니다.'};
+  },factory);
+}
