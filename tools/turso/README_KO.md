@@ -1,5 +1,15 @@
 # Turso 연결 검사 (BLUE Signal Lab)
 
+## 2026-11-18 — 일봉 조회 복구와 D1 폴백
+
+2026-11-18 [EOD 범위 저장 #44310029226](https://github.com/ehdud6728-bit/BLUE-Signal-Lab/actions/runs/44310029226)의 **8거래일·21,296건** Turso 저장/재조회 검증이 성공했습니다. 앱 복구에는 아래 두 단계의 **분리된 실제 배포**가 필요합니다.
+
+1. [BLUE Turso EOD API Deploy (MANUAL, D1 FALLBACK)](https://github.com/ehdud6728-bit/BLUE-Signal-Lab/actions/workflows/blue_turso_api_eod_deploy.yml)에서 `mode=verify_only`로 먼저 실행합니다. 성공하면 `mode=deploy_api`와 `confirm_worker=blue-signal-lab-api-v2`를 입력해 API Worker에 Turso URL·토큰 Secrets 두 개를 설치하고 새로운 API 코드를 배포합니다. 값은 로그에 출력하지 않으며 D1 바인딩·테이블·수집기 설정을 수정하지 않습니다. Wrangler Secret 명령은 기존 Worker의 새 버전을 게시할 수 있습니다.
+2. [기존 웹 정적 안전 배포 Actions](https://github.com/ehdud6728-bit/BLUE-Signal-Lab/actions/workflows/blue_web_r15110_static_safe_deploy.yml)에서 기존 확인 절차를 거쳐 웹을 별도 배포합니다. API가 먼저 배포됐는지 확인하세요.
+
+조회는 `GET /api/eod/dates`와 `GET /api/eod/search?day=2026-11-18&q=삼성&page=1&limit=50`입니다. 인증되지 않은 비밀 URL/토큰을 브라우저에 보내지 않습니다. 감사 완료된 Turso 일봉만 조회하며, 112·224일선/골든크로스/과거 패턴 승률을 8거래일로 만들어내지 않습니다. Turso에 장애가 발생하면 PWA는 `/api/dates`와 기존 D1 신호 UI로 전환합니다. **D1 데이터는 Turso 전체 EOD와 범위가 다르므로, 폴백에서도 동일 데이터가 있다고 주장하지 않습니다.** D1까지 실패하면 양쪽 오류를 표시하고 자동 데이터 쓰기/변경은 하지 않습니다.
+
+
 이 문서는 Turso 연결 검사부터 제한된 병행 저장까지 안내합니다. `SELECT 1` 연결 검사 자체는 **기존 D1 DB와 운영 수집기에 영향을 주지 않습니다**. 별도 수동 Actions로 Turso 스키마가 생성됐으며, 복제는 기본 OFF 상태입니다.
 
 ## 1. Turso DB 생성
