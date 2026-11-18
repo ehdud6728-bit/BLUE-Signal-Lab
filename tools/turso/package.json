@@ -1,0 +1,13 @@
+{
+  "name": "blue-turso-connection-check",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Read-only Turso connection smoke test; does not touch D1",
+  "scripts": {
+    "check": "node check.mjs"
+  },
+  "dependencies": {
+    "@libsql/client": "0.18.0"
+  }
+}
