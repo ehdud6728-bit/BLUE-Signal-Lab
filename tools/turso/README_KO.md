@@ -113,3 +113,18 @@ Actions URL: https://github.com/ehdud6728-bit/BLUE-Signal-Lab/actions/workflows/
 4. `publish_to_d1=true`는 기존 D1 전체 일봉 운영 저장을 실행하는 **별도 옵션**으로, Turso 파일럿을 위한 조건이 아닙니다. 먼저 D1 사용량을 고려하고 별도로 결정합니다.
 
 이 수동 경로의 기본값은 `off`이므로 Cloudflare EOD Cron이 기존 스캔을 호출해도 Turso 쓰기가 자동으로 켜지지 않습니다. 현재 API·Collector·D1 저장 경로는 변경하지 않았습니다.
+
+## 9. 2026년 11월 9일~18일 전체 일봉을 Turso에 저장하기 (신규)
+
+이번 단계의 목표는 **데이터를 정확하게 확보하여 Turso에 누락 없이 저장**하는 것입니다. 아직 D1/Turso 전량 비교나 앱의 Turso 우선 조회를 실행하지 않습니다.
+
+[BLUE Turso Verified KRX EOD Range 수동 실행](https://github.com/ehdud6728-bit/BLUE-Signal-Lab/actions/workflows/blue_turso_verified_eod_range.yml)
+
+1. 먼저 `start_day=2026-11-09`, `end_day=2026-11-18`, `mode=dry_run`으로 실행합니다. 11월 14·15일은 주말이므로 **8개 평일의 실제 KRX 거래일**만 대상으로 합니다. 결과는 GitHub Actions 아티팩트(`manifest.json`, `daily.jsonl`)와 요약 로그에서 검토할 수 있습니다.
+2. KRX가 **매일 정확한 기준일의 양 시장 데이터**를 돌려줘야 합니다. 소스가 아직 준비되지 않은 날짜가 있거나 약 1,700종목 미만/중복/가격 오류가 있다면 전체 저장 작업을 중단합니다. 11월 16일 자료를 17·18일로 복사하지 않습니다. 이 경우 해당 일의 공급처 자료가 준비되었는지 확인한 후 재실행합니다.
+3. `dry_run`의 `BLUE_TURSO_EOD_RANGE_DRY_RUN verified_days=8 ... written=0`이 성공하면 **명시적으로 `mode=apply`를 선택**하여 실행합니다. 같은 검증 경로를 다시 거치며 이때만 Turso `blue_eod_daily_v1`과 일자별 `blue_eod_ingest_audit_v1`에 데이터를 씁니다. 8일×약 2,500종목으로 약 2만 건이 예상되지만 실제 숫자는 소스 검증 결과에 따릅니다.
+4. 각 날짜의 모든 행을 저장한 뒤 해당 날짜만 다시 읽어 **종목코드·시장·OHLCV·거래대금·출처를 모두 비교**하고 완료 기록을 남깁니다. 이미 있는 동일 행은 중복 추가하지 않습니다. 값이 서로 다르면 무단 수정 없이 작업을 실패시킵니다. 네트워크 중단 등으로 일부 일자만 저장된 경우 같은 날짜 범위를 재실행해 복구할 수 있습니다.
+
+기본값은 `dry_run`; 자동 스케줄, Cloudflare D1 SQL, 기존 Worker 배포, KIS 주문은 없습니다. **일봉 테이블은 기존 분 단위 실시간 시세/종목명 디렉터리 테이블과 별개**입니다. `apply`가 성공해도 기존 PWA는 아직 D1을 사용합니다.
+
+만약 11월 18일 자료만 미준비라면 `end_day=2026-11-17`로 **확실히 검증되는 구간부터 별도 실행**하고, 18일 자료가 준비된 후 `start_day=2026-11-18`, `end_day=2026-11-18`로 이어서 진행할 수 있습니다. 실제 미준비 여부는 Actions 로그로 확인해야 하며 미리 단정하지 않습니다.
