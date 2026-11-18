@@ -733,7 +733,14 @@ function App(){
           </div>
           <div className="r15125-result-tools" role="search" aria-label="전체 검색 결과 종목명 검색 및 정렬">
             <label className="result-quick-search"><Search size={16}/><span className="sr-only">전체 페이지에서 종목명 또는 코드 찾기</span>
-              <input type="search" value={localQuery} onChange={e=>setLocalQuery(e.target.value)}
+              <input type="search" value={localQuery} onChange={e=>{
+                const next=e.target.value;
+                setLocalQuery(next);
+                // Clearing the field also clears the applied server-side query.
+                // Otherwise later sorting/paging silently keeps the last stock.
+                if(!next.trim()&&(appliedNameQuery||localQuery.trim())&&total!==null)
+                  void search(1,false,gcFields,gcLogic,undefined,undefined,techFields,techLogic,{q:''});
+              }}
                 onKeyDown={e=>{if(e.key==='Enter'){e.preventDefault();void search(1,false,gcFields,gcLogic,undefined,undefined,techFields,techLogic,{q:localQuery});}}}
                 placeholder="선택한 날짜·기간의 전체 페이지에서 찾기" aria-label="전체 검색 결과에서 종목명 또는 코드 찾기"/>
             </label>
@@ -741,10 +748,16 @@ function App(){
               onClick={()=>{void search(1,false,gcFields,gcLogic,undefined,undefined,techFields,techLogic,{q:localQuery});}}>
               <Search size={15}/>{busy?'검색 중':'전체 찾기'}
             </button>
+            {(localQuery||appliedNameQuery)&&<button type="button" className="r15125-result-clear" disabled={busy}
+              onClick={()=>{setLocalQuery('');void search(1,false,gcFields,gcLogic,undefined,undefined,techFields,techLogic,{q:''});}}>
+              <X size={14}/>전체 보기
+            </button>}
             <label className="r15125-result-sort"><span>전체 검색 결과 정렬</span>
               <select value={resultSort} disabled={busy} onChange={e=>{
                 const next=e.target.value as ResultSort;setResultSort(next);
-                if(total!==null)void search(1,false,gcFields,gcLogic,undefined,undefined,techFields,techLogic,{sort:next});
+                // Sort what the user currently sees in the input, not a stale
+                // applied query from a previous search (e.g. 'LK삼양').
+                if(total!==null)void search(1,false,gcFields,gcLogic,undefined,undefined,techFields,techLogic,{q:localQuery,sort:next});
               }}>
                 <option value="recent">최신 발견일순</option>
                 <option value="highest_gain">발견가 대비 확인 최고 수익률순</option>
@@ -757,7 +770,7 @@ function App(){
           {(appliedNameQuery||localQuery!==appliedNameQuery||appliedSort!=='recent')&&
             <p className="r15125-result-scope" role="status">저장된 전체 검색 결과에서 필터·정렬한 {total===null?'미확인':total.toLocaleString()+'건'}을 페이지별로 표시합니다.
               {appliedNameQuery?` · 종목 검색: ${appliedNameQuery}`:''}
-              {localQuery!==appliedNameQuery?' · 입력한 종목명은 ‘전체 찾기’를 눌러 적용하세요.':''}
+              {localQuery!==appliedNameQuery?' · 입력한 종목명은 ‘전체 찾기’ 또는 정렬 변경으로 적용됩니다.':''}
             </p>}
           {(appliedSort==='highest_gain'||appliedSort==='lowest_return')&&
             <p className="r15125-result-scope">최고·최저 수익률은 발견일 이후 저장된 검증 일봉 중 확인된 구간만 사용합니다. 후속 일봉이 없는 종목은 정렬 뒤쪽에 표시되며, 전체 보유기간 최저·최고를 보장하지 않습니다.</p>}
