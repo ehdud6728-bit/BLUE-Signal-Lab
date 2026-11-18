@@ -35,11 +35,18 @@ jobs:
             console.error('::error::Missing Cloudflare Analytics token or account ID secret.');
             process.exit(1);
           }
-          const errorCodes = body => {
+          const diagnostics = body => {
             const errors = Array.isArray(body?.errors) ? body.errors : [];
             const codes = errors.map(item => item?.extensions?.code ?? item?.code)
               .map(String).filter(code => /^(?:[0-9]{3,6}|[A-Z_]{2,40})$/.test(code));
-            return codes.length ? codes.join(',') : 'none';
+            const types = [...new Set(errors.map(error => {
+              const message = String(error?.message || '').toLowerCase();
+              if (/cannot query|unknown argument|validation|syntax|variable.*type|field.*not found/.test(message)) return 'QUERY_SHAPE';
+              if (/permission|authorized|authorization|forbidden|authentication|access denied/.test(message)) return 'PERMISSION';
+              if (/limit|rate|quota/.test(message)) return 'RATE_OR_LIMIT';
+              return 'OTHER';
+            }))];
+            return 'error_count=' + errors.length + ' error_codes=' + (codes.join(',') || 'none') + ' error_types=' + (types.join(',') || 'none');
           };
           const request = async (url, options) => {
             try {
@@ -55,28 +62,41 @@ jobs:
             const headers = { Authorization: 'Bearer ' + token };
             const verified = await request('https://api.cloudflare.com/client/v4/user/tokens/verify', { headers });
             const active = verified.response.ok && verified.body?.success === true && verified.body?.result?.status === 'active';
-            console.log('TOKEN_VERIFY HTTP ' + verified.response.status + ' active=' + active + ' error_codes=' + errorCodes(verified.body));
+            console.log('TOKEN_VERIFY HTTP ' + verified.response.status + ' active=' + active + ' ' + diagnostics(verified.body));
             if (!active) {
-              console.error('::error::Cloudflare token is not verified as active.');
+              console.error('::error::Cloudflare API token is not active; no D1 SQL was executed.');
               process.exit(1);
             }
-            const query = 'query D1AnalyticsScope($accountTag: string!, $databaseId: string) { viewer { accounts(filter: { accountTag: $accountTag }) { d1AnalyticsAdaptiveGroups(limit: 1, filter: { databaseId: $databaseId }) { sum { readQueries } } } } }';
-            const scope = await request('https://api.cloudflare.com/client/v4/graphql', {
+            const graph = async (query, variables) => request('https://api.cloudflare.com/client/v4/graphql', {
               method: 'POST',
               headers: { ...headers, 'Content-Type': 'application/json' },
-              body: JSON.stringify({ query, variables: { accountTag: accountId, databaseId: '272318c7-afd2-419c-91cc-dc59475ef87a' } }),
+              body: JSON.stringify({ query, variables }),
             });
-            const accounts = scope.body?.data?.viewer?.accounts;
-            const hasErrors = Array.isArray(scope.body?.errors) && scope.body.errors.length > 0;
-            const analyticsAccessible = scope.response.ok && !hasErrors && Array.isArray(accounts) && accounts.length > 0;
-            console.log('GRAPHQL_ANALYTICS HTTP ' + scope.response.status + ' account_accessible=' + analyticsAccessible + ' error_codes=' + errorCodes(scope.body));
-            if (!analyticsAccessible) {
-              console.error('::error::Analytics API unavailable for configured account. Check Account Analytics Read and account scope.');
+            const accountQuery = 'query AccountScope($accountTag: string!) { viewer { accounts(filter: { accountTag: $accountTag }) { __typename } } }';
+            const account = await graph(accountQuery, { accountTag: accountId });
+            const accountRows = account.body?.data?.viewer?.accounts;
+            const accountCount = Array.isArray(accountRows) ? accountRows.length : 0;
+            const accountErrors = Array.isArray(account.body?.errors) && account.body.errors.length > 0;
+            console.log('ACCOUNT_SCOPE HTTP ' + account.response.status + ' matched_accounts=' + accountCount + ' ' + diagnostics(account.body));
+            if (!account.response.ok || accountErrors || accountCount === 0) {
+              console.error('::error::Configured Cloudflare account is not visible to this token, or the account-scope probe was rejected.');
               process.exit(1);
             }
-            console.log('Preflight passed: active token and Analytics scope, zero D1 SQL queries.');
+            const end = new Date().toISOString().slice(0, 10);
+            const start = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+            const analyticsQuery = 'query D1AnalyticsScope($accountTag: string!, $databaseId: string, $start: Date, $end: Date) { viewer { accounts(filter: { accountTag: $accountTag }) { d1AnalyticsAdaptiveGroups(limit: 1, filter: { databaseId: $databaseId, date_geq: $start, date_leq: $end }) { sum { readQueries } } } } }';
+            const analytics = await graph(analyticsQuery, { accountTag: accountId, databaseId: '272318c7-afd2-419c-91cc-dc59475ef87a', start, end });
+            const analyticsRows = analytics.body?.data?.viewer?.accounts;
+            const analyticsCount = Array.isArray(analyticsRows) ? analyticsRows.length : 0;
+            const analyticsErrors = Array.isArray(analytics.body?.errors) && analytics.body.errors.length > 0;
+            console.log('GRAPHQL_ANALYTICS HTTP ' + analytics.response.status + ' matched_accounts=' + analyticsCount + ' ' + diagnostics(analytics.body));
+            if (!analytics.response.ok || analyticsErrors || analyticsCount === 0) {
+              console.error('::error::D1 Analytics probe rejected. Inspect HTTP, error_types and error_count; do not change token yet.');
+              process.exit(1);
+            }
+            console.log('Preflight passed: active token, account scope and D1 Analytics accessible. 0 direct D1 SQL queries.');
           })().catch(() => {
-            console.error('::error::Unexpected Cloudflare Analytics preflight failure (no D1 SQL).');
+            console.error('::error::Unexpected Analytics preflight failure (no D1 SQL).');
             process.exit(1);
           });
           NODE
