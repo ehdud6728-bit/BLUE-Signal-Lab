@@ -154,7 +154,9 @@ export async function collectBasket(env,now=new Date(),deps={}){
     await setState(db,r,{...values,status,last_error:quoteFailed?'QUOTE_UNAVAILABLE':null,checked_at_utc:stamp,
       next_due_utc:iso(new Date(now.getTime()+nextDue))});
     success++;
-    if(!deps.daily&&!deps.quote)await delay(500);
+    // The scheduled shared quote cache is injectable but must not disable the
+    // original 500ms spacing between basket rows and historical KIS requests.
+    if(!deps.daily&&(!deps.quote||deps.preserveBasketPacing))await delay(500);
    }catch{
     await setState(db,r,{status:'PROVIDER_RETRY',last_error:'PROVIDER_OR_DATA_NOT_READY',checked_at_utc:stamp,
       next_due_utc:iso(new Date(now.getTime()+2*60000))});
