@@ -1,0 +1,54 @@
+name: BLUE Turso Mirror Schema Init (MANUAL)
+
+on:
+  workflow_dispatch:
+    inputs:
+      apply:
+        description: 'FALSE explains only. TRUE creates two mirror tables on TURSO, never on D1.'
+        type: boolean
+        required: true
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: blue-turso-schema-init
+  cancel-in-progress: false
+
+jobs:
+  schema:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Confirm target and safe default
+        env:
+          APPLY: ${{ inputs.apply }}
+        run: |
+          echo 'Target: Turso database specified in Actions Secrets.'
+          echo 'SQL: CREATE TABLE / INDEX IF NOT EXISTS only.'
+          echo 'Cloudflare D1 is never queried or modified.'
+          if [[ "$APPLY" != 'true' ]]; then echo 'DRY RUN: no database access.'; fi
+
+      - name: Checkout repository
+        if: inputs.apply
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        if: inputs.apply
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install Turso client
+        if: inputs.apply
+        working-directory: tools/turso
+        run: npm install --no-audit --no-fund --ignore-scripts --no-package-lock
+
+      - name: Initialize and verify Turso mirror schema
+        if: inputs.apply
+        working-directory: tools/turso
+        env:
+          TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
+          TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
+        run: node init-mirror-schema.mjs
