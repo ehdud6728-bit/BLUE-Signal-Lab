@@ -27,6 +27,8 @@ class ChunkedChartSqlTests(unittest.TestCase):
             stmts=[x+';' for x in sql.read_text(encoding='utf-8').split(';') if x.strip()]
             self.assertTrue(all(len(s.encode('utf-8'))<=mod.MAX_STATEMENT_BYTES for s in stmts if s.strip()!=';'))
             db=sqlite3.connect(':memory:');db.executescript(sql.read_text(encoding='utf-8'))
+            indexes={row[1] for row in db.execute("PRAGMA index_list('chart_snapshots')")}
+            self.assertIn('idx_chart_snapshots_code_day',indexes)
             chart,stats=db.execute('SELECT chart_json,stats_json FROM chart_snapshots').fetchone()
             self.assertEqual(json.loads(chart),item['chart'])
             self.assertEqual(json.loads(stats),item['stats'])

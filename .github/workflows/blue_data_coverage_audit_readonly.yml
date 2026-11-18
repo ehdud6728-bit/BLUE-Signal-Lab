@@ -186,3 +186,128 @@ jobs:
             process.exit(1);
           });
           NODE
+
+      - name: Daily account and database reads plus today's query types (GraphQL only)
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_ANALYTICS_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          node <<'NODE'
+          const fs = require('node:fs');
+          const token = process.env.CLOUDFLARE_API_TOKEN || '';
+          const accountTag = process.env.CLOUDFLARE_ACCOUNT_ID || '';
+          const databaseId = '272318c7-afd2-419c-91cc-dc59475ef87a';
+          if (!token || !accountTag) {
+            console.error('::error::Missing Analytics credentials; no D1 SQL executed.');
+            process.exit(1);
+          }
+          const now = new Date();
+          const utcMidnight = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+          const dates = Array.from({length: 7}, (_, i) =>
+            new Date(utcMidnight.getTime() - (6 - i) * 86400000).toISOString().slice(0, 10));
+          const fmt = value => Number.isFinite(Number(value)) ? Math.round(Number(value)).toLocaleString('en-US') : '-';
+          const requestGraphQL = async (query, variables) => {
+            const res = await fetch('https://api.cloudflare.com/client/v4/graphql', {
+              method: 'POST',
+              headers: {Authorization: 'Bearer ' + token, 'Content-Type': 'application/json'},
+              body: JSON.stringify({query, variables}),
+              signal: AbortSignal.timeout(20000),
+            });
+            const json = await res.json().catch(() => null);
+            if (!res.ok || !json?.data || (Array.isArray(json?.errors) && json.errors.length)) {
+              const count = Array.isArray(json?.errors) ? json.errors.length : 0;
+              throw Error('GRAPHQL HTTP=' + res.status + ' error_count=' + count);
+            }
+            return json.data;
+          };
+          const sumByDate = entries => {
+            const map = new Map();
+            for (const row of entries) {
+              const day = row?.dimensions?.date;
+              const reads = Number(row?.sum?.rowsRead);
+              if (typeof day === 'string' && Number.isFinite(reads)) {
+                map.set(day, (map.get(day) || 0) + reads);
+              }
+            }
+            return map;
+          };
+          const dailyQuery = [
+            'query D1DailyReads($accountTag: string!, $start: Date, $end: Date, $db: string) {',
+            ' viewer { accounts(filter: {accountTag: $accountTag}) {',
+            '  target: d1AnalyticsAdaptiveGroups(limit: 1000, filter: {date_geq: $start, date_leq: $end, databaseId: $db}, orderBy: [date_DESC]) {dimensions {date databaseId} sum {rowsRead}}',
+            '  account: d1AnalyticsAdaptiveGroups(limit: 1000, filter: {date_geq: $start, date_leq: $end}, orderBy: [date_DESC]) {dimensions {date databaseId} sum {rowsRead}}',
+            ' } } }',
+          ].join(' ');
+          (async () => {
+            const data = await requestGraphQL(dailyQuery, {
+              accountTag, start: dates[0], end: dates[6], db: databaseId,
+            });
+            const account = data?.viewer?.accounts?.[0];
+            if (!Array.isArray(account?.target) || !Array.isArray(account?.account)) {
+              throw Error('DAILY_ANALYTICS_SHAPE');
+            }
+            const dbReads = sumByDate(account.target);
+            const allReads = sumByDate(account.account);
+            const lines = [
+              '## 일별 D1 행 읽기 (UTC 날짜 / 계정 전체 및 대상 DB)',
+              '',
+              '- Cloudflare GraphQL Analytics 집계이며 UTC 00:00 = 한국 시간 오전 9시입니다.',
+              '- 오늘 행은 실행 시각까지의 부분 집계입니다. 데이터 반영 지연이 있을 수 있습니다.',
+              '- 아래 수치를 7일 TOP 20 쿼리 합계와 직접 비교하지 마세요.',
+              '- **운영 D1에 SQL을 한 건도 실행하지 않았습니다.**',
+              '',
+              '| 날짜 (UTC) | 계정 전체 읽은 행 | BLUE DB 읽은 행 |',
+              '|---|---:|---:|',
+            ];
+            for (const day of dates) {
+              lines.push('| ' + day + (day === dates[6] ? ' (오늘·진행중)' : '') +
+                ' | ' + fmt(allReads.get(day) || 0) + ' | ' + fmt(dbReads.get(day) || 0) + ' |');
+            }
+            const oldSix = dates.slice(0, -1);
+            const prevSixDb = oldSix.reduce((n, day) => n + (dbReads.get(day) || 0), 0);
+            const prevSixAll = oldSix.reduce((n, day) => n + (allReads.get(day) || 0), 0);
+            lines.push('', '- 이전 6일 BLUE DB 합계: **' + fmt(prevSixDb) + '행**');
+            lines.push('- 오늘 BLUE DB 누적: **' + fmt(dbReads.get(dates[6]) || 0) + '행** (부분 집계)');
+            lines.push('- 이전 6일 계정 합계: **' + fmt(prevSixAll) + '행**');
+            lines.push('- 오늘 계정 누적: **' + fmt(allReads.get(dates[6]) || 0) + '행** (부분 집계)', '');
+            fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, lines.join('\n'));
+
+            // Optional culprit analysis: Insights is sampled; it helps locate which SQL types spiked today.
+            const todayQuery = 'query D1Today($accountTag: string, $filter: ZoneWorkersRequestsFilter_InputObject) { viewer { accounts(filter: {accountTag: $accountTag}) { d1QueriesAdaptiveGroups(limit: 10, filter: $filter, orderBy: [sum_rowsRead_DESC]) { sum { rowsRead } count dimensions { query databaseId } } } } }';
+            try {
+              const daily = await requestGraphQL(todayQuery, {accountTag, filter: {
+                AND: [{datetimeHour_geq: utcMidnight.toISOString(), datetimeHour_leq: now.toISOString(), databaseId}],
+              }});
+              const groups = daily?.viewer?.accounts?.[0]?.d1QueriesAdaptiveGroups;
+              if (!Array.isArray(groups)) throw Error('TODAY_QUERY_SHAPE');
+              const safeTag = sql => {
+                const cleaned = String(sql || '').replace(/'(?:''|[^'])*'/g, '?').replace(/\b\d+(?:\.\d+)?\b/g, '?');
+                const op = cleaned.match(/\b(SELECT|INSERT|UPDATE|DELETE|REPLACE|WITH)\b/i)?.[1]?.toUpperCase() || 'SQL';
+                const table = cleaned.match(/\b(?:FROM|JOIN|INTO|UPDATE)\s+([A-Za-z_][\w.]*)/i)?.[1] || 'table unknown';
+                return op + ' / ' + table;
+              };
+              const todayLines = [
+                '## 오늘 가장 많은 행을 읽은 쿼리 유형 TOP 10 (UTC, 샘플링)',
+                '',
+                '| 순위 | SQL 유형 / 테이블 | 읽은 행 | 실행 횟수 |',
+                '|---:|---|---:|---:|',
+              ];
+              for (const [i, item] of groups.entries()) {
+                const tag = safeTag(item?.dimensions?.query).replace(/\|/g, '/').slice(0, 120);
+                todayLines.push('| ' + (i + 1) + ' | ' + tag + ' | ' +
+                  fmt(item?.sum?.rowsRead) + ' | ' + fmt(item?.count) + ' |');
+              }
+              if (!groups.length) todayLines.push('| - | 조회 결과 없음 | - | - |');
+              fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, todayLines.join('\n') + '\n');
+              console.log('D1 DAILY and TODAY INSIGHTS succeeded; direct_D1_SQL=0');
+            } catch (error) {
+              console.warn('::warning::Today query breakdown unavailable: ' + error.message + '. No D1 SQL executed.');
+              fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY,
+                '\n오늘 쿼리 TOP 10 조회 불가 (일별 사용량 분석은 정상 완료).\n');
+            }
+          })().catch(error => {
+            console.error('::error::D1 daily Analytics query failed: ' + error.message + '; direct_D1_SQL=0');
+            process.exit(1);
+          });
+          NODE

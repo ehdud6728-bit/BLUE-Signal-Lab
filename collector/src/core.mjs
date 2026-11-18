@@ -178,9 +178,14 @@ export async function ensureTables(db){
     await db.prepare(`CREATE TABLE IF NOT EXISTS blue_kis_first_seen_r154 (
       market TEXT NOT NULL, code TEXT NOT NULL, first_observed_at_utc TEXT NOT NULL,
       source TEXT NOT NULL, PRIMARY KEY(market,code))`).run();
-    await db.prepare(`INSERT OR IGNORE INTO blue_kis_first_seen_r154(market,code,first_observed_at_utc,source)
-      SELECT market,code,MIN(received_at_utc),'RETAINED_HISTORY'
-      FROM blue_kis_live_history_r141 GROUP BY market,code`).run();
+    // Historical backfill is a one-time migration. New tickers are inserted below per quote.
+    // Scanning the complete retained history on every five-minute Cron costs millions of row reads.
+    const populated = await db.prepare('SELECT 1 AS present FROM blue_kis_first_seen_r154 LIMIT 1').first();
+    if (!populated) {
+      await db.prepare(`INSERT OR IGNORE INTO blue_kis_first_seen_r154(market,code,first_observed_at_utc,source)
+        SELECT market,code,MIN(received_at_utc),'RETAINED_HISTORY'
+        FROM blue_kis_live_history_r141 GROUP BY market,code`).run();
+    }
   } catch { console.warn('BLUE_R154_FIRST_SEEN_INIT_UNAVAILABLE'); }
 }
 export async function takeLease(db,now){
@@ -204,8 +209,13 @@ async function storeReport(db,report){
   // No credentials, ciphertext, raw API bodies, or raw provider errors in reports.
   await db.prepare('INSERT INTO blue_kis_collector_runs_r142(id,started_at_utc,status,source_date,source_kind,markets,attempted,saved,rejected,reason) VALUES(?,?,?,?,?,?,?,?,?,?)')
     .bind(report.id,report.started_at_utc,report.status,report.source_date,report.source_kind,report.markets,report.attempted,report.saved,report.rejected,report.reason).run();
-  const cutoff=new Date(Date.parse(report.started_at_utc)-14*86400000).toISOString();
-  await db.prepare('DELETE FROM blue_kis_collector_runs_r142 WHERE started_at_utc < ?').bind(cutoff).run();
+  // Run retention cleanup once at the beginning of the UTC day (09:00 KST),
+  // not on every five-minute collection. A missed window is retried next day.
+  const startedAt = new Date(report.started_at_utc);
+  if (startedAt.getUTCHours() === 0 && startedAt.getUTCMinutes() < 5) {
+    const cutoff = new Date(startedAt.getTime() - 14 * 86400000).toISOString();
+    await db.prepare('DELETE FROM blue_kis_collector_runs_r142 WHERE started_at_utc < ?').bind(cutoff).run();
+  }
 }
 export async function collect(env, now=new Date(),deps={}){
   const active=String(env.COLLECTOR_ENABLED||'false').toLowerCase()==='true';

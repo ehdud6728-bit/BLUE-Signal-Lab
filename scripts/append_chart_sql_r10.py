@@ -10,6 +10,7 @@ import json
 import re
 from pathlib import Path
 
+# Reverse index supports the code=? AND day>? lookup used by chart/price comparisons.
 SCHEMA = '''CREATE TABLE IF NOT EXISTS chart_snapshots (
   run_id TEXT NOT NULL,
   code TEXT NOT NULL,
@@ -19,7 +20,8 @@ SCHEMA = '''CREATE TABLE IF NOT EXISTS chart_snapshots (
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (run_id,code,day)
 );
-CREATE INDEX IF NOT EXISTS idx_chart_snapshots_day_code ON chart_snapshots(day,code);'''
+CREATE INDEX IF NOT EXISTS idx_chart_snapshots_day_code ON chart_snapshots(day,code);
+CREATE INDEX IF NOT EXISTS idx_chart_snapshots_code_day ON chart_snapshots(code,day);'''
 
 # 12,000 Unicode code points can be up to 48KiB of UTF-8 even before quote
 # escaping (SQLite SQL-literal quotes double). On pathological all-quote data,

@@ -1,0 +1,57 @@
+name: BLUE D1 Chart Index Optimization (MANUAL)
+
+on:
+  workflow_dispatch:
+    inputs:
+      apply:
+        description: 'FALSE checks only. TRUE builds the code/day index on the production BLUE D1 database.'
+        required: true
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: blue-d1-chart-index-maintenance
+  cancel-in-progress: false
+
+jobs:
+  chart_index:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Explain safety and explicit opt-in
+        run: |
+          echo 'Target: blue-signal-lab-db / chart_snapshots(code,day)'
+          echo 'Only CREATE INDEX IF NOT EXISTS is permitted. Existing chart rows remain unchanged.'
+          echo 'Index creation reads the existing table and adds indexed writes; use after the daily UTC quota reset.'
+          if [ "${{ inputs.apply }}" != 'true' ]; then
+            echo 'DRY RUN ONLY: no Cloudflare database commands are executed.'
+          fi
+      - name: Checkout repository
+        if: inputs.apply
+        uses: actions/checkout@v4
+      - name: Set up Node.js
+        if: inputs.apply
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Build one chart lookup index (no data-row modification)
+        if: inputs.apply
+        shell: bash
+        working-directory: worker
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          if [[ -z "${CLOUDFLARE_API_TOKEN:-}" || -z "${CLOUDFLARE_ACCOUNT_ID:-}" ]]; then
+            echo "::error::Production Cloudflare D1 credentials are not configured."
+            exit 1
+          fi
+          npm install --no-audit --no-fund --legacy-peer-deps
+          npx wrangler d1 execute blue-signal-lab-db --remote \
+            --command="CREATE INDEX IF NOT EXISTS idx_chart_snapshots_code_day ON chart_snapshots(code,day);" \
+            --yes
+          echo 'BLUE_CHART_CODE_DAY_INDEX_APPLIED'
