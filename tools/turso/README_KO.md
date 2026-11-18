@@ -1,6 +1,6 @@
 # Turso 연결 검사 (BLUE Signal Lab)
 
-이 테스트는 **기존 D1 DB와 운영 수집기에 영향을 주지 않습니다**. Turso 데이터베이스에 `SELECT 1`만 실행합니다. 아직 시세 복제, 스키마 생성, 데이터 이관 기능은 없습니다.
+이 문서는 Turso 연결 검사부터 제한된 병행 저장까지 안내합니다. `SELECT 1` 연결 검사 자체는 **기존 D1 DB와 운영 수집기에 영향을 주지 않습니다**. 별도 수동 Actions로 Turso 스키마가 생성됐으며, 복제는 기본 OFF 상태입니다.
 
 ## 1. Turso DB 생성
 
@@ -15,7 +15,7 @@
 - `TURSO_DATABASE_URL`: Turso DB URL (공개 문서/로그에는 출력하지 않음)
 - `TURSO_AUTH_TOKEN`: Turso DB 접근 토큰 (**절대 채팅이나 GitHub 소스에 붙여넣지 않기**)
 
-이 값은 GitHub Actions 수동 연결 검사용입니다. 아직 Cloudflare Worker에 Turso 비밀 값을 넣을 필요는 없습니다.
+연결 검사와 Turso-only 관리/상태 확인에 사용합니다. 별도로 Collector Worker에도 동일한 Turso Secrets가 설치됐는지는 5절 실행 기록에서 확인합니다.
 
 ## 3. 연결 검사 실행
 
@@ -44,7 +44,7 @@ Actions URL: https://github.com/ehdud6728-bit/BLUE-Signal-Lab/actions/workflows/
 
 수집기 `collector/src/turso-mirror.mjs`는 D1에 **성공적으로 저장한 시세 묶음만** Turso로 보내는 테스트용 코드입니다. 같은 시각의 중복 저장과 더 오래된 최신가의 덮어쓰기를 SQL 키/조건으로 방지합니다.
 
-**안전장치:** `collector/wrangler.jsonc`의 `TURSO_MIRROR_ENABLED`는 기본 `false`입니다. 코드를 병합하거나 수집기를 다시 배포하는 것만으로 Turso 복제가 켜지지 않습니다. 실제 활성화를 하려면 Turso Worker secrets를 넣고 별도 검증/승인 후 해당 플래그를 변경해야 합니다.
+**안전장치:** `collector/wrangler.jsonc`의 `TURSO_MIRROR_ENABLED`는 기본 `false`입니다. 코드를 병합하거나 수집기를 다시 배포하는 것만으로 Turso 복제가 켜지지 않습니다. 수동·시간제한 파일럿 모드는 6절을 참고하세요. 제한 없는 전체 복제는 별도 승인 없이는 켜지 않습니다.
 
 **현재 한계:** 이 단계는 `collector/`의 **5분 전체 수집 시세만** best-effort로 복제합니다. Turso 장애 중 발생한 모든 과거 행을 자동으로 재전송하는 큐/재처리 기능은 없습니다. 따라서 장기 보관의 완전성을 보장하지 않으며 운영 읽기 전환은 아직 금지합니다. 다음 단계에서 복구·재처리·일치성 검증을 우선 구현해야 합니다.
 
@@ -63,3 +63,29 @@ Actions URL: https://github.com/ehdud6728-bit/BLUE-Signal-Lab/actions/workflows/
 - Turso의 **한국 날짜 기준 오늘 자료만** 읽어 최신 스냅샷 건수/히스토리 건수/마지막 수신 시각을 출력합니다.
 - Cloudflare D1 조회가 전혀 없으므로 D1 무료 읽기 한도를 사용하지 않습니다.
 - 이 상태 검사는 Turso가 *얼마나 들어왔는지* 확인할 뿐, D1과의 완전한 일치나 과거 누락이 없음을 보장하지 않습니다.
+
+## 6. 수동 15분/30분 Turso 파일럿 (최대 2종목/수집 회차)
+
+### 검증된 선행 결과
+
+- [Cloudflare Turso Worker Secrets 설치 #44279139920](https://github.com/ehdud6728-bit/BLUE-Signal-Lab/actions/runs/44279139920) 성공.
+- [Turso Mirror Status #44279543275](https://github.com/ehdud6728-bit/BLUE-Signal-Lab/actions/runs/44279543275)에서 0행 확인(정상: 아직 복제 안 함).
+- [Collector 운영 배포 #44279762372](https://github.com/ehdud6728-bit/BLUE-Signal-Lab/actions/runs/44279762372) 성공. 이때는 시간제한 파일럿 코드가 포함되기 전이고 기본 복제 OFF.
+
+### 파일럿 시작 순서 (운영 데이터 변경이므로 확인 필요)
+
+1. 시간제한 파일럿 코드 PR을 `main`에 병합합니다.
+2. [BLUE R1.4.2 Collector Deploy](https://github.com/ehdud6728-bit/BLUE-Signal-Lab/actions/workflows/blue_r142_collector_deploy.yml)에서 **새 코드가 포함된 `main`**을 선택하고 `deploy=true`로 실제 Worker를 재배포합니다. 이때도 일반 복제 플래그는 `false`입니다.
+3. 수집기 실행이 가능한 **한국 주식시장 장중**에 [BLUE Turso 2-Quote Pilot (MANUAL)](https://github.com/ehdud6728-bit/BLUE-Signal-Lab/actions/workflows/blue_turso_mirror_pilot.yml)을 엽니다.
+4. 우선 `mode=dry_run`을 실행합니다(Worker/DB 변경 없음). 실제 시작할 때만 `mode=start_15m` 또는 `start_30m`을 선택하고 `confirm_worker=blue-market-collector`를 입력합니다.
+5. 이 Actions는 `TURSO_MIRROR_PILOT_UNTIL_UTC`라는 **Cloudflare Worker Secret 하나의 종료 시각만** 업데이트합니다. 해당 명령은 Worker 새 버전을 게시할 수 있습니다. `TURSO_MIRROR_ENABLED=false`는 유지됩니다.
+6. 파일럿 기간에 5분 전체 수집 작업이 완료될 때마다, D1에 저장한 시세 묶음에서 **최대 2건**만 Turso 최신/이력 테이블에 기록합니다. 파일럿에 쓰는 Turso 요청은 D1 성공 뒤 독립적으로 처리되며 실패해도 D1 결과를 취소하지 않습니다.
+7. 종료 시각(UTC)이 지나면 자동으로 복제하지 않습니다. 즉시 중단이 필요하면 같은 수동 Actions에서 `mode=stop`, `confirm_worker=blue-market-collector`을 실행합니다.
+8. [BLUE Turso Mirror Status (READ ONLY)](https://github.com/ehdud6728-bit/BLUE-Signal-Lab/actions/workflows/blue_turso_mirror_status.yml)로 당일 Turso 저장 건수/마지막 기록 시각을 확인합니다. **D1 SQL을 실행하지 않습니다.**
+
+### 주의
+
+- **수동 파일럿 액션이 성공했다고 해서 실제 시세가 저장됐다는 뜻은 아닙니다.** 수집기가 장중 실제 시세를 D1에 성공적으로 저장해야 Turso 기록이 발생합니다.
+- 시간제한이 끝나도 이미 저장된 Turso 시세는 자동 삭제하지 않습니다. 15분/30분은 **추가 쓰기 허용 시간**입니다.
+- 마지막 수집 회차가 파일럿 종료 전에 시작돼도 Turso 비동기 단계에서는 종료 시각을 한 번 더 검사합니다.
+- 리플레이 큐가 없으므로 Turso 오류 시 과거 누락 데이터는 자동 복구되지 않습니다. Turso는 아직 완전한 운영 백업도, 애플리케이션 읽기 원본도 아닙니다.

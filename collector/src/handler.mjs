@@ -13,12 +13,12 @@ export default {
       const now=new Date(),minute=now.getUTCMinutes();
       const shared=createSharedQuoteFetcher(getKisQuote);
       const deps={quote:shared.quote,preserveBasketPacing:true};
-      if(tursoMirrorEnabled(env)){
+      if(tursoMirrorEnabled(env,now)){
         deps.afterD1Persist=(quotes)=>{
           // Independent Worker lifetime. Never hold the D1 collector lock while
           // contacting Turso, and never allow its failure to fail a D1 run.
           ctx.waitUntil(mirrorQuotesToTurso(env,quotes)
-            .then(result=>console.log(`BLUE_TURSO_MIRROR status=${result.status} saved=${result.saved}`))
+            .then(result=>console.log(`BLUE_TURSO_MIRROR status=${result.status} mode=${result.mode||'OFF'} saved=${result.saved}`))
             .catch(()=>console.warn('BLUE_TURSO_MIRROR_WRITE_FAILED')));
         };
       }

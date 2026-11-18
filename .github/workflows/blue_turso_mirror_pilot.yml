@@ -1,0 +1,103 @@
+name: BLUE Turso 2-Quote Pilot (MANUAL)
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: 'Dry run is default. Start a 15/30-minute pilot or stop it immediately.'
+        type: choice
+        required: true
+        default: dry_run
+        options:
+          - dry_run
+          - start_15m
+          - start_30m
+          - stop
+      confirm_worker:
+        description: 'To start or stop, type exactly blue-market-collector.'
+        type: string
+        required: false
+        default: ''
+
+permissions:
+  contents: read
+
+concurrency:
+  group: blue-turso-timeboxed-pilot
+  cancel-in-progress: false
+
+jobs:
+  control:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Explain scope
+        shell: bash
+        env:
+          PILOT_MODE: ${{ inputs.mode }}
+        run: |
+          echo 'Target Worker: blue-market-collector only.'
+          echo 'Turso pilot: at most TWO 5-minute collector quotes per run.'
+          echo 'D1 remains primary. No D1 SQL, API switch, or backfill.'
+          echo 'The production full-mirror flag remains false.'
+          echo 'A Worker secret change may publish a new Worker version.'
+          if [[ "$PILOT_MODE" == 'dry_run' ]]; then
+            echo 'DRY RUN: no Cloudflare access, no mutation.'
+          fi
+
+      - name: Checkout repository
+        if: inputs.mode != 'dry_run'
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        if: inputs.mode != 'dry_run'
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install Wrangler
+        if: inputs.mode != 'dry_run'
+        working-directory: collector
+        run: npm install --no-audit --no-fund --no-package-lock
+
+      - name: Start or stop the temporary pilot
+        if: inputs.mode != 'dry_run'
+        working-directory: collector
+        shell: bash
+        env:
+          PILOT_MODE: ${{ inputs.mode }}
+          CONFIRM_WORKER: ${{ inputs.confirm_worker }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_WORKER_DEPLOY_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          if [[ "$CONFIRM_WORKER" != 'blue-market-collector' ]]; then
+            echo 'ERROR: confirm_worker mismatch.'; exit 1
+          fi
+          if [[ -z "${CLOUDFLARE_API_TOKEN:-}" || -z "${CLOUDFLARE_ACCOUNT_ID:-}" ]]; then
+            echo 'ERROR: Cloudflare GitHub Actions Secrets are not configured.'; exit 1
+          fi
+          if ! grep -Eq '"TURSO_MIRROR_ENABLED"[[:space:]]*:[[:space:]]*"false"' wrangler.jsonc; then
+            echo 'ERROR: Production full mirror must stay OFF.'; exit 1
+          fi
+          if ! grep -q 'TURSO_MIRROR_PILOT_UNTIL_UTC' src/turso-mirror.mjs; then
+            echo 'ERROR: Pilot code not found in checked-out repository.'; exit 1
+          fi
+          case "$PILOT_MODE" in
+            start_15m) MINUTES=15 ;;
+            start_30m) MINUTES=30 ;;
+            stop) MINUTES=0 ;;
+            *) echo 'ERROR: unsupported mode'; exit 1 ;;
+          esac
+          if (( MINUTES == 0 )); then
+            DEADLINE='2000-01-01T00:00:00.000Z'
+          else
+            DEADLINE="$(PILOT_MINUTES="$MINUTES" node -e 'process.stdout.write(new Date(Date.now()+Number(process.env.PILOT_MINUTES)*60*1000).toISOString())')"
+          fi
+          printf '%s' "$DEADLINE" | npx wrangler secret put TURSO_MIRROR_PILOT_UNTIL_UTC --name blue-market-collector
+          if (( MINUTES == 0 )); then
+            echo 'BLUE_TURSO_PILOT_STOPPED: The pilot expiry has been set to the past.'
+          else
+            echo "BLUE_TURSO_PILOT_STARTED: limit=2_quotes_per_full_run expires_utc=$DEADLINE"
+          fi
+          echo 'No D1 SQL executed. Production full-mirror flag remains false.'

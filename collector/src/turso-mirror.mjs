@@ -1,9 +1,21 @@
 import {createClient} from '@libsql/client/web';
 
-// Phase 1 of a Turso mirror: only the 5-minute full collector's already
-// validated quotes are mirrored. No D1 SELECT, API read switching, or backfill.
-export function tursoMirrorEnabled(env) {
-  return String(env?.TURSO_MIRROR_ENABLED || 'false').toLowerCase() === 'true';
+// Only quotes that were already persisted in D1 are mirrored. The time-boxed
+// pilot is separately opt-in, expires by itself, and never enables full mirror.
+// No D1 SELECT, API read switching, or backfill.
+const PILOT_MAX_DURATION_MS=30*60*1000;
+const PILOT_MAX_QUOTES_PER_RUN=2;
+
+export function tursoMirrorMode(env,now=new Date()) {
+  if (String(env?.TURSO_MIRROR_ENABLED || 'false').toLowerCase() === 'true') return 'FULL';
+  const deadline=String(env?.TURSO_MIRROR_PILOT_UNTIL_UTC || '');
+  if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(deadline)) return 'OFF';
+  const remaining=Date.parse(deadline)-now.getTime();
+  return remaining > 0 && remaining <= PILOT_MAX_DURATION_MS ? 'PILOT' : 'OFF';
+}
+
+export function tursoMirrorEnabled(env,now=new Date()) {
+  return tursoMirrorMode(env,now)!=='OFF';
 }
 
 export function buildTursoMirrorStatements(quotes) {
@@ -41,18 +53,20 @@ export function buildTursoMirrorStatements(quotes) {
   return statements;
 }
 
-export async function mirrorQuotesToTurso(env,quotes,{createClientFn=createClient}={}) {
-  if (!tursoMirrorEnabled(env)) return {status:'DISABLED',saved:0};
+export async function mirrorQuotesToTurso(env,quotes,{createClientFn=createClient,now=new Date()}={}) {
+  const mode=tursoMirrorMode(env,now);
+  if (mode==='OFF') return {status:'DISABLED',saved:0};
   const url=env.TURSO_DATABASE_URL?.trim();
   const authToken=env.TURSO_AUTH_TOKEN?.trim();
   if (!url || !authToken) return {status:'MISSING_SECRETS',saved:0};
   if (!url.startsWith('libsql://') && !url.startsWith('https://')) return {status:'BAD_URL',saved:0};
-  const statements=buildTursoMirrorStatements(quotes);
+  const selected=mode==='PILOT' ? quotes.slice(0,PILOT_MAX_QUOTES_PER_RUN) : quotes;
+  const statements=buildTursoMirrorStatements(selected);
   const client=createClientFn({url,authToken});
   try {
     // One transaction: never save a latest quote without its matching history.
     await client.batch(statements,'write');
-    return {status:'OK',saved:quotes.length};
+    return {status:'OK',saved:selected.length,mode};
   } finally {
     client.close();
   }
