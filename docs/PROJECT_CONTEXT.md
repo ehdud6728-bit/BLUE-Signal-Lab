@@ -28,16 +28,16 @@
 ## DB 방향 — 확정된 사용자 결정
 
 1. D1을 당장 버리지 않고 **Turso를 병행 연결**합니다.
-2. 먼저 비파괴적인 연결 검사만 수행합니다. Turso 새 DB를 생성하거나 비밀 값을 저장소 코드에 넣지 않습니다.
-3. 성공하면 스키마 호환성 → 일부 데이터 복제 → 건수·시각·값 일치 검증 → 제한된 읽기 전환을 단계적으로 검토합니다.
+2. 2026-11-18에 Turso **libSQL** DB에 대한 비파괴 연결 검사가 성공했습니다([Actions #44276186275](https://github.com/ehdud6728-bit/BLUE-Signal-Lab/actions/runs/44276186275)). GitHub Actions Secrets는 설정됐지만 Cloudflare Worker의 Turso 인증/복제 활성화 여부는 별도입니다.
+3. 다음은 Turso에만 테스트 테이블을 생성 → 5분 전체 수집 결과를 선택적으로 best-effort 복제 → 복구·재처리·건수/시각/값 일치 검증 → 제한된 읽기 전환 순서입니다. **복구 기능 검증 전 Turso 데이터를 완전한 보관본으로 취급하지 않습니다.**
 4. 장기 원시 데이터/대용량 아카이브는 Google 등 별도 스토리지도 검토 중이나, **선정·배포 완료 상태가 아닙니다**. Cloudflare R2를 무료라고 가정하지 않습니다.
 5. 주요 이력은 `docs/WORK_LOG.md`와 GitHub PR/Actions에 보존하여 새 채팅에서도 이어갑니다.
 
 ## 바로 다음 작업
 
-1. `BLUE Turso Connection Smoke Test` PR을 병합하고 Turso Free 계정의 **libSQL** DB를 생성합니다.
-2. GitHub Actions Secrets에 `TURSO_DATABASE_URL`, `TURSO_AUTH_TOKEN`을 등록한 뒤 수동 테스트를 실행하고 성공/실패를 기록합니다.
-3. 성공 시 **D1 운영 쓰기 작업을 건드리지 않는** 선택적 동기화/일치 검증 설계를 진행합니다. 식별자·업데이트 시각·중복 처리 정책을 먼저 결정합니다.
+1. 연결 검사는 **성공**함. 병행 저장 파일럿 PR을 검토하고 병합하더라도 `TURSO_MIRROR_ENABLED=false`를 유지합니다.
+2. `BLUE Turso Mirror Schema Init (MANUAL)` Actions에서 `apply=true`를 수동 선택하여 **Turso에만** 시세 최신/히스토리 테이블 생성 후 결과를 확인합니다.
+3. Turso 테이블 생성 성공 후 수집기 코드/Worker secrets/활성화 테스트 및 실패 기록을 확인하고, D1 대비 데이터 건수·시각·가격을 **소량 검증**합니다. 장기 누락을 막을 별도 재처리 정책을 구현하기 전에는 운영 데이터의 주 저장소로 전환하지 않습니다.
 4. D1 읽기 행 사용량을 UTC 기준 매일 비교하고 쿼리/인덱스 최적화 전후 차이를 관찰합니다.
 
 ## 참고
