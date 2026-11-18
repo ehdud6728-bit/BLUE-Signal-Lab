@@ -154,16 +154,17 @@ test('collector outside market produces no database writes',async()=>{
   assert.equal(state.status,'OUTSIDE_MARKET_WINDOW');assert.equal(db.calls.length,0);
 });
 
-test('historical first-seen backfill is not repeated in a populated database',async()=>{
+test('collector never performs full-history first-seen backfill, even on an empty database',async()=>{
   const fresh=fakeDb();
   await ensureTables(fresh);
   await ensureTables(fresh);
-  assert.equal(fresh.calls.filter(x=>x.type==='run'&&x.sql.includes("FROM blue_kis_live_history_r141 GROUP BY")).length,1);
-
+  assert.equal(fresh.calls.filter(x=>x.sql?.includes('FROM blue_kis_live_history_r141')).length,0);
+  assert.equal(fresh.calls.filter(x=>x.sql?.includes('FROM blue_kis_first_seen_r154 LIMIT 1')).length,0);
+  assert.equal(fresh.calls.filter(x=>x.sql?.includes('CREATE TABLE IF NOT EXISTS blue_kis_first_seen_r154')).length,2);
   const populated=fakeDb({firstSeenRows:true});
   await ensureTables(populated);
-  assert.equal(populated.calls.filter(x=>x.type==='run'&&x.sql.includes("FROM blue_kis_live_history_r141 GROUP BY")).length,0);
-  assert.equal(populated.calls.filter(x=>x.type==='first'&&x.sql.includes('FROM blue_kis_first_seen_r154')).length,1);
+  assert.equal(populated.calls.filter(x=>x.sql?.includes('FROM blue_kis_live_history_r141')).length,0);
+  assert.equal(populated.calls.filter(x=>x.sql?.includes('FROM blue_kis_first_seen_r154')).length,0);
 });
 
 test('collector run retention pruning is daily, not every collector call',async()=>{
@@ -194,6 +195,9 @@ test('collector reuses cache, persists quote, and logs receipt while leaving tok
   const report=await collect({DB:db,COLLECTOR_ENABLED:'true',KIS_APP_KEY:'TEST_APP_KEY_NOT_REAL',KIS_APP_SECRET:'TEST_APP_SECRET_NOT_REAL'},at(8,5),{quote:async()=>quote});
   assert.equal(report.status,'OK');assert.equal(report.attempted,1);assert.equal(report.saved,1);
   assert.ok(db.calls.some(x=>x.type==='run'&&x.sql.includes('INSERT INTO blue_kis_live_quotes_r141')));
+  assert.ok(db.calls.some(x=>x.type==='run'&&x.sql.includes('INSERT OR IGNORE INTO blue_kis_first_seen_r154')
+    && x.sql.includes('VALUES(?,?,?')));
+  assert.ok(!db.calls.some(x=>x.sql?.includes('FROM blue_kis_live_history_r141 GROUP BY')));
   assert.ok(db.calls.some(x=>x.type==='run'&&x.sql.includes('INSERT INTO blue_kis_collector_runs_r142')));
 });
 

@@ -173,19 +173,15 @@ export async function ensureTables(db){
     db.prepare('CREATE TABLE IF NOT EXISTS blue_kis_collector_runs_r142 (id TEXT PRIMARY KEY,started_at_utc TEXT NOT NULL,status TEXT NOT NULL,source_date TEXT,source_kind TEXT,markets TEXT,attempted INTEGER NOT NULL,saved INTEGER NOT NULL,rejected INTEGER NOT NULL,reason TEXT)')
   ]);
   await db.prepare('INSERT OR IGNORE INTO blue_kis_collector_lock_r142(id,lease_until_ms) VALUES(1,0)').run();
-  // R154_CLARITY: preserve first *observed* KIS collection; old 20d retained history is a lower-bound only.
+  // R154_CLARITY: store the first genuinely observed KIS quote per symbol.
+  // Never backfill from the full live-history table inside a scheduled collector:
+  // if the table stays empty (or a backfill fails), each retry scans all history
+  // and can exhaust the D1 Free plan's daily rows-read allowance.
+  // Historical backfills, if needed, must be an explicitly run one-time migration.
   try {
     await db.prepare(`CREATE TABLE IF NOT EXISTS blue_kis_first_seen_r154 (
       market TEXT NOT NULL, code TEXT NOT NULL, first_observed_at_utc TEXT NOT NULL,
       source TEXT NOT NULL, PRIMARY KEY(market,code))`).run();
-    // Historical backfill is a one-time migration. New tickers are inserted below per quote.
-    // Scanning the complete retained history on every five-minute Cron costs millions of row reads.
-    const populated = await db.prepare('SELECT 1 AS present FROM blue_kis_first_seen_r154 LIMIT 1').first();
-    if (!populated) {
-      await db.prepare(`INSERT OR IGNORE INTO blue_kis_first_seen_r154(market,code,first_observed_at_utc,source)
-        SELECT market,code,MIN(received_at_utc),'RETAINED_HISTORY'
-        FROM blue_kis_live_history_r141 GROUP BY market,code`).run();
-    }
   } catch { console.warn('BLUE_R154_FIRST_SEEN_INIT_UNAVAILABLE'); }
 }
 export async function takeLease(db,now){
