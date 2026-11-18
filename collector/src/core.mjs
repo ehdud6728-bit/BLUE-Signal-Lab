@@ -255,6 +255,13 @@ export async function collect(env, now=new Date(),deps={}){
     // Validate the entire group before beginning any DB writes.
     const keys=new Set();
     for(const x of quotes){const k=x.market+':'+x.code;if(keys.has(k))throw Error('DUPLICATE_KEY');keys.add(k);}
+    // The separately gated Turso writer can preserve verified KIS observations
+    // even when D1 subsequently rejects a write (e.g. daily quota exhausted).
+    // Scheduling failures must never invalidate a genuine KIS observation.
+    if(typeof deps.afterValidatedQuotes==='function'){
+      try { deps.afterValidatedQuotes(quotes); }
+      catch { console.warn('BLUE_TURSO_VERIFIED_QUEUE_FAILED'); }
+    }
     for(const stmt of batchStatements(db,quotes))await stmt.run();
     // Tracking provenance is optional. Failure cannot interrupt the original quote pipeline.
     try {

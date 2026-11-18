@@ -219,6 +219,29 @@ test('Turso mirror is notified only after successful D1 persistence; callback fa
   assert.equal(report.saved,1);
 });
 
+test('verified KIS quotes are queued before D1 write, even when its quota/write fails',async()=>{
+  const encoded='AAECAwQFBgcICQoLHoySzGOkixdwKEhHed2XN1mNTkhM40RLJU6sVjUQNBq2sf1Ot0WpkLk=';
+  const db=fakeDb({snapshots:[seed()],tokenRow:{ciphertext:encoded,expires_at_utc:'2026-11-11T23:59:00Z'}});
+  const original=db.prepare;
+  db.prepare=(sql)=>{
+    const stmt=original(sql);
+    if(sql.includes('INSERT INTO blue_kis_live_quotes_r141'))stmt.run=async()=>{throw Error('D1_DAILY_QUOTA');};
+    return stmt;
+  };
+  let queued=0;
+  const report=await collect({DB:db,COLLECTOR_ENABLED:'true',KIS_APP_KEY:'TEST_APP_KEY_NOT_REAL',
+    KIS_APP_SECRET:'TEST_APP_SECRET_NOT_REAL'},at(8,5),{
+    quote:async()=>quote,
+    afterValidatedQuotes:(quotes)=>{
+      queued+=quotes.length;
+      assert.equal(quotes[0].source,'KIS_REST_INQUIRE_PRICE');
+      assert.equal(db.calls.some(x=>x.type==='run'&&x.sql.includes('INSERT INTO blue_kis_live_quotes_r141')),false);
+    }
+  });
+  assert.equal(report.status,'COLLECTOR_ERROR');
+  assert.equal(queued,1);
+});
+
 test('the collector has no public manual trigger and Cron handler exists',async()=>{
   const {default:handler}=await import('../src/handler.mjs');
   const r=await handler.fetch(new Request('https://collector.example/run',{method:'POST'}),{COLLECTOR_ENABLED:'true'});

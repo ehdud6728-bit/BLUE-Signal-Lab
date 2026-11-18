@@ -109,8 +109,13 @@ export async function collectBasket(env,now=new Date(),deps={}){
      if(!quotesByCode.has(r.code)){
       try{
        const raw=await (deps.quote||getKisQuote)(env,token,market,r.code);
-       quotesByCode.set(r.code,parseQuote({code:r.code,name:'',eod_close:r.baseline_close,
-         eod_asof:base,eod_signals:'',origin:'BASKET_WATCH'},market,phase,raw,now,today));
+       const verified=parseQuote({code:r.code,name:'',eod_close:r.baseline_close,
+         eod_asof:base,eod_signals:'',origin:'BASKET_WATCH'},market,phase,raw,now,today);
+       quotesByCode.set(r.code,verified);
+       if(typeof deps.afterValidatedQuotes==='function'){
+        try{deps.afterValidatedQuotes([verified]);}
+        catch{console.warn('BLUE_TURSO_BASKET_QUEUE_FAILED');}
+       }
       }catch{quotesByCode.set(r.code,null);}
      }
      const quote=quotesByCode.get(r.code);

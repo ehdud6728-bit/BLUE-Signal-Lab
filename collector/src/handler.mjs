@@ -13,21 +13,29 @@ export default {
       const now=new Date(),minute=now.getUTCMinutes();
       const shared=createSharedQuoteFetcher(getKisQuote);
       const deps={quote:shared.quote,preserveBasketPacing:true};
-      if(tursoMirrorEnabled(env,now)){
-        deps.afterD1Persist=(quotes)=>{
-          // Independent Worker lifetime. Never hold the D1 collector lock while
-          // contacting Turso, and never allow its failure to fail a D1 run.
-          ctx.waitUntil(mirrorQuotesToTurso(env,quotes)
-            .then(result=>console.log(`BLUE_TURSO_MIRROR status=${result.status} mode=${result.mode||'OFF'} saved=${result.saved}`))
-            .catch(()=>console.warn('BLUE_TURSO_MIRROR_WRITE_FAILED')));
-        };
-      }
+      // One bounded Turso transaction per five-minute market tick, combining
+      // basket and scan quotes by key. PILOT keeps its two-symbol total cap.
+      // Verified quotes are queued BEFORE D1 persistence, with no new KIS calls.
+      const toTurso=new Map();
+      const mirrorOnTick=minute%5===0&&tursoMirrorEnabled(env,now);
+      if(mirrorOnTick)deps.afterValidatedQuotes=(quotes)=>{
+        for(const q of quotes){
+          const key=`${q.trade_date_kst}:${q.market}:${q.code}`;
+          const prev=toTurso.get(key);
+          if(!prev||q.received_at_utc>prev.received_at_utc)toTurso.set(key,q);
+        }
+      };
       try{
         await collectSymbolLivePriority(env,now,deps).catch(()=>{console.warn('BLUE_SYMBOL_LIVE_UNAVAILABLE');});
         await collectSearchPriority(env,now,deps).catch(()=>{console.warn('BLUE_R1594_PRIORITY_UNAVAILABLE');});
-        await collectBasket(env,now,deps);
+        await collectBasket(env,now,deps).catch(()=>{console.warn('BLUE_R153_BASKET_UNAVAILABLE');});
         if(minute%5===0)await collect(env,now,deps);
       }finally{
+        if(mirrorOnTick&&toTurso.size){
+          ctx.waitUntil(mirrorQuotesToTurso(env,[...toTurso.values()],{now:new Date()})
+            .then(result=>console.log(`BLUE_TURSO_MIRROR status=${result.status} mode=${result.mode||'OFF'} saved=${result.saved}`))
+            .catch(()=>console.warn('BLUE_TURSO_MIRROR_WRITE_FAILED')));
+        }
         console.log(`BLUE_QUOTE_SHARED provider_calls=${shared.stats.provider_calls} reused_calls=${shared.stats.reused_calls}`);
       }
     })());
