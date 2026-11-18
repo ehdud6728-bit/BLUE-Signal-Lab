@@ -1,0 +1,100 @@
+name: BLUE Data Coverage Audit (READ ONLY)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: blue-data-coverage-audit
+  cancel-in-progress: false
+
+jobs:
+  audit:
+    name: Inspect production D1 without writes
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Read-only database coverage report
+        shell: bash
+        working-directory: worker
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          if [[ -z "${CLOUDFLARE_API_TOKEN:-}" || -z "${CLOUDFLARE_ACCOUNT_ID:-}" ]]; then
+            echo "::error::Cloudflare token/account ID secrets are missing."
+            exit 1
+          fi
+          npm install --no-audit --no-fund --legacy-peer-deps
+          {
+            echo "# BLUE Signal Lab · D1 데이터 보유량 진단 (읽기 전용)"
+            echo ""
+            echo "- 실행: ${GITHUB_RUN_ID} / $(date -u +'%Y-%m-%d %H:%M UTC')"
+            echo "- 대상: blue-signal-lab-db (운영 DB)"
+            echo "- 모든 데이터베이스 명령은 SELECT 또는 WITH ... SELECT이며, 업데이트·삭제·배포를 수행하지 않습니다."
+            echo ""
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+          run_query() {
+            local label="$1" sql="$2" mode="$3" output
+            echo "::group::${label}"
+            printf '### %s\n\n' "${label}" >> "${GITHUB_STEP_SUMMARY}"
+            if output=$(npx wrangler d1 execute blue-signal-lab-db --remote --command "${sql}" --json --yes 2>&1); then
+              printf '%s\n' "${output}" 
+              {
+                echo '~~~json'
+                printf '%s\n' "${output}"
+                echo '~~~'
+                echo ""
+              } >> "${GITHUB_STEP_SUMMARY}"
+            else
+              echo "::warning::Query unavailable: ${label}"
+              {
+                echo "조회할 수 없음: ${label} (테이블 미생성 또는 접근/쿼리 오류)"
+                echo ""
+              } >> "${GITHUB_STEP_SUMMARY}"
+              if [[ "${mode}" == "required" ]]; then
+                printf '%s\n' "${output}" | tail -n 16
+                echo "::endgroup::"
+                return 1
+              fi
+            fi
+            echo "::endgroup::"
+          }
+
+          run_query '테이블 존재 여부'             "SELECT name FROM sqlite_master WHERE type='table' AND name IN ('runs','signals','daily_counts','chart_snapshots','blue_basket_watch_r153','blue_kis_live_quotes_r141','blue_kis_live_history_r141','blue_kis_collector_runs_r142') ORDER BY name" required
+
+          run_query '확인된 EOD 날짜 및 검색 범위 (재실행 중복 날짜 제외)'             "WITH ranked AS (SELECT d.day,d.observed_stocks,d.matched_stocks,d.signal_events,ROW_NUMBER() OVER(PARTITION BY d.day ORDER BY r.created_at DESC,r.run_id DESC) AS rn FROM daily_counts d JOIN runs r ON r.run_id=d.run_id WHERE r.is_demo=0 AND r.latest_price_date=d.day) SELECT COUNT(*) AS verified_days,MIN(day) AS first_day,MAX(day) AS last_day,MIN(observed_stocks) AS min_observed,MAX(observed_stocks) AS max_observed,SUM(matched_stocks) AS total_discoveries,SUM(signal_events) AS total_signal_events FROM ranked WHERE rn=1" required
+
+          run_query '최근 확인된 EOD 날짜별 수집량 (최대 30일)'             "WITH ranked AS (SELECT d.day,d.observed_stocks,d.matched_stocks,d.signal_events,ROW_NUMBER() OVER(PARTITION BY d.day ORDER BY r.created_at DESC,r.run_id DESC) AS rn FROM daily_counts d JOIN runs r ON r.run_id=d.run_id WHERE r.is_demo=0 AND r.latest_price_date=d.day) SELECT day,observed_stocks,matched_stocks,signal_events FROM ranked WHERE rn=1 ORDER BY day DESC LIMIT 30" required
+
+          run_query '검증된 발견 신호 보유량'             "SELECT COUNT(*) AS signal_rows,COUNT(DISTINCT s.code) AS distinct_symbols,COUNT(DISTINCT s.day) AS signal_days,SUM(CASE WHEN s.close_price>0 THEN 1 ELSE 0 END) AS priced_rows FROM signals s JOIN runs r ON r.run_id=s.run_id WHERE r.is_demo=0 AND r.latest_price_date=s.day" required
+
+          run_query '발견 종목의 차트 및 과거 통계 연결률'             "SELECT COUNT(*) AS verified_signal_rows,SUM(CASE WHEN c.chart_json IS NOT NULL THEN 1 ELSE 0 END) AS with_chart,SUM(CASE WHEN c.stats_json IS NOT NULL THEN 1 ELSE 0 END) AS with_pattern_stats FROM signals s JOIN runs r ON r.run_id=s.run_id LEFT JOIN chart_snapshots c ON c.run_id=s.run_id AND c.code=s.code AND c.day=s.day WHERE r.is_demo=0 AND r.latest_price_date=s.day" optional
+
+          run_query '저장된 차트의 날짜 범위 및 JSON 형식'             "SELECT COUNT(*) AS snapshots,COUNT(DISTINCT code) AS distinct_symbols,COUNT(DISTINCT day) AS days,MIN(day) AS first_day,MAX(day) AS last_day,SUM(CASE WHEN json_valid(chart_json) THEN 1 ELSE 0 END) AS valid_charts,SUM(CASE WHEN json_valid(stats_json) THEN 1 ELSE 0 END) AS valid_stats FROM chart_snapshots" optional
+
+          run_query '장바구니 추적 상태와 후속 일봉 범위'             "SELECT status,COUNT(*) AS entries,COUNT(DISTINCT code) AS symbols,MIN(base_day) AS first_base_day,MAX(progress_to_day) AS latest_verified_through FROM blue_basket_watch_r153 GROUP BY status ORDER BY entries DESC" optional
+
+          run_query 'KIS 최근 시세 저장 범위'             "SELECT COUNT(*) AS rows,COUNT(DISTINCT code) AS symbols,MIN(trade_date) AS first_day,MAX(trade_date) AS last_day FROM blue_kis_live_quotes_r141" optional
+
+          run_query 'KIS 장중 시세 기록 저장 범위'             "SELECT COUNT(*) AS rows,COUNT(DISTINCT code) AS symbols,MIN(trade_date) AS first_day,MAX(trade_date) AS last_day FROM blue_kis_live_history_r141" optional
+
+          run_query 'KIS 수집기 실행 상태 (최근 날짜별)'             "SELECT substr(started_at_utc,1,10) AS utc_day,status,COUNT(*) AS runs,SUM(attempted) AS attempted,SUM(saved) AS saved,SUM(rejected) AS rejected FROM blue_kis_collector_runs_r142 GROUP BY substr(started_at_utc,1,10),status ORDER BY utc_day DESC LIMIT 25" optional
+
+          {
+            echo "## 결과 해석 시 주의"
+            echo "- 저장된 종목별 과거 통계는 검색 당시 종목 내부의 과거 사례입니다. 전체 시장 공통 성과로 해석하지 않습니다."
+            echo "- 현재 테이블만으로 모든 발견 종목의 이후 5·10·20거래일 성과나 기간 최저가가 완전히 저장되었다고 증명할 수 없습니다."
+            echo "- 장중 KIS 기록의 현재 코드상 보관기간은 20일입니다. 장기 연구용 일봉·성과 보관기간과는 별도로 설계해야 합니다."
+            echo "- 누락/표본/수정주가 상태를 추가로 검증한 뒤 보관기간 변경과 패턴 우세 순위를 결정합니다."
+          } >> "${GITHUB_STEP_SUMMARY}"
