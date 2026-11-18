@@ -57,16 +57,24 @@ jobs:
           echo "BLUE_COLLECTOR_TAIL_START worker=blue-market-collector capture_minutes=$CAPTURE_MINUTES"
           echo 'Read-only, live logs only. Raw Worker output is NOT printed.'
           echo 'No D1 SQL, no KIS requests, no Worker deployment, no Turso writes.'
+          CAPTURE_STARTED_AT="$(date +%s)"
           set +e
           timeout --signal=INT --kill-after=10s "$((CAPTURE_MINUTES*60))s" \
             npx wrangler tail blue-market-collector --format=json 2>&1 \
             | node tools/tail-diagnostic.mjs
           statuses=("${PIPESTATUS[@]}")
           set -e
+          CAPTURE_ELAPSED="$(( $(date +%s) - CAPTURE_STARTED_AT ))"
+          EXPECTED_SECONDS="$((CAPTURE_MINUTES*60))"
+          echo "BLUE_COLLECTOR_TAIL_PROCESS exit_code=${statuses[0]} elapsed_seconds=$CAPTURE_ELAPSED"
           if [[ "${statuses[1]}" -ne 0 ]]; then
             echo 'ERROR: Sanitized tail processing failed.'; exit 1
           fi
-          if [[ "${statuses[0]}" -ne 0 && "${statuses[0]}" -ne 124 && "${statuses[0]}" -ne 130 ]]; then
-            echo 'ERROR: Cloudflare live tail unavailable. Check Worker Tail permission or use the Cloudflare dashboard Logs tab.'; exit 1
+          if [[ "${statuses[0]}" -ne 0 ]]; then
+            if (( CAPTURE_ELAPSED >= EXPECTED_SECONDS - 8 )); then
+              echo 'BLUE_COLLECTOR_TAIL_EXPECTED_TIMEOUT: The requested live capture window ended.'
+            else
+              echo 'ERROR: Cloudflare live tail stopped early. Check Worker Tail permission or use the Cloudflare dashboard Logs tab.'; exit 1
+            fi
           fi
           echo 'BLUE_COLLECTOR_TAIL_COMPLETE: The live capture finished without any D1 SQL.'
