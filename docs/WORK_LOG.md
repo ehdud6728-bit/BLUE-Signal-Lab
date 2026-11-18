@@ -2,6 +2,14 @@
 
 새 채팅에서 프로젝트를 이어가기 위한 **결정/구현/검증 이력**입니다. 대화 전체를 저장하지 않고 실제 개발에 필요한 내용만 보존합니다. 최신 항목을 위에 추가하고, 결과가 달라지면 추측 대신 검증된 상태로 수정합니다.
 
+## 2026-11-19 (KST) — D1 장애에도 독립적으로 저장 가능한 Turso 연구 신호·차트 미러링 1단계
+
+- **확인/결정:** 사용자 PR #26 기술 패턴 UI 복원은 이미 병합([PR #26](https://github.com/ehdud6728-bit/BLUE-Signal-Lab/pull/26), merge `33e13bcd2ac9e89cd8ab26cbc53621aef0ac10e5`). D1 기반 패턴 검색으로는 D1 한도 초과 재발 시 서비스를 지킬 수 없음. 최종 우선순위는 Turso 주 DB/D1 보조 DB의 **동일한 검증 데이터 저장·복구 가능성**. 현재 둘은 아직 불완전하게 동기화되어 있으며 전환·자동 복구가 성공했다고 주장하지 않음.
+- **이번 구현:** 기존 R1.1 EOD 스캐너가 생성하는 `signals.csv`/`chart_snapshots.jsonl`/`AUDIT.json`에서 `scripts/export_turso_signal_snapshot.py`가 D1 importer와 동일한 `pattern_highlights` 연구 규칙으로 날짜별 검색 신호·원래 180봉 차트·실제 과거 검증 통계를 JSONL/해시 manifest로 추출. 기존 D1 SQL 생성/원래 신호 정의는 변경하지 않음. `tools/turso/signal-snapshot-import.mjs`는 해당 날짜가 Turso 원본 EOD 감사에 존재하는지, 개별 신호 종가가 독립 감사 완료 KRX 종가와 일치하는지 검증. 기존 데이터 충돌을 **수정하지 않고 실패**, 부분 삽입 재실행·전량 read-back 확인 후에만 별도 `blue_research_signal_audit_v1` 완료 기록.
+- **수동 워크플로:** `blue_market_scan_research_only.yml`에 `turso_signals_mode='off'|'dry_run'|'apply'` 입력. 기본 `off`, `dry_run`은 DB 연결/쓰기 없음, 명시 `apply`에만 Turso 행 삽입. 기존 `publish_to_d1` 옵션과 독립적으로 실행되어 D1 무료 한도에 영향을 받지 않음. 단, **같은 정확한 EOD 날짜가 Turso `blue_eod_ingest_audit_v1`에 먼저 있어야 저장 가능**하고, 두 모드를 모두 apply/publish했는지는 수동 실행 결과로 별도 확인해야 함.
+- **검증:** Python 전체 회귀 **204/204** 통과(신규 4건 포함), Node 신규 **4/4** 통과(데이터 변조·미래 날짜·중복·EOD 종가 불일치·중복 재실행·기존값 충돌), GitHub Actions YAML 파싱/입력 문자열 확인 완료. 실제 KRX 데이터 다운로드·Turso 인증/삽입·D1 데이터 일치 확인 및 배포는 **미실행**.
+- **미완료/다음:** PR 병합 후 기존 workflow에서 `asof_date=2026-11-18`, `publish_to_d1=false`, `turso_directory_mode=off`, `turso_signals_mode=dry_run`으로 우선 생성·검증. 해당 날짜 EOD가 Turso에 감사 완료 저장됐는지 확인 후 별도 사용자 명시 선택으로 `apply`; 수동 read-back/audit 완료 증빙 확인. 추가로 오래된 D1 runs/signals/chart snapshots 및 장바구니/추적의 역이관, 양 DB 지속 재시도 큐·정합성 검사, Turso 검색 API/앱 읽기 전환, 두 DB 장애 폴백을 별도 단계로 진행해야 실제 D1 독립 검색을 보장할 수 있음. 장중 KIS 파일럿은 기존대로 정규장에 별도 시행.
+
 ## 2026-11-19 (KST) — 검색 기본 화면을 기술 패턴 발굴로 복원 (웹 PR 준비)
 
 - **사용자 요청:** 장외 KIS→Turso 15분 파일럿은 다음 거래시간에 진행. 현재 `검색`에 보이는 Turso 확정 일봉 2,660종목 전체 목록을 기본 화면에서 내리고, 기존 **BLUE20/30/40·ENV20/40 중심선·RSI/Slow Stoch/MACD GC·112/224일선·역배열·거래대금·과거 패턴** 검색을 복원.

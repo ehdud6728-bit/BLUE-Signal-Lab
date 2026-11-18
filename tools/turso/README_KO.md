@@ -21,6 +21,17 @@ Turso의 일자별 확정 종가/가격·거래량은 이미 저장되었지만 
 
 이 문서는 Turso 연결 검사부터 제한된 병행 저장까지 안내합니다. `SELECT 1` 연결 검사 자체는 **기존 D1 DB와 운영 수집기에 영향을 주지 않습니다**. 별도 수동 Actions로 Turso 스키마가 생성됐으며, 복제는 기본 OFF 상태입니다.
 
+## 2026-11-19 — 일봉 연구 신호/차트 이중화 첫 단계
+
+이미 병합된 검색 화면 PR #26은 기존 **D1 패턴 검색을 다시 보여주는 임시 화면 복구**입니다. D1이 다시 막힐 때를 대비하여, 검증된 R1.1 연구 신호와 과거 패턴 차트 증거를 D1에 독립적으로 Turso에도 저장하는 기능을 추가했습니다. 원래 연구 알고리즘과 D1 SQL 변환기는 변경하지 않습니다.
+
+1. [BLUE Market Scan Research Only](https://github.com/ehdud6728-bit/BLUE-Signal-Lab/actions/workflows/blue_market_scan_research_only.yml)에서 `asof_date=2026-11-18`, `publish_to_d1=false`, `publish_diagnostic_only=false`, `turso_directory_mode=off`, **`turso_signals_mode=dry_run`**으로 실행합니다. 소스 검증/JSONL 해시 검사만 수행하며 D1/Turso 쿼리나 쓰기는 실행하지 않습니다.
+2. 정상 스캐너·데이터 출처·신호 건수를 확인합니다. 2026-11-18 KRX 원본 일봉은 기존 Turso에 감사 완료 저장되어 있습니다. 이력이나 원천 검증 실패 시 종가 또는 날짜를 추정해서 채우지 않습니다.
+3. 필요할 때만 `turso_signals_mode=apply`를 명시적으로 선택합니다. Turso 검증 일봉 종가와 모든 신호 종가를 비교한 후 별도 두 테이블 `blue_research_signals_v1`, `blue_research_signal_audit_v1`에 충돌 거부·멱등 저장하고 실제 행을 다시 읽습니다. **D1에 SQL을 실행하지 않으며**, 기존 EOD 감사·가격 및 장바구니 자료를 수정하지 않습니다.
+4. 같은 원천 결과를 D1에도 반영하려면 기존 `publish_to_d1=true`를 **별도로 명시**해야 합니다. 이 옵션은 D1 운영 DB에 SQL을 쓰므로 한도/사용자 승인과 분리해서 결정합니다. 두 DB에 모두 쓰도록 선택해도 실제 성공·일치 여부는 각각의 실행 로그와 감사 자료로 확인해야 합니다.
+
+**중요:** 이 단계는 새로 실행한 특정 날짜의 `signals.csv`/차트/패턴 결과에 한정됩니다. 이전 D1 전체 기록의 백필, 모든 업무 테이블 자동 복제, 장애 후 자동 재시도 및 UI의 Turso 신호 검색은 아직 구현되지 않았으므로 이 단계를 완료했다고 D1 검색을 끄거나 전체 이중화 성공이라고 표시하지 마세요.
+
 ## 1. Turso DB 생성
 
 1. https://turso.tech 에서 계정을 만들거나 로그인합니다.
