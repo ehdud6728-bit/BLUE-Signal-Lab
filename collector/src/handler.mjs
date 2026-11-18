@@ -3,6 +3,7 @@ import {collectBasket} from './basket.mjs';
 import {collectSearchPriority} from './search-quote-priority.mjs';
 import {collectSymbolLivePriority} from './symbol-live.mjs';
 import {createSharedQuoteFetcher} from './quote-cache.mjs';
+import {mirrorQuotesToTurso,tursoMirrorEnabled} from './turso-mirror.mjs';
 
 // The public HTTP surface stays health-only. An on-demand KIS quote is exposed
 // through a named, non-HTTP WorkerEntrypoint in index.mjs, not here.
@@ -12,6 +13,15 @@ export default {
       const now=new Date(),minute=now.getUTCMinutes();
       const shared=createSharedQuoteFetcher(getKisQuote);
       const deps={quote:shared.quote,preserveBasketPacing:true};
+      if(tursoMirrorEnabled(env)){
+        deps.afterD1Persist=(quotes)=>{
+          // Independent Worker lifetime. Never hold the D1 collector lock while
+          // contacting Turso, and never allow its failure to fail a D1 run.
+          ctx.waitUntil(mirrorQuotesToTurso(env,quotes)
+            .then(result=>console.log(`BLUE_TURSO_MIRROR status=${result.status} saved=${result.saved}`))
+            .catch(()=>console.warn('BLUE_TURSO_MIRROR_WRITE_FAILED')));
+        };
+      }
       try{
         await collectSymbolLivePriority(env,now,deps).catch(()=>{console.warn('BLUE_SYMBOL_LIVE_UNAVAILABLE');});
         await collectSearchPriority(env,now,deps).catch(()=>{console.warn('BLUE_R1594_PRIORITY_UNAVAILABLE');});
