@@ -4,11 +4,21 @@ import {collectSearchPriority} from './search-quote-priority.mjs';
 import {collectSymbolLivePriority} from './symbol-live.mjs';
 import {createSharedQuoteFetcher} from './quote-cache.mjs';
 import {mirrorQuotesToTurso,tursoMirrorEnabled} from './turso-mirror.mjs';
+import {collectTursoDirect,tursoDirectMode} from './turso-direct.mjs';
 
 // The public HTTP surface stays health-only. An on-demand KIS quote is exposed
 // through a named, non-HTTP WorkerEntrypoint in index.mjs, not here.
 export default {
   async scheduled(_event,env,ctx){
+    // A separate waitUntil chain: D1 quota failures in the legacy collector
+    // cannot block the independently authenticated Turso-only KIS path.
+    const directNow=new Date();
+    if(tursoDirectMode(env,directNow)!=='OFF'){
+      ctx.waitUntil(collectTursoDirect(env,directNow)
+        .then(result=>console.log('BLUE_TURSO_DIRECT status='+result.status+
+          ' saved='+(result.saved||0)+' rejected='+(result.rejected||0)))
+        .catch(()=>console.warn('BLUE_TURSO_DIRECT_FAILED')));
+    }
     ctx.waitUntil((async()=>{
       const now=new Date(),minute=now.getUTCMinutes();
       const shared=createSharedQuoteFetcher(getKisQuote);
