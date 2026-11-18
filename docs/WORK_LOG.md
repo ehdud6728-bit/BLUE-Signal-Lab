@@ -8,7 +8,7 @@
 - **사용자 승인:** D1을 기본 저장소로 유지하고 Turso는 실제 종목 중 소량만, 기간이 지나면 자동 종료되는 파일럿을 준비하기로 함.
 - **이번 코드:** `TURSO_MIRROR_PILOT_UNTIL_UTC`라는 Worker Secret에 미래 UTC 종료 시각을 넣으면 `TURSO_MIRROR_ENABLED=false` 상태에서도 최대 **30분간** `PILOT` 모드로 동작. **5분 전체 수집 완료 건당 앞의 최대 2종목**만 Turso 테이블 두 곳에 쓰며, 만료 후 추가 작업을 자동 차단. 독립된 `FULL` 모드는 기존처럼 배포 설정을 명시적으로 `true`로 바꿀 때만 사용 가능.
 - **수동 Actions:** `.github/workflows/blue_turso_mirror_pilot.yml`(기본 `dry_run`, `start_15m`, `start_30m`, `stop`; 대상 Worker 이름 확인 필수). Cloudflare의 종료 시각 Secret만 갱신할 수 있으며, 배포 버전이 새로 생성될 수 있음. D1 SQL 없음.
-- **반영 범위:** 작업 브랜치 `codex/turso-timeboxed-pilot-20261118`. 새 파일럿 코드의 운영 배포나 실제 복제 **아직 하지 않음**. 병합 → 기존 수집기 배포 Actions로 새 코드 운영 반영 → 사용자 수동 파일럿 시작 순서를 지킴.
+- **작업 PR:** [#15 — 15/30분 자동 종료·최대 2종목 Turso 복제 파일럿](https://github.com/ehdud6728-bit/BLUE-Signal-Lab/pull/15) (게시 완료, 아직 병합 전). 작업 브랜치 `codex/turso-timeboxed-pilot-20261118`. 새 파일럿 코드의 운영 배포나 실제 복제 **아직 하지 않음**. 병합 → 기존 수집기 배포 Actions로 새 코드 운영 반영 → 사용자 수동 파일럿 시작 순서를 지킴.
 - **로컬 검증 완료:** Collector Node 테스트 **40/40 통과**(엄격한 30분 시한, 회당 2건, 만료 시 연결 없음 포함). `npm run build:check` Wrangler dry-run 성공, 빌드 바인딩에서 `TURSO_MIRROR_ENABLED="false"` 확인. GitHub Actions 파일 YAML 파싱 성공. **운영 Worker 재배포/실제 Turso 저장은 별도이며 미실행.**
 - **후속:** 장중 소량 복제 확인 → Turso-only Status로 건수/시각 확인 → D1 대비 정확한 일치 확인 및 누락 재처리 큐 설계. 파일럿은 연속/완전한 보관이 아니며 운영 읽기 전환 근거로 사용하지 않음.
 
