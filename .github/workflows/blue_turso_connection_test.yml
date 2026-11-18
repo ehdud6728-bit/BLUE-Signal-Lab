@@ -1,0 +1,43 @@
+name: BLUE Turso Connection Smoke Test (READ ONLY)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: blue-turso-manual-connection-test
+  cancel-in-progress: false
+
+jobs:
+  connection_test:
+    name: Turso SELECT 1 only (No D1)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install Turso client (test only)
+        working-directory: tools/turso
+        run: npm install --no-audit --no-fund --ignore-scripts --no-package-lock
+
+      - name: Verify Turso via one read-only query
+        working-directory: tools/turso
+        env:
+          TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
+          TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
+        run: npm run check
+
+      - name: Write safe summary
+        if: success()
+        run: |
+          echo '### BLUE Turso connection' >> "$GITHUB_STEP_SUMMARY"
+          echo 'Connection OK. One SELECT 1 ran against the configured Turso DB.' >> "$GITHUB_STEP_SUMMARY"
+          echo 'No production Cloudflare D1 queries, schema changes or data migrations were performed.' >> "$GITHUB_STEP_SUMMARY"
