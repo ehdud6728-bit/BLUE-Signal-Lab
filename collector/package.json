@@ -8,5 +8,6 @@
     "build:check": "wrangler deploy --dry-run --outdir ../.r142-build",
     "deploy": "wrangler deploy"
   },
+  "dependencies": {"@libsql/client":"0.18.0"},
   "devDependencies": {"wrangler":"4.160.0"}
 }

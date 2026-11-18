@@ -269,6 +269,12 @@ export async function collect(env, now=new Date(),deps={}){
     const cutoff=kstParts(new Date(now.getTime()-20*86400000)).date;
     await db.prepare('DELETE FROM blue_kis_live_history_r141 WHERE trade_date < ?').bind(cutoff).run();
     await db.prepare('DELETE FROM blue_kis_live_quotes_r141 WHERE trade_date < ?').bind(cutoff).run();
+    // D1 remains authoritative. Queue a separate, best-effort mirror only after
+    // all primary writes have succeeded; a Turso failure must not fail the run.
+    if(typeof deps.afterD1Persist==='function'){
+      try { deps.afterD1Persist(quotes); }
+      catch { console.warn('BLUE_TURSO_MIRROR_SCHEDULE_FAILED'); }
+    }
     return {...report};
   }catch{
     report.status='COLLECTOR_ERROR';report.reason='SANITIZED_RUNTIME_FAILURE';

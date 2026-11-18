@@ -31,3 +31,19 @@ Actions URL: https://github.com/ehdud6728-bit/BLUE-Signal-Lab/actions/workflows/
 연결 성공 이후에만 스키마 호환성, 변경 데이터의 **중복 없는** Turso 복제, 수집 시각·종목코드·건수 검증, 장애 시 분리 운영을 설계합니다. 운영 D1의 읽기/쓰기를 일괄 변경하지 않습니다.
 
 공식 참고: https://developers.cloudflare.com/workers/databases/third-party-integrations/turso/
+
+## 4. 병행 저장 파일럿 (연결 성공 후)
+
+새 GitHub Actions **BLUE Turso Mirror Schema Init (MANUAL)** 워크플로에서:
+
+1. `apply=false`로 실행하면 설명만 출력하며 DB에 접근하지 않습니다.
+2. `apply=true`를 명시하면 Turso에 `blue_kis_live_quotes_r141`, `blue_kis_live_history_r141` 두 테이블과 보조 인덱스를 `IF NOT EXISTS`로 생성합니다. 기존 행은 삭제하지 않습니다.
+3. 이 과정에서 Cloudflare D1을 읽거나 쓰지 않습니다.
+
+수동 실행 링크: https://github.com/ehdud6728-bit/BLUE-Signal-Lab/actions/workflows/blue_turso_mirror_schema_init.yml
+
+수집기 `collector/src/turso-mirror.mjs`는 D1에 **성공적으로 저장한 시세 묶음만** Turso로 보내는 테스트용 코드입니다. 같은 시각의 중복 저장과 더 오래된 최신가의 덮어쓰기를 SQL 키/조건으로 방지합니다.
+
+**안전장치:** `collector/wrangler.jsonc`의 `TURSO_MIRROR_ENABLED`는 기본 `false`입니다. 코드를 병합하거나 수집기를 다시 배포하는 것만으로 Turso 복제가 켜지지 않습니다. 실제 활성화를 하려면 Turso Worker secrets를 넣고 별도 검증/승인 후 해당 플래그를 변경해야 합니다.
+
+**현재 한계:** 이 단계는 `collector/`의 **5분 전체 수집 시세만** best-effort로 복제합니다. Turso 장애 중 발생한 모든 과거 행을 자동으로 재전송하는 큐/재처리 기능은 없습니다. 따라서 장기 보관의 완전성을 보장하지 않으며 운영 읽기 전환은 아직 금지합니다. 다음 단계에서 복구·재처리·일치성 검증을 우선 구현해야 합니다.

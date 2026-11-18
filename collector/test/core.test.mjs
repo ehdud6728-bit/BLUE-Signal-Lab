@@ -201,6 +201,24 @@ test('collector reuses cache, persists quote, and logs receipt while leaving tok
   assert.ok(db.calls.some(x=>x.type==='run'&&x.sql.includes('INSERT INTO blue_kis_collector_runs_r142')));
 });
 
+test('Turso mirror is notified only after successful D1 persistence; callback failure is isolated',async()=>{
+  const encoded='AAECAwQFBgcICQoLHoySzGOkixdwKEhHed2XN1mNTkhM40RLJU6sVjUQNBq2sf1Ot0WpkLk=';
+  const db=fakeDb({snapshots:[seed()],tokenRow:{ciphertext:encoded,expires_at_utc:'2026-11-11T23:59:00Z'}});
+  let called=0;
+  const report=await collect({DB:db,COLLECTOR_ENABLED:'true',KIS_APP_KEY:'TEST_APP_KEY_NOT_REAL',KIS_APP_SECRET:'TEST_APP_SECRET_NOT_REAL'},at(8,5),{
+    quote:async()=>quote,
+    afterD1Persist:(quotes)=>{
+      called++;
+      assert.equal(quotes.length,1);
+      assert.ok(db.calls.some(x=>x.type==='run'&&x.sql.includes('INSERT INTO blue_kis_live_quotes_r141')));
+      throw Error('TURSO_TEMPORARILY_UNAVAILABLE');
+    }
+  });
+  assert.equal(called,1);
+  assert.equal(report.status,'OK');
+  assert.equal(report.saved,1);
+});
+
 test('the collector has no public manual trigger and Cron handler exists',async()=>{
   const {default:handler}=await import('../src/handler.mjs');
   const r=await handler.fetch(new Request('https://collector.example/run',{method:'POST'}),{COLLECTOR_ENABLED:'true'});
