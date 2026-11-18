@@ -9,7 +9,7 @@ import {validChartCode} from './chart-query';
 import {lookupSymbolAnalysis,lookupSymbolDirectory,validAnalysisCode} from './symbol-analysis';
 import {lookupSymbolLive,requestSymbolLive,validLiveCode} from './symbol-live';
 import {runEodCloudflareCron} from './eod-cron';
-import {InvalidEodQuery,tursoEodDates,tursoEodSearch} from './turso-eod';
+import {InvalidEodQuery,tursoEodDates,tursoEodSearch,tursoEodCompare} from './turso-eod';
 interface Env {
   DB: D1Database;
   TURSO_DATABASE_URL?:string;
@@ -127,6 +127,16 @@ export default {
         catch(e){if(e instanceof InvalidEodQuery)return respond({error:e.message},400);
           return respond({error:'TURSO_EOD_UNAVAILABLE',fallback:'D1',
             message:'Turso 확정 일봉 조회 실패. 기존 D1 조회를 시도하세요.'},503);}
+      }
+      // Basket discovery dates stay in the browser. Read only Turso's
+      // independently audited later candles; if unavailable, the client may
+      // explicitly use its existing Access-protected D1 comparison endpoint.
+      if(p==='/api/eod/prices/compare'&&request.method==='GET'){
+        if(!access)return respond({error:'ACCESS_REQUIRED'},401);
+        try{return respond(await tursoEodCompare(env,u.searchParams,todayKST()));}
+        catch(e){if(e instanceof InvalidEodQuery)return respond({error:e.message},400);
+          return respond({error:'TURSO_EOD_COMPARE_UNAVAILABLE',fallback:'D1',
+            message:'Turso 검증 일봉 가격 비교가 불가능합니다.'},503);}
       }
       // Current KIS quote research is independent of today's confirmed KRX EOD.
       // The saved quote is always available immediately. The optional private

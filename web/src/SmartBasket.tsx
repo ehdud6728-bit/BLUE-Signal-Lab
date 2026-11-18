@@ -10,7 +10,7 @@ import './smart-basket.css';
 import './r15116-basket-priority.css';
 import './r158-long-watch.css';
 import './r15117-basket-discovery-layout.css';
-import {comparisonKey,fetchCompared,sourceName,type PriceCompare} from './price-compare';
+import {comparisonKey,fetchComparedTursoFirst,sourceName,type PriceCompare} from './price-compare';
 import StopLossRow from './StopLossRow';
 import type {StopMethod} from './stop-loss';
 import BasketSupplyRecordRow from './BasketSupplyRecordRow';
@@ -109,9 +109,19 @@ function patternEvidence(data:SearchRow|AiPick):Pick<BasketItem,'patternUp10d'|'
 const hotPattern=(x:BasketItem,threshold:number|null,minSamples:number)=>threshold!==null&&
  typeof x.patternUp10d==='number'&&x.patternUp10d>=threshold&&
  typeof x.patternN10d==='number'&&x.patternN10d>=minSamples;
-function baselineReturn(item:BasketItem,quote:Quote|undefined):number|null{
- if(!quote||!Number.isFinite(quote.price)||quote.price<=0||quote.trade_date_kst<=item.day)return null;
- return (quote.price/item.baseline-1)*100;
+function selectedObservation(item:BasketItem,comp:PriceCompare|undefined,pr:Performance|undefined,
+ q:Quote|undefined):{price:number;day:string;source:string;at:string|null}|null{
+ const choices:{price:number;day:string;source:string;at:string|null;priority:number}[]=[];
+ const add=(price:number|null|undefined,day:string|null|undefined,source:string,at:string|null|undefined,priority:number)=>{
+  if(price&&Number.isFinite(price)&&price>0&&day&&day>item.day)
+   choices.push({price,day,source,at:at||null,priority});
+ };
+ add(comp?.latest_price,comp?.latest_day,sourceName(comp?.latest_source),comp?.latest_at,4);
+ add(pr?.quote_price,pr?.quote_day,'기존 KIS 수집기',pr?.quote_at,3);
+ add(pr?.recent_close,pr?.recent_day,'기존 KIS 일봉',null,2);
+ add(q?.price,q?.trade_date_kst,'KIS 저장 시세',q?.received_at_utc,1);
+ choices.sort((a,b)=>b.day.localeCompare(a.day)||b.priority-a.priority);
+ return choices[0]||null;
 }
 // R151_QUICK_ADD: controlled one-tap requests from the search results list.
 export default function SmartBasket({quickAddRequest,onItemsChange,active=true,refreshKey=0,patternHighlightMin=70,patternSampleMin=8}: {
@@ -147,13 +157,13 @@ export default function SmartBasket({quickAddRequest,onItemsChange,active=true,r
  const [performanceError,setPerformanceError]=useState('');
  const [performanceChecked,setPerformanceChecked]=useState('');
  const idsKey=items.map(x=>perfId(x)).join(',');
- // R1593: mirror shared, read-only D1 price records; preserve existing Watch queue.
+ // Turso audited EOD first; the existing D1 comparison remains a failure fallback.
  const [r1593Prices,setR1593Prices]=useState<Record<string,PriceCompare>>({});
  const [r1593Error,setR1593Error]=useState('');
  useEffect(()=>{
   if(!active||!idsKey)return;const ctrl=new AbortController();let loading=false;
   const load=async()=>{if(loading||document.visibilityState==='hidden')return;loading=true;
-   try{const result=await fetchCompared(items,ctrl.signal,partial=>{if(!ctrl.signal.aborted)setR1593Prices(prev=>({...prev,...partial}));});if(!ctrl.signal.aborted){setR1593Prices(prev=>({...prev,...result}));setR1593Error('');}}
+   try{const result=await fetchComparedTursoFirst(items,ctrl.signal,partial=>{if(!ctrl.signal.aborted)setR1593Prices(prev=>({...prev,...partial}));});if(!ctrl.signal.aborted){setR1593Prices(prev=>({...prev,...result}));setR1593Error('');}}
    catch(e){if(!ctrl.signal.aborted)setR1593Error(e instanceof Error?e.message:'최근 시세 확인 실패');}
    finally{loading=false;}
   };
@@ -379,12 +389,8 @@ export default function SmartBasket({quickAddRequest,onItemsChange,active=true,r
    (dayFilter==='ALL'||x.day===dayFilter)&&
    (!normalizedQuery||x.code.includes(normalizedQuery)||x.name.toLocaleLowerCase('ko-KR').includes(normalizedQuery)));
  const pct=(x:BasketItem)=>{
-  const verified=r1593Prices[comparisonKey(x)];
-  if(verified?.latest_day&&verified.latest_day>x.day&&verified.latest_price)
-    return pctChange(verified.latest_price,x.baseline);
-  const pr=performance[perfId(x)];const price=pr?.quote_day&&pr.quote_day>x.day&&pr.quote_day>=(pr.recent_day||'')
-   ?pr.quote_price:pr?.recent_day&&pr.recent_day>x.day?pr.recent_close:null;
-  return pctChange(price,x.baseline)??baselineReturn(x,latestQuote.get(x.code));
+  const obs=selectedObservation(x,r1593Prices[comparisonKey(x)],performance[perfId(x)],latestQuote.get(x.code));
+  return pctChange(obs?.price,x.baseline);
  };
   const visible=rank==='RECENT'?scoped:
     scoped.filter(x=>{const v=pct(x);return v!==null&&(rank==='GAIN_TOP'?v>0:v<0);})
@@ -431,7 +437,8 @@ export default function SmartBasket({quickAddRequest,onItemsChange,active=true,r
   {error&&<p className="basket-alert" role="alert"><AlertCircle size={15}/>{error}</p>}
   {message&&<p className="basket-feedback" role="status">{message}</p>}
    {performanceError&&<p className="basket-alert" role="status">시세 수집 연결: {performanceError}</p>}
-   {r1593Error&&<p className="r1593-comparison-status" role="status">D1 저장 시세 비교: {r1593Error}</p>}
+   {r1593Error&&<p className="r1593-comparison-status" role="status">저장 시세 비교: {r1593Error}</p>}
+   {items.length>0&&<p className="r1593-comparison-status" role="note">최근 확인가는 Turso의 검증된 KRX 확정 종가 우선 · 장애 시 기존 D1 저장 시세 사용. 일봉 고가는 수집된 날짜만의 부분 관측이며 실시간 현재가가 아닙니다.</p>}
    {items.length>0&&<p className="r153-performance-status" role="status">
     <RefreshCw size={12}/> 등록 종목 우선 연속 수집 · 서버 분당 최대 18건 처리 · 화면 확인 30초
     {performanceChecked&&<span> · 마지막 화면 확인 {new Date(performanceChecked).toLocaleTimeString('ko-KR')}</span>}
@@ -482,19 +489,13 @@ export default function SmartBasket({quickAddRequest,onItemsChange,active=true,r
        <div className="r1595-group-records">{group.records.map(it=>{const q=latestQuote.get(it.code);
      const pr=performance[perfId(it)];
      const signalChips=discoveredSignals(it.signals,pr?.signal_names);
-     const quoteIsLater=!!(pr?.quote_day&&pr.quote_day>it.day&&pr.quote_day>=(pr.recent_day||''));
-     const recent=quoteIsLater?pr?.quote_price:pr?.recent_day&&pr.recent_day>it.day?pr?.recent_close:null;
-     const recentDay=quoteIsLater?pr?.quote_day:pr?.recent_day;
      const intradayHigh=pr?.quote_day&&pr.quote_day>it.day?pr.quote_high:null;
      const dailyHigh=pr?.highest_price||null;
      const comp=r1593Prices[comparisonKey(it)];
-     const compareRecent=comp?.latest_day&&comp.latest_day>it.day&&comp.latest_price?comp.latest_price:null;
-     const shownRecent=compareRecent??recent??(q&&q.trade_date_kst>it.day?q.price:null);
-     const shownRecentDay=compareRecent?comp?.latest_day:recent?recentDay:q&&q.trade_date_kst>it.day?q.trade_date_kst:null;
-     const shownSource=compareRecent?sourceName(comp?.latest_source):recent?'기존 KIS 수집기':'KIS 저장 시세';
-     // Never attach a different provider's timestamp to a daily-close price.
-     const shownAt=compareRecent?comp?.latest_at:recent?(quoteIsLater?pr?.quote_at:null):q?.received_at_utc;
-     const observedAt=observedTimeKst(shownAt);
+     const selected=selectedObservation(it,comp,pr,q);
+     const shownRecent=selected?.price??null,shownRecentDay=selected?.day??null;
+     const shownSource=selected?.source||'저장 시세';
+     const observedAt=observedTimeKst(selected?.at);
      // Use the exact price displayed on screen for every current-return calculation.
      const growth=pctChange(shownRecent,it.baseline);
      const highs=[
@@ -537,7 +538,7 @@ export default function SmartBasket({quickAddRequest,onItemsChange,active=true,r
        </div>}
      <div className="basket-record-stats r153-price-grid basket-price-focus" aria-label="장바구니 주요 가격 지표">
        <div className="basket-price-high"><span>검색 이후 관측 최고가</span><b>{maxHigh?`${cash(maxHigh)}원`:'—'}</b>
-         <small>{maxHigh?`최고 수익률 ${pctText(pctChange(maxHigh,it.baseline))} · ${maxHighDay||''}${comp&&!comp.high_complete?' · 과거 수집 중':''}`:pending?'수집 중':'기간 고가 미확인'}</small></div>
+         <small>{maxHigh?`최고 수익률 ${pctText(pctChange(maxHigh,it.baseline))} · ${maxHighDay||''}${comp&&!comp.high_complete?' · 부분 관측':''}`:pending?'수집 중':'기간 고가 미확인'}</small></div>
        <div className="basket-price-recent"><span>최근시세</span><b>{shownRecent?`${cash(shownRecent)}원`:'—'}</b>
          <small>{shownRecentDay?`${shownRecentDay}${observedAt?' '+observedAt:''} · ${shownSource}`:'후속 시세 미수집'} · 실시간 체결가 아님</small></div>
        <div className="basket-price-return"><span>현재수익률 <small>발견가 기준</small></span><b className={growth==null?'':growth>=0?'basket-rise':'basket-fall'}>{pctText(growth)}</b>
