@@ -2,6 +2,14 @@
 
 새 채팅에서 프로젝트를 이어가기 위한 **결정/구현/검증 이력**입니다. 대화 전체를 저장하지 않고 실제 개발에 필요한 내용만 보존합니다. 최신 항목을 위에 추가하고, 결과가 달라지면 추측 대신 검증된 상태로 수정합니다.
 
+## 2026-11-18 (KST) — Turso 테이블 생성 성공 / Worker 인증·상태 점검 준비
+
+- **확인 완료:** [GitHub Actions #44278060936](https://github.com/ehdud6728-bit/BLUE-Signal-Lab/actions/runs/44278060936) 성공. `TURSO_MIRROR_SCHEMA_READY: two tables verified, no stock rows inserted` 로그 확인. 사용자가 `apply=true`로 실제 Turso 스키마를 생성함.
+- **작업 PR:** [#14 — Turso Worker 시크릿 수동 설치·상태 점검](https://github.com/ehdud6728-bit/BLUE-Signal-Lab/pull/14). 병합 및 배포 상태는 실제 PR/Actions에서 확인할 것.
+- **준비:** `blue_turso_collector_secrets.yml`(기본 아무 작업 없음, 명시적 승인 시 Turso 인증 두 개만 Worker에 등록), `blue_turso_mirror_status.yml`(Turso 한국 날짜 당일 건수/최신 수신 시각만 조회), `tools/turso/mirror-status.mjs`.
+- **운영 상태:** D1은 계속 원본. Turso 테이블 생성 성공, **현재 복제 플래그 OFF**. Worker 인증 등록/실제 데이터 복제/누락 복구는 아직 확인되지 않음.
+- **후속:** PR 병합 → 기본 `apply=false` 워크플로 확인 → 사용자 선택 시 Worker Secrets 설치 → 상태 점검 → 제한된 수집 파일럿과 D1 대비 일치 검증 및 누락 재처리 설계.
+
 ## 2026-11-18 (KST) — Turso 연결 성공 / 병행 저장 파일럿 코드 준비
 
 - **검증 성공:** [GitHub Actions #44276186275](https://github.com/ehdud6728-bit/BLUE-Signal-Lab/actions/runs/44276186275)에서 `TURSO_CONNECTION_OK` 확인. `SELECT 1` 실행 성공, GitHub Secrets 인식, D1 SQL 없음.

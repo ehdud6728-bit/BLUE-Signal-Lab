@@ -36,9 +36,10 @@
 ## 바로 다음 작업
 
 1. 연결 검사는 **성공**함. 병행 저장 파일럿 PR을 검토하고 병합하더라도 `TURSO_MIRROR_ENABLED=false`를 유지합니다.
-2. `BLUE Turso Mirror Schema Init (MANUAL)` Actions에서 `apply=true`를 수동 선택하여 **Turso에만** 시세 최신/히스토리 테이블 생성 후 결과를 확인합니다.
-3. Turso 테이블 생성 성공 후 수집기 코드/Worker secrets/활성화 테스트 및 실패 기록을 확인하고, D1 대비 데이터 건수·시각·가격을 **소량 검증**합니다. 장기 누락을 막을 별도 재처리 정책을 구현하기 전에는 운영 데이터의 주 저장소로 전환하지 않습니다.
-4. D1 읽기 행 사용량을 UTC 기준 매일 비교하고 쿼리/인덱스 최적화 전후 차이를 관찰합니다.
+2. `BLUE Turso Mirror Schema Init (MANUAL)`가 [Actions #44278060936](https://github.com/ehdud6728-bit/BLUE-Signal-Lab/actions/runs/44278060936)에서 성공했습니다. Turso에 두 테이블 생성 확인, 시세 행 없음.
+3. 수집기 Worker에 Turso Secrets를 설치할 수동 Actions 및 Turso만 읽는 상태 점검 Actions를 준비합니다. **기본 복제 OFF 유지**. 실제 데이터 전송은 별도 승인 및 검증 후 활성화합니다.
+4. D1 대비 데이터 건수·시각·가격을 **소량 검증**하고 장기 누락을 막을 재처리 정책을 구현하기 전에는 운영 데이터의 주 저장소로 전환하지 않습니다.
+5. D1 읽기 행 사용량을 UTC 기준 매일 비교하고 쿼리/인덱스 최적화 전후 차이를 관찰합니다.
 
 ## 참고
 
