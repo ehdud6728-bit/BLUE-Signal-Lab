@@ -1,5 +1,6 @@
 /** Read-only, audited KRX daily candles from Turso. Never synthesize signals. */
 import {createClient} from '@libsql/client/web';
+import {decodePairs,type PriceCompareRow} from './price-compare.ts';
 
 type TursoConfig = {TURSO_DATABASE_URL?:string;TURSO_AUTH_TOKEN?:string};
 type DbClient = Pick<ReturnType<typeof createClient>,'execute'|'close'>;
@@ -79,5 +80,53 @@ export async function tursoEodSearch(env:TursoConfig,params:URLSearchParams,fact
     }));
     return {storage:'TURSO',data_status:'VERIFIED_EOD_ONLY',day,q,page,limit,
       total,items};
+  },factory);
+}
+
+/** Compare user-owned discovery dates against *later*, audited KRX daily rows.
+ * This does not require the discovery day to exist in Turso: older basket
+ * baselines belong to the user's preserved local/D1 discovery evidence.
+ * No quote, intraday price, technical signal, or complete-period claim is made.
+ */
+export async function tursoEodCompare(env:TursoConfig,params:URLSearchParams,
+  today:string,factory?:ClientFactory){
+  const pairs=decodePairs(params.get('items')||'',today);
+  if(!pairs||!pairs.length)throw new InvalidEodQuery();
+  return withTurso(env,async client=>{
+    const codes=[...new Set(pairs.map(p=>p.code))];
+    const earliest=pairs.reduce((a,b)=>a<b.day?a:b.day,pairs[0].day);
+    const result=await client.execute({sql:`SELECT e.trade_day,e.code,e.close,e.high
+      FROM blue_eod_daily_v1 e
+      JOIN blue_eod_ingest_audit_v1 a ON a.trade_day=e.trade_day AND a.row_count>=1700
+      WHERE e.code IN (${codes.map(()=>'?').join(',')}) AND e.trade_day>?
+        AND e.trade_day<=?
+      ORDER BY e.trade_day ASC,e.code ASC LIMIT 5001`,args:[...codes,earliest,today]});
+    if(result.rows.length>5000)throw Error('TURSO_EOD_COMPARE_RANGE_TOO_LARGE');
+    const byCode=new Map<string,{day:string;close:number;high:number}[]>();
+    for(const r of result.rows){
+      const day=String(r.trade_day),code=String(r.code);
+      const close=Number(r.close),high=Number(r.high);
+      if(!validDay(day)||!codes.includes(code)||!Number.isSafeInteger(close)||close<=0||
+        !Number.isSafeInteger(high)||high<close)throw Error('TURSO_EOD_COMPARE_INVALID_PRICE');
+      const rows=byCode.get(code)||[];rows.push({day,close,high});byCode.set(code,rows);
+    }
+    const items=pairs.map(({code,day})=>{
+      const later=(byCode.get(code)||[]).filter(r=>r.day>day);
+      const latest=later.at(-1)||null;
+      const high=later.reduce<(typeof later)[number]|null>((best,row)=>
+        !best||row.high>best.high?row:best,null);
+      return {code,day,status:latest?'READY':'NO_LATER_PRICE',
+        latest_price:latest?.close??null,latest_day:latest?.day??null,
+        latest_source:latest?'KRX_VERIFIED_EOD_CLOSE':null,latest_at:null,latest_market:null,
+        period_high:high?.high??null,period_high_day:high?.day??null,
+        period_high_source:high?'KRX_VERIFIED_EOD_HIGH':null,
+        high_coverage_from:later[0]?.day??null,
+        high_coverage_to:latest?.day??null,
+        // Import range is currently short; it cannot establish complete
+        // coverage for arbitrary older local basket discovery dates.
+        high_complete:false} satisfies PriceCompareRow & {high_coverage_from:string|null};
+    });
+    return {status:'OK',storage:'TURSO',source:'KRX_VERIFIED_EOD_ONLY',items,
+      note:'검증된 KRX 확정 일봉만 사용합니다. 장중 현재가가 아니며 기간 최고가는 부분 관측입니다.'};
   },factory);
 }

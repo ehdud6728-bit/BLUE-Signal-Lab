@@ -3,7 +3,7 @@ export type PriceCompare = {
  code:string;day:string;status:'READY'|'NO_LATER_PRICE'|'NOT_VERIFIED';
  latest_price:number|null;latest_day:string|null;latest_source:string|null;latest_at:string|null;latest_market:string|null;
  period_high:number|null;period_high_day:string|null;period_high_source:string|null;
- high_coverage_to:string|null;high_complete:boolean;
+ high_coverage_to:string|null;high_complete:boolean;high_coverage_from?:string|null;
  quote_status?:string|null;quote_checked_at?:string|null;quote_error?:string|null;
 };
 export const comparisonKey=(v:{code:string;day:string})=>`${v.code}:${v.day}`;
@@ -11,6 +11,8 @@ const API=(import.meta.env.VITE_API_BASE||'https://blue-signal-lab-api-v2.ehdud6
 export function sourceName(s:string|null|undefined):string {
  switch(s){
   case 'KIS_DAILY_CLOSE':return 'KIS 일봉 종가';
+  case 'KRX_VERIFIED_EOD_CLOSE':return 'Turso KRX 확정 종가';
+  case 'KRX_VERIFIED_EOD_HIGH':return 'Turso KRX 일봉 고가';
   case 'KIS_SAVED_QUOTE':return 'KIS 저장 시세';
   case 'KIS_STORED_SNAPSHOT':return 'KIS 저장 시세';
   case 'KIS_SEARCH_PRIORITY_R1594':return 'KIS 우선 수집 시세';
@@ -23,6 +25,50 @@ export function sourceName(s:string|null|undefined):string {
   case 'MATCHED_SIGNAL_EOD_ONLY':return '저장된 검색일 종가';
   default:return '저장된 시세';
  }
+}
+
+/** Prefer audited Turso EOD, falling back to legacy D1 ONLY on an unavailable
+ * Turso endpoint or invalid/incomplete response. No D1 calls on valid empty
+ * Turso results. Other search/chart UI keeps its established D1 comparison.
+ */
+export async function fetchComparedTursoFirst(items:{code:string;day:string}[],signal?:AbortSignal,
+ onBatch?:(partial:Record<string,PriceCompare>)=>void):Promise<Record<string,PriceCompare>>{
+ const unique=[...new Map(items.filter(x=>/^\d{6}$/.test(x.code)&&/^20\d{2}-\d{2}-\d{2}$/.test(x.day))
+  .map(x=>[comparisonKey(x),x] as const)).values()];
+ const out:Record<string,PriceCompare>={};
+ for(let i=0;i<unique.length;i+=8){
+  if(signal?.aborted)throw Error('CANCELLED');
+  const batch=unique.slice(i,i+8), keys=new Set(batch.map(comparisonKey));
+  const url=new URL(API+'/api/eod/prices/compare');
+  url.searchParams.set('items',batch.map(comparisonKey).join(','));
+  let turso:Record<string,PriceCompare>|null=null;
+  try{
+   const response=await fetch(url.toString(),{credentials:'include',cache:'no-store',signal});
+   if(!response.ok)throw Error(`TURSO_EOD_HTTP_${response.status}`);
+   const body=await response.json() as {storage?:string;items?:PriceCompare[]};
+   if(body.storage!=='TURSO'||!Array.isArray(body.items)||body.items.length!==keys.size)
+    throw Error('TURSO_EOD_COMPARE_INVALID_RESPONSE');
+   const valid:Record<string,PriceCompare>={};
+   for(const row of body.items){
+    const key=comparisonKey(row);
+    if(!keys.has(key)||valid[key]||!['READY','NO_LATER_PRICE'].includes(row.status)||
+      (row.status==='READY'&&(!row.latest_day||row.latest_day<=row.day||
+        !Number.isFinite(row.latest_price)||Number(row.latest_price)<=0)))
+      throw Error('TURSO_EOD_COMPARE_INVALID_RESPONSE');
+    valid[key]=row;
+   }
+   turso=valid;
+  }catch(e){
+   if(signal?.aborted)throw e;
+   // Only a Turso transport/provider problem warrants using the D1 fallback.
+   // Authorization errors also affect the protected D1 route, so surface them.
+   if(e instanceof Error&&/TURSO_EOD_HTTP_(400|401|403)/.test(e.message))throw e;
+  }
+  const partial=turso??await fetchCompared(batch,signal);
+  Object.assign(out,partial);
+  onBatch?.(partial);
+ }
+ return out;
 }
 export async function fetchCompared(items:{code:string;day:string}[],signal?:AbortSignal,
  onBatch?:(partial:Record<string,PriceCompare>)=>void):Promise<Record<string,PriceCompare>>{

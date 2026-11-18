@@ -2,6 +2,15 @@
 
 새 채팅에서 프로젝트를 이어가기 위한 **결정/구현/검증 이력**입니다. 대화 전체를 저장하지 않고 실제 개발에 필요한 내용만 보존합니다. 최신 항목을 위에 추가하고, 결과가 달라지면 추측 대신 검증된 상태로 수정합니다.
 
+## 2026-11-19 (KST) — 장바구니 검증 일봉 가격 비교 Turso 우선 (PR 준비)
+
+- **휴대폰 실화면:** Turso 2026-11-18 종목명 검색에서 `삼성전자 005930`/`삼성전자우 005935`와 정확한 확정 종가가 보임. 장바구니에서 기존 LK삼양(225190) 등 18개 발견 기록 및 사용자 선택 기준가가 유지되지만 `최근시세`, `현재수익률`, `검색 이후 관측 최고가`는 미수집/확인 중으로 남음. **기존 장바구니 로컬 데이터는 삭제하거나 재작성하지 않음.**
+- **운영 선행 성공:** [Turso 종목명 전체 입력 #44323354552](https://github.com/ehdud6728-bit/BLUE-Signal-Lab/actions/runs/44323354552)에서 `verified_source_symbols=2721 written=2721`; [API 검증 #44325688656](https://github.com/ehdud6728-bit/BLUE-Signal-Lab/actions/runs/44325688656), [API 실배포 #44326003529](https://github.com/ehdud6728-bit/BLUE-Signal-Lab/actions/runs/44326003529), [정적 웹 실배포 #44327071460](https://github.com/ehdud6728-bit/BLUE-Signal-Lab/actions/runs/44327071460) 성공. 이 결과는 **일봉 검색/종목명 복구**의 배포이며, 당시 장바구니 Turso 가격 비교는 없었음.
+- **이번 변경:** `/api/eod/prices/compare?items=종목코드:발견일,...`를 **Access 인증 필수/읽기 전용**으로 추가. 요청 코드에 대해 Turso 감사 완료된 날짜의 `blue_eod_daily_v1`에서 **발견일보다 나중**의 확정 종가/일봉 고가만 비교. 최고가를 전체 기간 완전 커버로 단정하지 않음(`high_complete=false`); 가격이 없는 경우 `NO_LATER_PRICE`/빈값 유지. 장바구니의 가격 조회만 Turso 우선, Turso 장애 때 기존 D1 `prices/compare`로 폴백. 다른 검색/정밀분석/AI/수집기 기능은 현행 D1 그대로. 장중 KIS/실시간 가격으로 오인하지 않도록 출처를 표시하고 여러 후속 수집원의 **거래일이 더 최신인 값**을 우선 표시.
+- **운영 안전:** D1·Turso SQL 쓰기/스키마·EOD 감사 해시·기기 로컬 저장 키 변경 없음. `POST /api/basket/watch` 및 기타 D1 탭은 **아직 D1 의존**. 일봉 8거래일 이후 자동 수집/224일선·패턴·AI 전환이 아님. PR 병합은 실제 배포가 아니며, API와 웹 수동 배포 Actions가 둘 다 필요.
+- **로컬 검증:** `node --test tests/test_turso_eod_api.mjs tests/test_turso_basket_prices.mjs tests/test_turso_basket_browser.mjs tests/test_r1593_compare.mjs` **24/24 통과**(Turso 성공/실패·미수집·Access 거부 등), 프런트 TypeScript+Vite 빌드 성공, API Worker Wrangler dry-run 성공(D1·KIS 바인딩 보존). 실제 API 원격 호출/휴대폰 반영은 PR 병합·배포 전까지 미확인.
+- **다음:** PR 병합 → `blue_turso_api_eod_deploy.yml` `verify_only` 후 `deploy_api` → `blue_web_r15110_static_safe_deploy.yml`에서 웹 배포 → 장바구니 LK삼양(발견일 11/17)처럼 다음 거래일 11/18의 **실제 Turso 가격 존재** 케이스와 후속 가격 미수집 케이스를 각각 확인. 이후 지속적인 KIS/Turso 수집 및 다른 탭 Turso 전환을 별개 개발.
+
 ## 2026-11-18 (KST) — Turso 일봉 종목명 미표시 수정 준비
 
 - **실제 사용자 화면:** Turso 2026-11-16 확정 일봉이 2,661종목으로 조회되지만 `000660 000660`, `005930 005930`처럼 종목코드가 두 번 보임. 장바구니 탭과 기존 장바구니 종목은 보존해야 함.

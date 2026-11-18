@@ -67,7 +67,7 @@ export default function TursoEodRecovery({api,dates,onUnavailable}:{api:string;d
     <div className="turso-eod-notice" role="note"><AlertCircle size={19}/><div>
       <strong>일봉 전용 복구 모드</strong>
       <p>기술 신호·112/224일선·과거 패턴 승률은 아직 Turso에서 계산하지 않습니다.
-        다른 메뉴의 정밀분석·종목 추적·AI 시황·장바구니는 현재 D1에 의존하며 제한 중일 수 있습니다.
+        장바구니의 발견일 이후 확정 일봉 가격은 Turso를 우선 사용하지만, KIS 관찰·정밀분석·종목 추적·AI 시황 등은 아직 D1에 의존하여 제한 중일 수 있습니다.
         Turso가 연결되지 않으면 기존 D1 검색 화면으로 자동 전환합니다.</p>
     </div></div>
     <form className="turso-eod-form" onSubmit={e=>{e.preventDefault();setPage(1);setAppliedQ(q.trim());}}>
