@@ -1,6 +1,16 @@
 .app-main.eod-recovery-active {display:block;max-width:1180px;margin:0 auto;width:100%}
 .app-main.eod-recovery-active>.search-panel {display:none!important}
 .app-main.eod-recovery-active .r151-research-content>:not(.turso-eod-recovery) {display:none!important}
+.blue-search-source-switch {display:flex;gap:9px;flex-wrap:wrap;margin:8px 18px 12px}
+.blue-search-source-switch button {display:inline-flex;align-items:center;justify-content:center;gap:7px;min-height:44px;padding:9px 16px;border:1px solid #aac3e4;border-radius:10px;background:#fff;color:#244e80;font-weight:750;cursor:pointer}
+.blue-search-source-switch button.active {background:#2462ce;border-color:#2462ce;color:white}
+.blue-search-source-switch button:focus-visible {outline:3px solid #80adff;outline-offset:2px}
+.blue-pattern-source-note {margin:0 18px 14px;padding:12px 14px;border-radius:11px;background:#edf5ff;border:1px solid #abcdf1;color:#23446d;font-size:.85rem;line-height:1.5}
+.blue-pattern-source-note strong,.blue-pattern-source-note span {display:block}
+.blue-pattern-source-note span {margin-top:4px}
+.blue-pattern-source-note p {margin:7px 0 0}
+.blue-pattern-source-error {color:#a33c2b}
+.blue-pattern-source-error button {font:inherit;color:#155ab1;background:#fff;border:1px solid #90b2e5;border-radius:6px;padding:4px 8px}
 .turso-eod-recovery {background:var(--panel,#fff);color:var(--text,#20293d);border:1px solid #cbd5e1;border-radius:16px;padding:clamp(14px,3vw,24px);margin-bottom:20px}
 .turso-eod-title {display:flex;justify-content:space-between;gap:12px;align-items:start;flex-wrap:wrap}
 .turso-eod-title h2 {display:flex;align-items:center;gap:8px;font-size:1.2rem;margin:0}
