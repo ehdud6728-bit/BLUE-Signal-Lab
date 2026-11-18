@@ -26,12 +26,12 @@ jobs:
         shell: bash
         working-directory: worker
         env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_ANALYTICS_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: |
           set -euo pipefail
           if [[ -z "${CLOUDFLARE_API_TOKEN:-}" || -z "${CLOUDFLARE_ACCOUNT_ID:-}" ]]; then
-            echo "::error::CLOUDFLARE_API_TOKEN or CLOUDFLARE_ACCOUNT_ID secret is missing."
+            echo "::error::CLOUDFLARE_ANALYTICS_API_TOKEN or CLOUDFLARE_ACCOUNT_ID secret is missing."
             exit 1
           fi
 
@@ -49,13 +49,29 @@ jobs:
           } >> "${GITHUB_STEP_SUMMARY}"
 
           insights_json="$(mktemp)"
-          trap 'rm -f "${insights_json}"' EXIT
-          if ! npx wrangler d1 insights 272318c7-afd2-419c-91cc-dc59475ef87a --sort-by=reads --time-period=7d --limit=20 --json > "${insights_json}" 2>/dev/null; then
-            echo "::error::D1 Insights 조회 실패. API 토큰의 Account Analytics Read 권한을 확인하세요. D1 테이블 쿼리로 대체하지 않습니다."
+          insights_error="$(mktemp)"
+          trap 'rm -f "${insights_json}" "${insights_error}"' EXIT
+          if ! npx wrangler d1 insights 272318c7-afd2-419c-91cc-dc59475ef87a --sort-by=reads --time-period=7d --limit=20 --json > "${insights_json}" 2> "${insights_error}"; then
+            # Categorize Wrangler errors without printing raw stderr, SQL or credentials.
+            reason="UNKNOWN_INSIGHTS_ERROR"
+            guidance="Cloudflare Analytics API 접근 상태 및 Wrangler 버전을 확인하세요."
+            if grep -Eiq 'permission|not authorized|unauthorized|forbidden|authentication|401|403|10000' "${insights_error}"; then
+              reason="ANALYTICS_TOKEN_PERMISSION"
+              guidance="분석 전용 토큰에 Account > Account Analytics > Read 권한과 정확한 계정 범위가 있는지 확인하세요."
+            elif grep -Eiq 'unknown command|unknown argument|unknown option|invalid option|not found: d1 insights' "${insights_error}"; then
+              reason="WRANGLER_COMMAND_COMPATIBILITY"
+              guidance="Wrangler 버전과 d1 insights 명령 지원 여부를 확인하세요."
+            elif grep -Eiq 'database.*(not found|does not exist|unknown)|unknown database|404' "${insights_error}"; then
+              reason="DATABASE_IDENTIFIER_OR_ACCESS"
+              guidance="D1 데이터베이스 ID와 분석 전용 토큰의 계정 범위를 확인하세요."
+            fi
+            echo "::error::D1 Insights 조회 실패 [${reason}]. ${guidance} 운영 D1 직접 SQL 조회는 수행하지 않았습니다."
             {
               echo "## 조회 불가"
-              echo "- Account Analytics Read 권한 또는 Wrangler 호환성을 점검하세요."
-              echo "- **안전을 위해 D1 테이블 조회로 대체하지 않았습니다.**"
+              echo "- 분류: \`${reason}\`"
+              echo "- 대응: ${guidance}"
+              echo "- 보안상 Wrangler 원본 오류 메시지와 SQL을 출력하지 않습니다."
+              echo "- **운영 D1 테이블을 조회하지 않았습니다.**"
             } >> "${GITHUB_STEP_SUMMARY}"
             exit 1
           fi
