@@ -1,5 +1,14 @@
 # Turso 연결 검사 (BLUE Signal Lab)
 
+## 2026-11-18 — 코드만 두 번 표시되는 문제: 종목명 전체 복구
+
+Turso의 일자별 확정 종가/가격·거래량은 이미 저장되었지만 원천 `pykrx` 일봉에는 종목명(`Name`)이 비어 있어 화면에 `005930 005930`으로 보였습니다. **저장된 KRX 확정 가격과 검증 감사·해시는 변경하지 않습니다.** 검증된 별도 `SYMBOL_DIRECTORY.json`의 `code`, `name`, `market`, `asof`를 이름 테이블에 기록해 조회 시 결합합니다. 디렉터리 이름은 기준일 현재의 명칭이며 과거 상호 변경을 완벽히 재현하지 않을 수 있습니다.
+
+1. 해당 수정 PR을 병합한 후 [BLUE Market Scan Research Only](https://github.com/ehdud6728-bit/BLUE-Signal-Lab/actions/workflows/blue_market_scan_research_only.yml)에서 `asof_date=latest`, `publish_to_d1=false`, `publish_diagnostic_only=false`, `turso_directory_mode=dry_run`으로 실행해 KRX 스캔·감사·전체 종목 디렉터리 생성에 성공했는지 확인합니다. 이 모드는 Turso/D1 SQL을 실행하지 않습니다.
+2. 검증이 성공하면 **명시적으로** 같은 Actions에서 `turso_directory_mode=apply_all`을 선택합니다. D1 게시 옵션은 둘 다 `false`여야 합니다. 검증된 전체 종목명(코드가 이름인 가짜 값은 거부)을 50개씩 Turso `blue_symbol_directory_v1`에 UPSERT하고 같은 코드·시장·이름·기준일을 다시 읽습니다. 기존 이름을 더 오래된 기준일로 덮어쓰지 않습니다. **이 단계는 D1과 장바구니를 읽거나 쓰지 않습니다.**
+3. 이름 저장이 성공하면 [Turso EOD API 수동 배포](https://github.com/ehdud6728-bit/BLUE-Signal-Lab/actions/workflows/blue_turso_api_eod_deploy.yml)에서 `mode=verify_only` → `mode=deploy_api`, `confirm_worker=blue-signal-lab-api-v2`로 수동 배포합니다. 이후 [웹 정적 안전 배포](https://github.com/ehdud6728-bit/BLUE-Signal-Lab/actions/workflows/blue_web_r15110_static_safe_deploy.yml)를 실행합니다.
+4. 앱에서 `005930` 및 `삼성전자`로 검색해 한글 이름과 실제 종가가 함께 보이는지 확인합니다. **정밀분석·추적·AI 시황·장바구니는 여전히 D1에 의존**하므로 Turso 일봉 이름 복구만으로 이 탭들의 D1 오류가 해결되지는 않습니다. 기존 장바구니 종목 데이터는 삭제하거나 Turso에 자동 이관하지 않습니다.
+
 ## 2026-11-18 — 일봉 조회 복구와 D1 폴백
 
 2026-11-18 [EOD 범위 저장 #44310029226](https://github.com/ehdud6728-bit/BLUE-Signal-Lab/actions/runs/44310029226)의 **8거래일·21,296건** Turso 저장/재조회 검증이 성공했습니다. 앱 복구에는 아래 두 단계의 **분리된 실제 배포**가 필요합니다.

@@ -23,14 +23,20 @@ class TursoEodWorkflowModeTests(unittest.TestCase):
         self.assertRegex(mode_block, r"(?m)^\s+- ['\"]off['\"]$")
         self.assertRegex(mode_block, r"(?m)^\s+- ['\"]dry_run['\"]$")
         self.assertRegex(mode_block, r"(?m)^\s+- ['\"]apply_12['\"]$")
+        self.assertRegex(mode_block, r"(?m)^\s+- ['\"]apply_all['\"]$")
 
     def test_optional_steps_only_run_for_allowlisted_modes(self):
         condition = (
             "if: ${{ inputs.turso_directory_mode == 'dry_run' || "
-            "inputs.turso_directory_mode == 'apply_12' }}"
+            "inputs.turso_directory_mode == 'apply_12' || "
+            "inputs.turso_directory_mode == 'apply_all' }}"
         )
         self.assertEqual(self.workflow.count(condition), 3)
         self.assertNotIn("inputs.turso_directory_mode != 'off'", self.workflow)
+
+    def test_full_name_backfill_blocks_any_d1_publication(self):
+        self.assertIn("if: ${{ inputs.turso_directory_mode == 'apply_all' }}", self.workflow)
+        self.assertIn("if [[ \"$PUBLISH_ALL\" != 'false' || \"$PUBLISH_SYMBOL\" != 'false' ]]", self.workflow)
 
     def test_mode_is_passed_to_pilot_without_implicit_fallback(self):
         self.assertIn("TURSO_EOD_MODE: ${{ inputs.turso_directory_mode }}", self.workflow)
