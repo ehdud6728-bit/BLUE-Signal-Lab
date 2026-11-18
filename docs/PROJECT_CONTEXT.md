@@ -45,6 +45,7 @@
 
 ## 바로 다음 작업
 
+0. **신규 사용자 우선순위(2026-11-18):** 우선 2026-11-09~11-18의 정확한 KRX 일봉 전 종목을 Turso에 채운다. `.github/workflows/blue_turso_verified_eod_range.yml`에서 먼저 `dry_run`으로 8개 평일의 KRX 정확한 날짜·OHLCV·건수·해시를 검증한다. 날짜 하나라도 불확실하면 저장하지 않음. 검증 후 명시적 `apply` 선택으로만 `blue_eod_daily_v1`에 멱등 삽입 및 read-back 완료 기록. **D1/Turso 전체 일치 검사와 주 DB 전환은 이 단계의 선행조건이 아님.** 기존 D1 기능·데이터를 보존한다.
 1. Secrets 설치와 Collector 실제 재배포까지 성공했습니다. 단, [Mirror Status #44279543275](https://github.com/ehdud6728-bit/BLUE-Signal-Lab/actions/runs/44279543275)의 0행은 복제 OFF 상태에서의 결과로 정상입니다.
 2. PR #15 병합·Collector 재배포([#44284567795](https://github.com/ehdud6728-bit/BLUE-Signal-Lab/actions/runs/44284567795)) 및 제한 파일럿([#44284901016](https://github.com/ehdud6728-bit/BLUE-Signal-Lab/actions/runs/44284901016))은 성공했습니다. 하지만 [Turso Status #44286642943](https://github.com/ehdud6728-bit/BLUE-Signal-Lab/actions/runs/44286642943)에서 파일럿 중에도 **0행**입니다. 원인은 아직 미확정이며, 정상 복제 증거가 없습니다.
 3. 먼저 **운영 D1을 추가 조회하지 않고** Cloudflare Collector 상태 로그(`BLUE_R142`, `BLUE_TURSO_MIRROR`)로 `후보 없음/토큰 문제/시세 무효/수집 오류/Turso 쓰기 오류`를 구분합니다. [Tail 실행 #44296117467](https://github.com/ehdud6728-bit/BLUE-Signal-Lab/actions/runs/44296117467)은 KST **20:36~20:43 거래시간 종료 후** 시행돼 0건이며, 종료 코드 처리의 오탐 실패도 확인돼 개선 중입니다. **다음 거래일 09:00~15:20에 7분 라이브 진단을 다시 실행**해야 원인을 구분할 수 있습니다.

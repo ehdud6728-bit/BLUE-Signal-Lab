@@ -1,0 +1,92 @@
+name: BLUE Turso Verified KRX EOD Range - 2026-11-09 to 2026-11-18
+
+on:
+  workflow_dispatch:
+    inputs:
+      start_day:
+        description: 'First calendar day (YYYY-MM-DD); max 10 days, weekends excluded'
+        required: true
+        default: '2026-11-09'
+        type: string
+      end_day:
+        description: 'Last calendar day (YYYY-MM-DD); requested EOD must be available'
+        required: true
+        default: '2026-11-18'
+        type: string
+      mode:
+        description: 'dry_run validates source and files only; apply inserts into Turso only'
+        required: true
+        default: 'dry_run'
+        type: choice
+        options:
+          - 'dry_run'
+          - 'apply'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: blue-turso-eod-range
+  cancel-in-progress: false
+
+jobs:
+  verified_eod:
+    runs-on: ubuntu-latest
+    timeout-minutes: 50
+    steps:
+      - name: Guard correct repository and manual range
+        env:
+          START: ${{ inputs.start_day }}
+          END: ${{ inputs.end_day }}
+          MODE: ${{ inputs.mode }}
+        run: |
+          test "$GITHUB_REPOSITORY" = 'ehdud6728-bit/BLUE-Signal-Lab' || exit 1
+          [[ "$START" =~ ^20[0-9]{2}-[0-9]{2}-[0-9]{2}$ ]] || exit 1
+          [[ "$END" =~ ^20[0-9]{2}-[0-9]{2}-[0-9]{2}$ ]] || exit 1
+          [[ "$MODE" == 'dry_run' || "$MODE" == 'apply' ]] || exit 1
+          echo "BLUE_TURSO_EOD_REQUEST start=$START end=$END mode=$MODE"
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install source validation dependencies
+        run: pip install pandas numpy pyarrow requests 'cryptography>=43,<48' 'pykrx==1.2.9'
+      - name: Test EOD range validation
+        run: python -m unittest discover -s tests -p 'test_turso_verified_eod_range.py' -v
+      - name: Fetch and independently verify each exact KRX trading day
+        env:
+          START: ${{ inputs.start_day }}
+          END: ${{ inputs.end_day }}
+          KRX_AUTH_KEY: ${{ secrets.KRX_AUTH_KEY }}
+          KRX_ID: ${{ secrets.KRX_DATA_ID || secrets.KRX_ID }}
+          KRX_PW: ${{ secrets.KRX_DATA_PW || secrets.KRX_PW }}
+          KRX_DATA_ID: ${{ secrets.KRX_DATA_ID || secrets.KRX_ID }}
+          KRX_DATA_PW: ${{ secrets.KRX_DATA_PW || secrets.KRX_PW }}
+        run: |
+          python scripts/turso_verified_eod_range.py \
+            --start "$START" --end "$END" --provider auto \
+            --out output/turso_eod_range
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install Turso importer only
+        working-directory: tools/turso
+        run: npm install --no-audit --no-fund --ignore-scripts --no-package-lock
+      - name: Test bounded Turso importer
+        run: node --test tools/turso/eod-range-import.test.mjs
+      - name: Validate manifest and file without any database connection
+        run: node tools/turso/eod-range-import.mjs --mode=dry_run --input-dir=output/turso_eod_range
+      - name: Insert and read back verified daily prices in Turso only
+        if: ${{ inputs.mode == 'apply' }}
+        env:
+          TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
+          TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
+        run: node tools/turso/eod-range-import.mjs --mode=apply --input-dir=output/turso_eod_range
+      - name: Upload validated day manifest for inspection
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: BLUE_TURSO_EOD_${{ github.run_id }}
+          path: output/turso_eod_range/
+          if-no-files-found: warn
+          retention-days: 14
