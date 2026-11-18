@@ -2,6 +2,13 @@
 
 새 채팅에서 프로젝트를 이어가기 위한 **결정/구현/검증 이력**입니다. 대화 전체를 저장하지 않고 실제 개발에 필요한 내용만 보존합니다. 최신 항목을 위에 추가하고, 결과가 달라지면 추측 대신 검증된 상태로 수정합니다.
 
+## 2026-11-18 (KST) — 진단 Actions 야간 실행 / 7분 종료 판정 개선
+
+- **실행 확인:** [Collector Runtime Tail #44296117467](https://github.com/ehdud6728-bit/BLUE-Signal-Lab/actions/runs/44296117467), UTC 11:36~11:43 = **한국 시간 20:36~20:43**, 거래 시간 종료 후. 로컬 필터 테스트 4/4 통과; 7분 수집 결과 `full_runs=0 mirror_events=0 provider_summaries=0 warnings=0`. **장중 수집 실패의 증거는 아님.** Cloudflare Worker Tail 원문은 보안상 출력되지 않았으며 D1 SQL 실행 없음.
+- **진단 Actions 자체의 결함:** 정해진 7분이 정상적으로 지나도 `timeout`/`wrangler tail` 종료 코드가 기존 허용 목록(`0`, `124`, `130`)에 없으면 실패 처리됨. 이번 실행도 약 7분 후 이 조건에서 종료됐으나 실제 코드 값은 기존 로그에 없어서 미확정. Tail 권한이 없었다고 단정하지 말 것.
+- **개선 PR:** [#17 — Collector 로그 진단 정상 종료 오탐 수정](https://github.com/ehdud6728-bit/BLUE-Signal-Lab/pull/17). 시작/종료 시각과 종료 코드(숫자만)를 출력하고, 정상 관측 시간에 도달했다면 신호에 따른 종료 코드가 달라도 **정상 관측 종료**로 처리. 권한 오류 등으로 조기 종료하면 실패 상태 유지. 운영 D1 조회·Worker 배포·시세 요청 없음.
+- **바로 다음 작업:** 수정 PR 병합 → **다음 거래일 KST 09:00~15:20 중** 7분 로그 진단 수동 실행 → `BLUE_R142` 상태/원인을 토대로 수정. 현재 Turso 0건 원인은 여전히 미확정이며, 만료된 파일럿을 근거 없이 재시작하지 않음.
+
 ## 2026-11-18 (KST) — 수집기 재배포·Turso 파일럿 실행 성공, 실제 복제 0건 진단
 
 - **확인 완료:** [PR #15](https://github.com/ehdud6728-bit/BLUE-Signal-Lab/pull/15) 병합 후 [Collector 실배포 #44284567795](https://github.com/ehdud6728-bit/BLUE-Signal-Lab/actions/runs/44284567795)에서 수집기 테스트 40/40, Wrangler 실배포 및 KIS Secrets 설치 성공. 일반 Turso 복제는 OFF.
