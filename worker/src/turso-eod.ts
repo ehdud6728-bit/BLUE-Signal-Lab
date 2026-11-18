@@ -83,10 +83,11 @@ export async function tursoEodSearch(env:TursoConfig,params:URLSearchParams,fact
   },factory);
 }
 
-/** Compare user-owned discovery dates against *later*, audited KRX daily rows.
+/** Compare user-owned discovery dates against *later*, audited KRX daily rows
+ * and separately validated KIS saved snapshots. Neither is an exchange feed.
  * This does not require the discovery day to exist in Turso: older basket
  * baselines belong to the user's preserved local/D1 discovery evidence.
- * No quote, intraday price, technical signal, or complete-period claim is made.
+ * A KIS saved price is never labelled a confirmed close or full-period high.
  */
 export async function tursoEodCompare(env:TursoConfig,params:URLSearchParams,
   today:string,factory?:ClientFactory){
@@ -102,6 +103,13 @@ export async function tursoEodCompare(env:TursoConfig,params:URLSearchParams,
         AND e.trade_day<=?
       ORDER BY e.trade_day ASC,e.code ASC LIMIT 5001`,args:[...codes,earliest,today]});
     if(result.rows.length>5000)throw Error('TURSO_EOD_COMPARE_RANGE_TOO_LARGE');
+    const snapshots=await client.execute({sql:`SELECT trade_date,code,market,received_at_utc,payload_json
+      FROM blue_kis_live_quotes_r141
+      WHERE code IN (${codes.map(()=>'?').join(',')}) AND trade_date>?
+        AND trade_date<=?
+      ORDER BY trade_date ASC,received_at_utc DESC LIMIT 5001`,
+      args:[...codes,earliest,today]});
+    if(snapshots.rows.length>5000)throw Error('TURSO_KIS_COMPARE_RANGE_TOO_LARGE');
     const byCode=new Map<string,{day:string;close:number;high:number}[]>();
     for(const r of result.rows){
       const day=String(r.trade_day),code=String(r.code);
@@ -110,23 +118,65 @@ export async function tursoEodCompare(env:TursoConfig,params:URLSearchParams,
         !Number.isSafeInteger(high)||high<close)throw Error('TURSO_EOD_COMPARE_INVALID_PRICE');
       const rows=byCode.get(code)||[];rows.push({day,close,high});byCode.set(code,rows);
     }
+    type QuoteSnapshot={day:string;price:number;high:number;at:string;market:string};
+    const quotesByCode=new Map<string,QuoteSnapshot[]>();
+    for(const r of snapshots.rows){
+      try{
+        const code=String(r.code),day=String(r.trade_date),market=String(r.market);
+        const at=String(r.received_at_utc);
+        const payload=JSON.parse(String(r.payload_json)) as Record<string,unknown>;
+        const price=Number(payload.price),high=Number(payload.high),low=Number(payload.low);
+        const timestamp=Date.parse(at);
+        // Verify stored row keys AND the original KIS evidence. Invalid rows
+        // are omitted, never converted to prices or allowed to hide audited EOD.
+        if(!codes.includes(code)||!validDay(day)||day>today||
+          !['J','NX'].includes(market)||payload.code!==code||
+          payload.trade_date_kst!==day||payload.market!==market||
+          payload.received_at_utc!==at||payload.source!=='KIS_REST_INQUIRE_PRICE'||
+          payload.research_only!==true||!Number.isFinite(timestamp)||
+          new Date(timestamp+9*3600_000).toISOString().slice(0,10)!==day||
+          !Number.isSafeInteger(price)||price<=0||
+          !Number.isSafeInteger(high)||high<price||
+          !Number.isSafeInteger(low)||low<=0||low>price||
+          (payload.reported_trade_date!=null&&payload.reported_trade_date!==day.replaceAll('-','')))continue;
+        const rows=quotesByCode.get(code)||[];
+        rows.push({day,price,high,at,market});quotesByCode.set(code,rows);
+      }catch{/* A corrupt or unverified snapshot does not invalidate audited EOD. */}
+    }
     const items=pairs.map(({code,day})=>{
       const later=(byCode.get(code)||[]).filter(r=>r.day>day);
-      const latest=later.at(-1)||null;
-      const high=later.reduce<(typeof later)[number]|null>((best,row)=>
-        !best||row.high>best.high?row:best,null);
-      return {code,day,status:latest?'READY':'NO_LATER_PRICE',
-        latest_price:latest?.close??null,latest_day:latest?.day??null,
-        latest_source:latest?'KRX_VERIFIED_EOD_CLOSE':null,latest_at:null,latest_market:null,
+      const quoteRows=(quotesByCode.get(code)||[]).filter(r=>r.day>day);
+      const eodLatest=later.at(-1)||null;
+      const quoteLatest=quoteRows.sort((a,b)=>b.day.localeCompare(a.day)||b.at.localeCompare(a.at)||
+        (a.market==='J'?-1:1))[0]||null;
+      // Confirmed EOD supersedes a same-day intraday quote. A later KIS
+      // snapshot supersedes an older confirmed EOD, never vice versa.
+      const useQuote=!!quoteLatest&&(!eodLatest||quoteLatest.day>eodLatest.day);
+      const latestDay=useQuote?quoteLatest!.day:eodLatest?.day??null;
+      const auditedDays=new Set(later.map(r=>r.day));
+      const highs=[...later.map(r=>({day:r.day,high:r.high,source:'KRX_VERIFIED_EOD_HIGH'})),
+        // Audited full-day high supersedes the same-day partial KIS high.
+        ...quoteRows.filter(r=>!auditedDays.has(r.day))
+          .map(r=>({day:r.day,high:r.high,source:'KIS_TURSO_DAY_HIGH'}))];
+      const high=highs.sort((a,b)=>b.high-a.high||a.day.localeCompare(b.day))[0]||null;
+      const observedDays=[...later.map(r=>r.day),...quoteRows.map(r=>r.day)].sort();
+      return {code,day,status:latestDay?'READY':'NO_LATER_PRICE',
+        latest_price:useQuote?quoteLatest!.price:eodLatest?.close??null,latest_day:latestDay,
+        latest_source:useQuote?'KIS_TURSO_SNAPSHOT':eodLatest?'KRX_VERIFIED_EOD_CLOSE':null,
+        latest_at:useQuote?quoteLatest!.at:null,latest_market:useQuote?quoteLatest!.market:null,
         period_high:high?.high??null,period_high_day:high?.day??null,
-        period_high_source:high?'KRX_VERIFIED_EOD_HIGH':null,
-        high_coverage_from:later[0]?.day??null,
-        high_coverage_to:latest?.day??null,
+        period_high_source:high?.source??null,
+        high_coverage_from:observedDays[0]??null,
+        high_coverage_to:observedDays.at(-1)??null,
         // Import range is currently short; it cannot establish complete
         // coverage for arbitrary older local basket discovery dates.
         high_complete:false} satisfies PriceCompareRow & {high_coverage_from:string|null};
     });
-    return {status:'OK',storage:'TURSO',source:'KRX_VERIFIED_EOD_ONLY',items,
-      note:'검증된 KRX 확정 일봉만 사용합니다. 장중 현재가가 아니며 기간 최고가는 부분 관측입니다.'};
+    const hasSavedQuotes=[...quotesByCode.values()].some(rows=>rows.length>0);
+    return {status:'OK',storage:'TURSO',
+      source:hasSavedQuotes?'KRX_VERIFIED_EOD_PLUS_KIS_SAVED':'KRX_VERIFIED_EOD_ONLY',items,
+      note:hasSavedQuotes?
+        'KRX 확정 종가와 별도로 수집된 KIS 저장 시세를 날짜·시각과 함께 구분합니다. 실시간 체결가가 아니며 최고가는 부분 관측입니다.':
+        '검증된 KRX 확정 일봉만 사용합니다. 장중 현재가가 아니며 기간 최고가는 부분 관측입니다.'};
   },factory);
 }

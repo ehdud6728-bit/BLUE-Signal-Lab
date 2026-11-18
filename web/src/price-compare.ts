@@ -15,6 +15,8 @@ export function sourceName(s:string|null|undefined):string {
   case 'KRX_VERIFIED_EOD_HIGH':return 'Turso KRX 일봉 고가';
   case 'KIS_SAVED_QUOTE':return 'KIS 저장 시세';
   case 'KIS_STORED_SNAPSHOT':return 'KIS 저장 시세';
+  case 'KIS_TURSO_SNAPSHOT':return 'Turso KIS 저장 시세 (체결 시각 미검증)';
+  case 'KIS_TURSO_DAY_HIGH':return 'Turso KIS 장중 고가';
   case 'KIS_SEARCH_PRIORITY_R1594':return 'KIS 우선 수집 시세';
   case 'KIS_SEARCH_PRIORITY_DAY_HIGH_R1594':return 'KIS 우선 수집 장중 고가';
   case 'VERIFIED_CHART_EOD':return '검증 일봉 종가';

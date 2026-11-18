@@ -1,8 +1,8 @@
 import {createClient} from '@libsql/client/web';
 
-// Only quotes that were already persisted in D1 are mirrored. The time-boxed
-// pilot is separately opt-in, expires by itself, and never enables full mirror.
-// No D1 SELECT, API read switching, or backfill.
+// Only KIS quotes validated by the existing collector can be mirrored. The
+// separate time-boxed pilot is opt-in and never enables full mirror. D1 may
+// reject a write later; Turso never reads D1 or fabricates a missing quote.
 const PILOT_MAX_DURATION_MS=30*60*1000;
 const PILOT_MAX_QUOTES_PER_RUN=2;
 
