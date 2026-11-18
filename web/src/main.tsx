@@ -92,6 +92,13 @@ function App(){
   const [storageMode,setStorageMode]=useState<'checking'|'turso'|'d1'|'unavailable'>('checking');
   const [tursoDays,setTursoDays]=useState<TursoDay[]>([]);
   const [eodRefresh,setEodRefresh]=useState(0);
+  // The Turso EOD catalog is not a signal scanner. Keep the original D1
+  // research search visible while a verified long-history Turso scanner is built.
+  const [searchSource,setSearchSource]=useState<'patterns'|'daily'>('patterns');
+  const [patternStatus,setPatternStatus]=useState<'checking'|'ready'|'unavailable'>('checking');
+  const [patternSourceError,setPatternSourceError]=useState('');
+  const patternDatesInitialized=useRef(false);
+  const patternSearchActive=storageMode==='d1'||(storageMode==='turso'&&searchSource==='patterns');
   const [mode,setMode]=useState<'single'|'range'>('single');
   const [date,setDate]=useState(todayKST());
   const [start,setStart]=useState(todayKST());
@@ -166,7 +173,7 @@ function App(){
   const [completedDate,setCompletedDate]=useState('');
   const [scanInfo,setScanInfo]=useState('');
   const [actionsUrl,setActionsUrl]=useState('');
-  const [filterOpen,setFilterOpen]=useState(false);
+  const [filterOpen,setFilterOpen]=useState(true);
   const [installPrompt,setInstallPrompt]=useState<InstallPrompt|null>(null);
   const [installGuide,setInstallGuide]=useState(false);
   const [standalone,setStandalone]=useState(false);
@@ -271,8 +278,30 @@ function App(){
       return last?'d1':'unavailable';
     }
   },[fallbackToD1]);
+  const loadPatternDates=useCallback(async()=>{
+    setPatternStatus('checking');setPatternSourceError('');
+    try{
+      const response=await fetch(API+'/api/dates',{credentials:'include',cache:'no-store'});
+      if(!response.ok)throw Error(`D1 분석 날짜 조회 오류 ${response.status}`);
+      const body=await response.json() as {latest?:string};
+      if(typeof body.latest!=='string'||!/^20\d{2}-\d{2}-\d{2}$/.test(body.latest))
+        throw Error('저장된 기술 패턴 분석 날짜가 없습니다.');
+      setLatest(body.latest);setDate(body.latest);setStart(body.latest);setEnd(body.latest);
+      setPatternStatus('ready');
+    }catch(e){
+      setPatternStatus('unavailable');
+      setPatternSourceError(e instanceof Error?e.message:'D1 분석 날짜를 조회하지 못했습니다.');
+      setRows([]);setDays([]);setTotal(null);
+    }
+  },[]);
   const onTursoUnavailable=useCallback((message:string)=>{void fallbackToD1(message);},[fallbackToD1]);
   useEffect(()=>{void loadDates();},[loadDates]);
+  useEffect(()=>{
+    if(storageMode==='turso'&&searchSource==='patterns'&&!patternDatesInitialized.current){
+      patternDatesInitialized.current=true;
+      void loadPatternDates();
+    }
+  },[storageMode,searchSource,loadPatternDates]);
 
   // R1581_SCAN_RESUME: refresh/reopen must not silently lose the server-side scan.
   useEffect(()=>{
@@ -304,6 +333,10 @@ function App(){
     finally{setRequestBusy(false);}
   }
   async function search(p=1,scroll=true,selectedGc:GcKey[]=gcFields,selectedGcLogic:'any'|'all'=gcLogic,requestedDay?:string,patternOverride?:{enabled?:boolean;threshold?:number|null;minSamples?:number;amountEok?:number},selectedTech:TechKey[]=techFields,selectedTechLogic:'any'|'all'=techLogic,queryOverride?:{q?:string;sort?:ResultSort}){
+    if(storageMode==='turso'&&patternStatus!=='ready'){
+      setError('기술 패턴 검색에 사용할 D1 분석 데이터 연결을 먼저 확인해 주세요.');
+      return;
+    }
     const serial=++searchVersion.current;
     const queryAmountEok=patternOverride?.amountEok??amountEok;
     const queryName=(queryOverride?.q??appliedNameQuery).trim();
@@ -366,7 +399,7 @@ function App(){
   }
   // R1581_SCAN_RESUME: keep polling while navigating; persist and resume after reload.
   useEffect(()=>{
-    if(!watchDate||storageMode!=='d1')return;
+    if(!watchDate||!patternSearchActive)return;
     let cancelled=false,inFlight=false;
     const poll=async()=>{
       if(inFlight)return;
@@ -403,7 +436,7 @@ function App(){
     return()=>{cancelled=true;window.clearInterval(timer);
       document.removeEventListener('visibilitychange',onVisible);
       window.removeEventListener('focus',onFocus);};
-  },[watchDate,mode,date,gcFields,gcLogic,storageMode]);
+  },[watchDate,mode,date,gcFields,gcLogic,patternSearchActive]);
 
   const extra=(r:Signal,k:string):unknown=>r.extras?.[k];
   const num=(r:Signal,k:string):number|null=>{const v=extra(r,k);if(v==null||v==='')return null;const n=Number(v);return Number.isFinite(n)?n:null;};
@@ -500,7 +533,7 @@ function App(){
       return;
     }
     setActiveView('research');
-    if(storageMode==='turso'){
+    if(storageMode==='turso'&&searchSource==='daily'){
       window.setTimeout(()=>window.scrollTo({top:0,behavior:'smooth'}),20);
       return;
     }
@@ -516,7 +549,8 @@ function App(){
   const refreshCurrentView=()=>{
     if(activeView==='research'){
       setR1594Refresh(v=>v+1);
-      void loadDates().then(source=>{if(source==='d1'&&total!==null)void search(page,false);});
+      if(storageMode==='turso'&&searchSource==='patterns')void loadPatternDates();
+      else void loadDates().then(source=>{if(source==='d1'&&total!==null)void search(page,false);});
     }else if(activeView==='tracking')setR1594TrackingRefresh(v=>v+1);
     else if(activeView==='basket')setR1594BasketRefresh(v=>v+1);
     else if(activeView==='analysis')setAnalysisRefresh(v=>v+1);
@@ -578,9 +612,19 @@ function App(){
       <button type="button" disabled={activeView==='research'&&(busy||requestBusy)}
         onClick={refreshCurrentView}><RefreshCw size={16}/> 새로고침</button>
     </div>
+    {activeView==='research'&&storageMode==='turso'&&<div className="blue-search-source-switch" role="group" aria-label="검색 종류 선택">
+      <button type="button" className={searchSource==='patterns'?'active':''} aria-pressed={searchSource==='patterns'} onClick={()=>setSearchSource('patterns')}><ScanSearch size={17}/> 기술 패턴 찾기</button>
+      <button type="button" className={searchSource==='daily'?'active':''} aria-pressed={searchSource==='daily'} onClick={()=>setSearchSource('daily')}><Database size={17}/> 확정 일봉 전체</button>
+    </div>}
+    {activeView==='research'&&storageMode==='turso'&&searchSource==='patterns'&&<div className="blue-pattern-source-note" role="status">
+      <strong>기술 패턴 검색 · 기존 D1 분석 자료</strong>
+      <span>BLUE20/30/40 · ENV20/40 중심선 · RSI/스토캐스틱/MACD · 112/224일선 · 과거 패턴 검증</span>
+      {patternStatus==='checking'?<p>저장된 분석 거래일을 확인 중입니다.</p>:patternStatus==='ready'?<p>최근 분석일: <b>{latest}</b> · Turso 확정 일봉 {tursoDays.length}거래일만으로 장기 기술지표를 계산할 수 없어 기존 D1 검색을 사용합니다. 오늘의 실시간 조건 검색은 아닙니다.</p>:
+        <p className="blue-pattern-source-error">D1 분석 조회 불가: {patternSourceError} <button type="button" onClick={()=>void loadPatternDates()}>다시 확인</button> · 확정 일봉 전체는 별도 조회할 수 있습니다.</p>}
+    </div>}
     {storageMode==='d1'&&<div className="turso-fallback-banner" role="status">보조 DB · D1 분석 모드 {error&&'· Turso 일봉 조회 불가'} · 상단 새로고침으로 Turso 재연결 시도</div>}
     {storageMode==='unavailable'&&<div className="turso-unavailable-banner" role="alert">{error}<button type="button" onClick={()=>{void loadDates();}}>다시 연결</button></div>}
-    {storageMode==='d1'&&(watchDate||completedDate||scanInfo)&&<div className="r1581-scan-monitor" role="status">
+    {patternSearchActive&&(watchDate||completedDate||scanInfo)&&<div className="r1581-scan-monitor" role="status">
       <RefreshCw size={16} className={watchDate?'r1581-pending':''}/>
       <div className="r1581-scan-text">
         <strong>{watchDate?`${watchDate} 검색 분석 중`:completedDate?`${completedDate} 분석 완료`:'검색 분석 안내'}</strong>
@@ -600,7 +644,7 @@ function App(){
       <p><a href="/pwa-check.html" target="_blank" rel="noopener noreferrer">PWA 설치 진단 열기</a></p>
       <small>Cloudflare Access 로그인 페이지가 manifest·아이콘을 대신 반환하면 설치할 수 없을 수 있습니다. 접근 제어를 해제하지 말고 진단 결과를 확인하세요.</small>
     </div>}
-    <main className={"app-main "+(activeView!=='research'?'r152-full-mode':'')+(storageMode==='turso'&&activeView==='research'?' eod-recovery-active':'')}>
+    <main className={"app-main "+(activeView!=='research'?'r152-full-mode':'')+(storageMode==='turso'&&activeView==='research'&&searchSource==='daily'?' eod-recovery-active':'')}>
       <aside className={'panel search-panel '+(filterOpen?'filter-open':'filter-closed')} ref={formRef} id="search-panel">
         <div className="search-heading"><h2><SlidersHorizontal size={18}/> 검색 조건</h2><button type="button" className="filter-toggle" onClick={()=>setFilterOpen(v=>!v)} aria-expanded={filterOpen} aria-controls="filter-body">{filterOpen?'조건 접기':'조건 변경'} <ListFilter size={16}/></button></div>
         <div className="filter-body" id="filter-body">
@@ -627,7 +671,7 @@ function App(){
               value={customAmount} onChange={e=>setCustomAmount(e.target.value)}/>}
             <small>거래대금은 검색일 확정 일봉의 실제 원화 금액입니다. 금액이 저장되지 않은 과거 기록은 기준 검색에서 제외됩니다.</small>
           </div>
-          <button className="primary search-submit" disabled={busy||requestBusy} onClick={()=>{void search(1);}}><Search size={18}/>{busy?'검색 중…':'종목 검색하기'}</button>
+          <button className="primary search-submit" disabled={busy||requestBusy||(storageMode==='turso'&&patternStatus!=='ready')} onClick={()=>{void search(1);}}><Search size={18}/>{busy?'검색 중…':'종목 검색하기'}</button>
           <p className="small">저장된 결과를 조회합니다. 거래대금 기준은 당일 확정 일봉이며, 저장되지 않은 이전 금액은 추정하지 않습니다. 장중 현재가 아님.</p>
         </div>
         <div className="search-compact r15108-quickbar" role="group" aria-label="빠른 검색 날짜와 거래대금 변경">
@@ -682,7 +726,7 @@ function App(){
           </section>}
         </div>
         <div className={'r151-research-content '+(activeView==='research'?'':'r151-hidden')}>
-        {storageMode==='turso'&&<TursoEodRecovery key={eodRefresh} api={API} dates={tursoDays} onUnavailable={onTursoUnavailable}/>}
+        {storageMode==='turso'&&searchSource==='daily'&&<TursoEodRecovery key={eodRefresh} api={API} dates={tursoDays} onUnavailable={onTursoUnavailable}/>}
         <div className="stats" ref={summaryRef} id="summary-panel">
           <div className="metric"><span>검색 결과</span><strong>{total==null?'—':total.toLocaleString()}</strong><small>종목</small></div>
           <div className="metric"><span>검색 거래일</span><strong>{total==null?'—':days.length}</strong><small>저장된 날짜</small></div>
