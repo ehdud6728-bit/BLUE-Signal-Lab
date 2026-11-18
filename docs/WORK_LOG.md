@@ -2,6 +2,13 @@
 
 새 채팅에서 프로젝트를 이어가기 위한 **결정/구현/검증 이력**입니다. 대화 전체를 저장하지 않고 실제 개발에 필요한 내용만 보존합니다. 최신 항목을 위에 추가하고, 결과가 달라지면 추측 대신 검증된 상태로 수정합니다.
 
+## 2026-11-19 (KST) — Turso 패턴 검색의 최근 시세 D1 잔여 의존 수정 PR
+
+- **사용자 확인:** [PR #28](https://github.com/ehdud6728-bit/BLUE-Signal-Lab/pull/28) 병합 후 API 검증 [#44358312734](https://github.com/ehdud6728-bit/BLUE-Signal-Lab/actions/runs/44358312734), API 배포 [#44358544419](https://github.com/ehdud6728-bit/BLUE-Signal-Lab/actions/runs/44358544419), 웹 배포 [#44358717880](https://github.com/ehdud6728-bit/BLUE-Signal-Lab/actions/runs/44358717880) 성공. 사용자가 Turso 패턴 검색·차트는 정상 표시됨을 확인했으나 검색 결과 **최근시세는 안 나옴**을 보고.
+- **원인:** `web/src/main.tsx`의 패턴 결과 가격 비교 효과와 종목별 수동 갱신 버튼은 기존 D1 전용 `/api/prices/compare` 및 D1 수집 큐를 계속 호출. Turso 검색/차트만 전환된 상태에서 가격은 D1 장애의 영향을 받음.
+- **수정:** Turso 패턴 검색에는 검증된 Turso `/api/eod/prices/compare` 우선 읽기(`fetchComparedTursoFirst`)를 연결. D1 패턴 보기 모드에서는 기존 비교/서버 수집 요청 유지. Turso 모드의 종목별 버튼은 신규 KIS 수집이 아닌 저장 관측 자료 **재조회**로 명시하고 D1 큐 호출 금지. 영문 혼합 여섯 자리 종목코드 비교 허용 및 테스트 추가.
+- **중요한 한계:** 11월 18일 발견 신호의 경우 11월 19일 후속 일봉·검증 KIS 저장 시세가 없다면 `NO_LATER_PRICE`가 정상. 검색일의 종가를 최근가로 승격하지 않음. 장중 실시간 KIS 호출 기능을 추가한 것은 아님. 배포 전 코드 검증 결과를 별도로 기록해야 함.
+
 ## 2026-11-19 (KST) — Turso 감사 연구 신호 직접 검색·차트, D1 보조 읽기 PR
 
 - **실제 전 단계 증빙:** [GitHub Actions #44351153148](https://github.com/ehdud6728-bit/BLUE-Signal-Lab/actions/runs/44351153148)에서 `BLUE_TURSO_SIGNAL_SNAPSHOT_OK day=2026-11-18 records=189 written=189` 확인. **2026-11-18 하루의 189개 신호**가 Turso에서 검증 저장된 것이며 이전 날짜 전체 이관·D1 완전 복제·운영 읽기 배포 성공을 의미하지 않음.

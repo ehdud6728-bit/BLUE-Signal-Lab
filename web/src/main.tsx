@@ -5,7 +5,7 @@ import PriceCompareMini from './PriceCompareMini';
 import SymbolAnalysisPanel from './SymbolAnalysisPanel';
 import TursoEodRecovery, {type TursoDay} from './TursoEodRecovery';
 import {requestSearchPriority} from './search-priority';
-import {comparisonKey,fetchCompared,type PriceCompare} from './price-compare';
+import {comparisonKey,fetchCompared,fetchComparedTursoFirst,type PriceCompare} from './price-compare';
 import './r1595-group-price.css';
 import AiWidget from './AiWidget';
 import React, {useCallback,useEffect, useRef, useState} from 'react';
@@ -192,18 +192,20 @@ function App(){
   const [r1595RequestNote,setR1595RequestNote]=useState('');
   const r1595Timers=useRef<Map<string,number>>(new Map());
   useEffect(()=>()=>{for(const timer of r1595Timers.current.values())window.clearInterval(timer);r1595Timers.current.clear();},[]);
-  // R1593: browser reads only validated D1 snapshots; no KIS call on search.
+  // Research price comparison must follow the selected research backend.
+  // Turso-first reads verified EOD/saved quotes without touching D1 on success.
   const [r1593Prices,setR1593Prices]=useState<Record<string,PriceCompare>>({});
   const [r1593Busy,setR1593Busy]=useState(false);
   const [r1593Error,setR1593Error]=useState('');
   useEffect(()=>{
     if(activeView!=='research'||!rows.length)return;
-    const ctrl=new AbortController();setR1593Busy(true);setR1593Error('');
-    void fetchCompared(rows,ctrl.signal,partial=>{if(!ctrl.signal.aborted)setR1593Prices(prev=>({...prev,...partial}));}).then(result=>{if(!ctrl.signal.aborted)setR1593Prices(prev=>({...prev,...result}));})
+    const ctrl=new AbortController();setR1593Busy(true);setR1593Error('');setR1593Prices({});
+    const readPrices=patternBackend==='turso'?fetchComparedTursoFirst:fetchCompared;
+    void readPrices(rows,ctrl.signal,partial=>{if(!ctrl.signal.aborted)setR1593Prices(prev=>({...prev,...partial}));}).then(result=>{if(!ctrl.signal.aborted)setR1593Prices(prev=>({...prev,...result}));})
       .catch(e=>{if(!ctrl.signal.aborted)setR1593Error(e instanceof Error?e.message:'최근 시세 확인 실패');})
       .finally(()=>{if(!ctrl.signal.aborted)setR1593Busy(false);});
     return ()=>ctrl.abort();
-  },[rows,activeView,r1594Refresh]);
+  },[rows,activeView,r1594Refresh,patternBackend]);
 
   // R1594: submit at most eight verified visible search symbols to the server queue.
   // This does NOT block the D1 search and NEVER calls KIS from the browser.
@@ -587,14 +589,24 @@ function App(){
     else setR1594AiRefresh(v=>v+1);
   };
   const aiReportDay=mode==='single'?(latest&&date>latest?latest:date):latest||end;
-  // R1595: manually request a missing verified symbol, then poll only that pair.
-  // The protected API validates real discovery evidence; no KIS call from this browser.
+  // Turso research rechecks saved observations only. D1 research retains the
+  // existing protected server-side priority KIS collection flow.
   async function requestMissingQuote(r:Signal){
     const key=comparisonKey(r);
     if(r1595Requesting||r1595Timers.current.size>=3)return;
-    if(!/^\d{6}$/.test(r.code)||!r.close_price||r.close_price<=0)return;
+    if(!/^[0-9A-Z]{6}$/.test(r.code)||!r.close_price||r.close_price<=0)return;
     setR1595Requesting(key);setR1595RequestNote('');
     try{
+      if(patternBackend==='turso'){
+        const saved=await fetchComparedTursoFirst([{code:r.code,day:r.day}]);
+        setR1593Prices(prev=>({...prev,...saved}));
+        const price=saved[key];
+        setR1595RequestNote(price?.status==='READY'
+          ?`${r.name||r.code}: ${price.latest_day} 저장된 시세를 다시 확인했습니다. 장중 실시간 가격은 아닙니다.`
+          :`${r.name||r.code}: ${r.day} 검색 이후 검증된 시세가 아직 없습니다. Turso 저장 자료만 다시 확인했으며 신규 수집 요청은 하지 않았습니다.`);
+        return;
+      }
+      if(!/^\d{6}$/.test(r.code))return;
       const requestStartedAt=new Date().toISOString();
       const result=await requestSearchPriority([{code:r.code,day:r.day}]);
       if(result.not_verified){setR1595RequestNote(`${r.name||r.code}: 검증된 발견 기록이 없어 요청할 수 없습니다.`);return;}
@@ -789,7 +801,7 @@ function App(){
           {r1593Error&&<p className="r1593-comparison-status" role="status">가격 비교: {r1593Error}</p>}
           {r1595RequestNote&&<p className="r1595-request-status" role="status">{r1595RequestNote}</p>}
           {rows.length>0&&<p className="r1594-quote-note" role="status">{patternBackend==='turso'
-            ?'Turso 패턴 기록은 확정 일봉 스냅샷입니다. 현재가 비교는 별도 조회이며 장중 실시간 체결가를 뜻하지 않습니다.'
+            ?'Turso 검증 일봉·저장된 KIS 시세만 확인합니다. 검색일 이후 새로운 거래일 자료가 없으면 최근 확인가는 비어 있습니다. ↻ 저장 시세 확인은 새 수집 요청이 아닙니다.'
             :r1594QueueStatus+' · 수집 가능한 시장 시간에만 KIS 가격이 갱신됩니다.'}</p>}
           <div className="gc-filter-panel r15102-unified-filter" aria-label="골든크로스 및 다중 조건 과거 패턴 필터">
               <div className="gc-filter-heading"><strong><ListFilter size={15}/> 골든크로스 필터</strong><span>검색 전체 결과에 적용 · 당일 발생만</span></div>
@@ -916,6 +928,7 @@ function App(){
               <td>{r.signals.map(s=><span className="tag" key={s}>{showSignal(s)}</span>)}{techBadges(r).map(t=><span className="r1591-search-tech" key={t}>{t}</span>)}{supplyTag(r)}</td><td className="r1593-price-cell"><strong>{money(r.close_price)}원</strong><small> · 검색일 종가</small>
                 <PriceCompareMini data={r1593Prices[comparisonKey(r)]} baseline={r.close_price} loading={r1593Busy&&!r1593Prices[comparisonKey(r)]}
                   onRequest={()=>{void requestMissingQuote(r);}} requesting={r1595Requesting===comparisonKey(r)}
+                  requestLabel={patternBackend==='turso'?'↻ 저장 시세 확인':'↻ 시세 갱신'}
                   requestDisabled={!!r1595Requesting||r1595Timers.current.size>=3}/>
               </td>
               <td>{fmt(r,'rsi')} <small>{crossed(r,'rsi_gc')}</small></td><td>{fmt(r,'slow_14_3_3_k')} / {fmt(r,'slow_14_3_3_d')} <small>{crossed(r,'slow_14_3_3_gc')}</small></td>
@@ -931,6 +944,7 @@ function App(){
               {patternEvidenceBlock(r)}
               <PriceCompareMini compact data={r1593Prices[comparisonKey(r)]} baseline={r.close_price} loading={r1593Busy&&!r1593Prices[comparisonKey(r)]}
                 onRequest={()=>{void requestMissingQuote(r);}} requesting={r1595Requesting===comparisonKey(r)}
+                requestLabel={patternBackend==='turso'?'↻ 저장 시세 확인':'↻ 시세 갱신'}
                 requestDisabled={!!r1595Requesting||r1595Timers.current.size>=3}/>
               <div className="stock-tags">{r.signals.slice(0,4).map(s=><span className="tag" key={s}>{showSignal(s)}</span>)}{r.signals.length>4&&<span className="tag tag-more">+{r.signals.length-4}</span>}{supplyTag(r)}</div>
               <div className="r1599-mobile-meta">{amountLabel(r)}</div>
@@ -971,6 +985,7 @@ function App(){
         <div className="detail-head"><div><small>{selected.code} · {selected.day}</small><h2>{displayName(selected)}</h2></div><div className="detail-close"><span>종가</span><strong>{money(selected.close_price)} <small>원</small></strong></div></div>
         <PriceCompareMini compact data={r1593Prices[comparisonKey(selected)]} baseline={selected.close_price} loading={r1593Busy&&!r1593Prices[comparisonKey(selected)]}
           onRequest={()=>{void requestMissingQuote(selected);}} requesting={r1595Requesting===comparisonKey(selected)}
+          requestLabel={patternBackend==='turso'?'↻ 저장 시세 확인':'↻ 시세 갱신'}
           requestDisabled={!!r1595Requesting||r1595Timers.current.size>=3}/>
         <div className="study-tags">{selected.signals.map(s=><span key={s}>{showSignal(s)}</span>)}</div>
         <StockChart key={'chart-'+selected.code+'-'+selected.day} code={selected.code}

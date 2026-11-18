@@ -41,6 +41,27 @@ test('valid empty Turso result never burns D1 read quota',async()=>{
  }finally{globalThis.fetch=prev;}
 });
 
+test('Turso reader supports audited alphanumeric KRX symbols',async()=>{
+ const prev=globalThis.fetch,urls=[];
+ try{
+  globalThis.fetch=async url=>{urls.push(new URL(url));return response({storage:'TURSO',items:[{
+    ...snapshot,code:'0000A0',status:'NO_LATER_PRICE',latest_price:null,latest_day:null
+  }]});};
+  const data=await fetchComparedTursoFirst([{code:'0000A0',day:'2026-11-17'}]);
+  assert.equal(urls.length,1);
+  assert.equal(urls[0].pathname,'/api/eod/prices/compare');
+  assert.equal(urls[0].searchParams.get('items'),'0000A0:2026-11-17');
+  assert.equal(data['0000A0:2026-11-17'].status,'NO_LATER_PRICE');
+ }finally{globalThis.fetch=prev;}
+});
+
+test('pattern search price and manual recheck both use Turso reader',async()=>{
+ const main=await readFile(new URL('../web/src/main.tsx',import.meta.url),'utf8');
+ assert.match(main,/const readPrices=patternBackend==='turso'\?fetchComparedTursoFirst:fetchCompared/);
+ assert.match(main,/if\(patternBackend==='turso'\)\{\s*const saved=await fetchComparedTursoFirst/);
+ assert.match(main,/requestLabel=\{patternBackend==='turso'\?'↻ 저장 시세 확인':'↻ 시세 갱신'\}/);
+});
+
 test('Turso outage falls back exactly once to existing D1 endpoint',async()=>{
  const prev=globalThis.fetch,paths=[];
  try{

@@ -5,6 +5,8 @@ import {decodePairs,chartAfterSearch,bestObservation,highSummary,comparePrices} 
 test('date validation and request cap reject arbitrary tickers, duplicates and future dates',()=>{
  assert.equal(decodePairs('005930:2026-11-02','2026-11-12')?.length,1);
  assert.equal(decodePairs('005930:2026-11-02,005930:2026-11-02','2026-11-12')?.length,1);
+ assert.equal(decodePairs('0000A0:2026-11-02','2026-11-12')?.[0]?.code,'0000A0');
+ assert.equal(decodePairs('0000a0:2026-11-02','2026-11-12'),null);
  assert.equal(decodePairs('BAD:2026-11-02','2026-11-12'),null);
  assert.equal(decodePairs('005930:2026-12-02','2026-11-12'),null);
  assert.equal(decodePairs(Array.from({length:25},(_,i)=>`0000${String(i).padStart(2,'0')}:2026-11-02`).join(','),'2026-11-12'),null);
