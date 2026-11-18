@@ -22,7 +22,7 @@ export function decodePairs(value:string,today:string):CompareItem[]|null {
  const parts=value.split(',');if(parts.length>24)return null;
  const pairs:CompareItem[]=[];const seen=new Set<string>();
  for(const part of parts){const [code,day,...extra]=part.split(':');
-  if(extra.length||!/^\d{6}$/.test(code)||!validDay(day)||day<'2025-01-01'||day>today)return null;
+  if(extra.length||!/^[0-9A-Z]{6}$/.test(code)||!validDay(day)||day<'2025-01-01'||day>today)return null;
   if(!seen.has(part)){pairs.push({code,day});seen.add(part);}
  }
  return pairs;

@@ -1,4 +1,4 @@
-/** R1.5.9.3 browser-only reader. D1 results are optional and never interpreted as live trades. */
+/** Browser-only reader. Saved quotes and audited EOD are never live trades. */
 export type PriceCompare = {
  code:string;day:string;status:'READY'|'NO_LATER_PRICE'|'NOT_VERIFIED';
  latest_price:number|null;latest_day:string|null;latest_source:string|null;latest_at:string|null;latest_market:string|null;
@@ -31,11 +31,11 @@ export function sourceName(s:string|null|undefined):string {
 
 /** Prefer audited Turso EOD, falling back to legacy D1 ONLY on an unavailable
  * Turso endpoint or invalid/incomplete response. No D1 calls on valid empty
- * Turso results. Other search/chart UI keeps its established D1 comparison.
+ * Turso results. D1-only comparison remains available for D1 search mode.
  */
 export async function fetchComparedTursoFirst(items:{code:string;day:string}[],signal?:AbortSignal,
  onBatch?:(partial:Record<string,PriceCompare>)=>void):Promise<Record<string,PriceCompare>>{
- const unique=[...new Map(items.filter(x=>/^\d{6}$/.test(x.code)&&/^20\d{2}-\d{2}-\d{2}$/.test(x.day))
+ const unique=[...new Map(items.filter(x=>/^[0-9A-Z]{6}$/.test(x.code)&&/^20\d{2}-\d{2}-\d{2}$/.test(x.day))
   .map(x=>[comparisonKey(x),x] as const)).values()];
  const out:Record<string,PriceCompare>={};
  for(let i=0;i<unique.length;i+=8){
@@ -74,7 +74,7 @@ export async function fetchComparedTursoFirst(items:{code:string;day:string}[],s
 }
 export async function fetchCompared(items:{code:string;day:string}[],signal?:AbortSignal,
  onBatch?:(partial:Record<string,PriceCompare>)=>void):Promise<Record<string,PriceCompare>>{
- const unique=[...new Map(items.filter(x=>/^\d{6}$/.test(x.code)&&/^20\d{2}-\d{2}-\d{2}$/.test(x.day))
+ const unique=[...new Map(items.filter(x=>/^[0-9A-Z]{6}$/.test(x.code)&&/^20\d{2}-\d{2}-\d{2}$/.test(x.day))
   .map(x=>[comparisonKey(x),x] as const)).values()];
  const all:Record<string,PriceCompare>={};
  let failed=0,firstError='';
@@ -94,7 +94,7 @@ export async function fetchCompared(items:{code:string;day:string}[],signal?:Abo
    }
    const data=await r.json() as {items?:PriceCompare[]};
    const partial:Record<string,PriceCompare>={};
-   for(const item of data.items||[]){if(item&&/^\d{6}$/.test(item.code)){
+   for(const item of data.items||[]){if(item&&/^[0-9A-Z]{6}$/.test(item.code)){
     const key=comparisonKey(item);partial[key]=item;all[key]=item;
    }}
    if(Object.keys(partial).length)onBatch?.(partial);
