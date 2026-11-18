@@ -1,6 +1,6 @@
 # BLUE Signal Lab — 현재 프로젝트 상황
 
-> 업데이트: 2026-11-18 (한국 시간). 이 파일은 개발 인계용 요약이며, 서버의 실시간 상태를 자동으로 반영하지 않습니다.
+> 업데이트: 2026-11-19 (한국 시간). 이 파일은 개발 인계용 요약이며, 서버의 실시간 상태를 자동으로 반영하지 않습니다.
 
 ## 목표와 우선순위
 
@@ -50,6 +50,8 @@
 - 권장 수동 순서: `asof_date=latest`, `publish_to_d1=false`, `publish_diagnostic_only=false`, `turso_directory_mode=dry_run` → 검증 성공 및 감사 수치 확인 → 별도 사용자 승인으로 `apply_12` 실행 → Turso 결과 12개 검증. `apply_12`를 선택해도 D1은 건드리지 않습니다. `publish_to_d1=true`는 별도의 운영 쓰기 선택입니다.
 
 ## 바로 다음 작업
+
+- **2026-11-19 추가 (코드 준비, 아직 운영 미적용):** 기존 8거래일을 225개 이상 정확한 거래일로 확장하기 전에, 읽기 전용 수동 Actions `blue_turso_eod_history_coverage.yml`로 Turso 감사 완료일의 수·양 끝 날짜·누락 *후보* 평일·최신 일자 실제 건수·다음 과거 10일 후보 구간을 확인. 휴장일과 공급처 오류를 임의로 구별하지 않음. 225일 수집만으로 종목별 정밀분석·실제 신호 검증 완료라고 주장하지 않음. 다음 작업은 결과에 따라 기존 검증된 일봉 `dry_run`/명시 `apply`를 과거 구간별로 반복하고, 개별 종목 이력·수정주가 검증 후 신호 엔진 이전.
 
 - **Turso 읽기 복구 단계:** `worker/src/turso-eod.ts`, `/api/eod/dates`, `/api/eod/search` 및 PWA의 전용 확정 일봉 화면. 먼저 수동 API Actions `verify_only` 후 `deploy_api`를 명시적으로 선택해 `blue-signal-lab-api-v2`에 Turso URL/토큰 Worker Secrets 두 개를 설치·배포. 이후 기존 웹 안전 배포 Actions를 따로 실행. PR만 병합하면 운영에 자동 적용되지 않음. 다른 탭의 112/224일선·패턴/AI·장바구니는 기존 D1 의존 상태임.
 
