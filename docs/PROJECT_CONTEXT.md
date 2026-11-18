@@ -27,11 +27,21 @@
 
 ## DB 방향 — 확정된 사용자 결정
 
-1. D1을 당장 버리지 않고 **Turso를 병행 연결**합니다.
+1. D1을 당장 버리지 않고 **Turso를 병행 연결**합니다. **2026-11-18 사용자 추가 결정:** 최종 목표는 **Turso 주 DB / D1 보조 DB**, 가능한 범위에서 **동일한 검증된 업무 데이터**를 유지합니다. 현재는 전환 전 단계이며, Turso에 유효 데이터가 저장·검증되기 전까지 D1 원본을 유지합니다.
+   - 최종 쓰기 경로: KRX/KIS 한 번 수집·검증 → Turso 기록 및 동기화 이벤트 → D1에 멱등 복제. 이력/누락 재처리와 행 수·키·값 일치 검증을 필수로 합니다. 두 독립 DB의 동시 트랜잭션은 보장되지 않으므로 복제 지연을 표시합니다.
+   - 최종 읽기 경로: Turso 우선, 장애 시 **마지막 검증된 D1 시점과 데이터 날짜를 명시**하는 읽기 전용 폴백. Turso 장애 중 D1에 독립 쓰기를 허용해 충돌시키지 않습니다.
+   - `runs`, `signals`, `chart_snapshots`, 일봉·시세·장바구니·분석·종목목록은 업무 데이터 복제 후보입니다. Lock, 캐시, KIS 암호화 토큰·비밀값, Worker 런타임 상태는 각 시스템 책임 하에 분리합니다.
+   - **무료 용량 제약:** D1 무료는 단일 DB 최대 **500MB**(계정 합계 5GB), Turso 무료는 총 5GB 수준이므로 모든 과거 대용량 데이터를 D1에 영구히 완전 복제할 수 있다고 가정하지 않습니다. 용량에 앞서 별도 아카이브/유료 전환 여부를 검토해야 합니다.
 2. 2026-11-18에 Turso **libSQL** DB에 대한 비파괴 연결 검사가 성공했습니다([Actions #44276186275](https://github.com/ehdud6728-bit/BLUE-Signal-Lab/actions/runs/44276186275)). Turso 스키마 생성([#44278060936](https://github.com/ehdud6728-bit/BLUE-Signal-Lab/actions/runs/44278060936)), Cloudflare Collector Worker에 Turso Secrets 설치([#44279139920](https://github.com/ehdud6728-bit/BLUE-Signal-Lab/actions/runs/44279139920)), Collector 실배포([#44279762372](https://github.com/ehdud6728-bit/BLUE-Signal-Lab/actions/runs/44279762372))도 성공했지만 **복제 기본값은 OFF**입니다.
 3. 제한된 병행 저장을 위한 수동 파일럿은 **15분/30분 자동 만료 + 5분 수집당 최대 2종목**으로 설계합니다. 실제 적용은 파일럿 코드 병합·재배포 후 수동 Actions 실행이 필요합니다. 이후 복구·재처리·건수/시각/값 일치 검증 → 제한된 읽기 전환 순서입니다. **복구 기능 검증 전 Turso 데이터를 완전한 보관본으로 취급하지 않습니다.**
 4. 장기 원시 데이터/대용량 아카이브는 Google 등 별도 스토리지도 검토 중이나, **선정·배포 완료 상태가 아닙니다**. Cloudflare R2를 무료라고 가정하지 않습니다.
 5. 주요 이력은 `docs/WORK_LOG.md`와 GitHub PR/Actions에 보존하여 새 채팅에서도 이어갑니다.
+
+### 장외 EOD → Turso 소량 실데이터 검증 (신규 수동 경로)
+
+- 기존 `blue_market_scan_research_only.yml`의 EOD 검증 성공 후 같은 `SYMBOL_DIRECTORY.json`를 사용하는 **Turso 단독 12종목 파일럿**을 추가합니다. 새 입력 `turso_directory_mode` 기본값은 `off`; `dry_run`은 외부 DB 호출이 없고, `apply_12`만 **Turso에 최대 12개 종목명**을 `blue_symbol_directory_v1`에 멱등 기록·키별 재검증합니다. D1 SQL 실행·KIS API 호출·Worker 배포·주/보조 DB 전환은 없습니다. 단, 기존 EOD 스캔은 원천 자료를 내려받으므로 데이터 제공처 준비 상태에 좌우됩니다.
+- 이 기능은 기존 5분 수집기를 기다리지 않고 장 마감 이후 **실제 검증된 종목 데이터를 Turso에 저장할 수 있는지** 확인하는 분리된 파일럿입니다. 전체 동일 데이터 복제, 일봉/차트/시그널 복제, 누락 복구, 읽기 전환은 **구현되지 않았습니다**. 기존 EOD 수집/검증 실패를 임의 데이터로 보완하지 않습니다.
+- 권장 수동 순서: `asof_date=latest`, `publish_to_d1=false`, `publish_diagnostic_only=false`, `turso_directory_mode=dry_run` → 검증 성공 및 감사 수치 확인 → 별도 사용자 승인으로 `apply_12` 실행 → Turso 결과 12개 검증. `apply_12`를 선택해도 D1은 건드리지 않습니다. `publish_to_d1=true`는 별도의 운영 쓰기 선택입니다.
 
 ## 바로 다음 작업
 

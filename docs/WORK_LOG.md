@@ -2,6 +2,14 @@
 
 새 채팅에서 프로젝트를 이어가기 위한 **결정/구현/검증 이력**입니다. 대화 전체를 저장하지 않고 실제 개발에 필요한 내용만 보존합니다. 최신 항목을 위에 추가하고, 결과가 달라지면 추측 대신 검증된 상태로 수정합니다.
 
+## 2026-11-18 (KST) — Turso 주 DB / D1 보조 DB 목표 확정, 장외 EOD Turso 12종목 파일럿 준비
+
+- **사용자 결정:** 두 독립 DB에 검증된 업무 데이터를 가능한 동일하게 보존하되, 최종 **Turso를 주 DB, D1을 보조 DB**로 운영. 즉시 전환하지 않고 실제 저장·대조·누락 재처리 및 읽기 장애 폴백을 검증한 뒤 전환합니다. 무료 D1 단일 DB 용량 제한(500MB) 때문에 영구 완전 복제를 무제한 약속하지 않습니다.
+- **이번 코드:** `.github/workflows/blue_market_scan_research_only.yml`에 수동 `turso_directory_mode=off|dry_run|apply_12` 입력 추가. 기존 검증된 `SYMBOL_DIRECTORY.json`를 `tools/turso/eod-directory-pilot.mjs`가 전체 검사 후 코드 순 최대 12개만 Turso의 동일 이름 테이블 `blue_symbol_directory_v1`에 멱등 UPSERT, 정확한 키로 소량 read-back 검증. 기본 off이며 **D1 SQL/Worker 배포/운영 전환 없음**.
+- **분리된 단계:** 파일럿은 실제 종목명 저장 통신 테스트이고 `runs`·`signals`·`chart_snapshots` 및 과거 대용량 자료의 전체 미러와는 다릅니다. 현재 Turso 0건 원인은 여전히 미확정. 새 경로 성공을 5분 시세 복제 성공으로 해석하지 않습니다.
+- **로컬 테스트:** Turso 파일럿 Node 테스트 **5/5** 통과, GitHub Actions YAML 파싱 및 `git diff --check` 통과. 실제 Turso DB 쓰기와 D1 운영 DB 조회는 실행하지 않았습니다.
+- **바로 다음:** PR 병합 후 EOD 스캔 `dry_run` → 검증 성공 시 수동 `apply_12` → Turso 입출력 확인 → 운영 D1 데이터 백필·재시도 큐·전량 정합성 검사·Turso 우선 읽기 기능을 순차 구현. **사용자 승인 없이 즉시 운영 DB를 바꾸지 않음**.
+
 ## 2026-11-18 (KST) — 진단 Actions 야간 실행 / 7분 종료 판정 개선
 
 - **실행 확인:** [Collector Runtime Tail #44296117467](https://github.com/ehdud6728-bit/BLUE-Signal-Lab/actions/runs/44296117467), UTC 11:36~11:43 = **한국 시간 20:36~20:43**, 거래 시간 종료 후. 로컬 필터 테스트 4/4 통과; 7분 수집 결과 `full_runs=0 mirror_events=0 provider_summaries=0 warnings=0`. **장중 수집 실패의 증거는 아님.** Cloudflare Worker Tail 원문은 보안상 출력되지 않았으며 D1 SQL 실행 없음.
