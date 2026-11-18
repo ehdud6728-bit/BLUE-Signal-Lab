@@ -225,7 +225,7 @@ export async function collect(env, now=new Date(),deps={}){
   try{
     await ensureTables(db);
     locked=await takeLease(db,now);
-    if(!locked)return {status:'SKIPPED_LOCKED'};
+    if(!locked){report.status='SKIPPED_LOCKED';return {...report};}
     const selection=await candidateSelection(db,now,Math.min(MAX_STOCKS,Math.max(1,Number(env.CANDIDATE_LIMIT)||12)));
     report.source_date=selection.asof;
     report.source_kind=selection.source;
@@ -284,6 +284,9 @@ export async function collect(env, now=new Date(),deps={}){
       try{await storeReport(db,report);}catch{console.warn('BLUE_R142_LOG_WRITE_FAILED');}
       try{await releaseLease(db);}catch{console.warn('BLUE_R142_LOCK_RELEASE_FAILED');}
     }
-    console.log(`BLUE_R142 status=${report.status} attempted=${report.attempted} saved=${report.saved} rejected=${report.rejected}`);
+    // Fixed status/reason codes only. Never log SQL, provider payloads, or tokens.
+    const safeReasons=new Set(['NO_VERIFIED_CANDIDATES','STALE_OR_FUTURE_EOD','SANITIZED_RUNTIME_FAILURE']);
+    const reason=safeReasons.has(report.reason)?report.reason:'NONE';
+    console.log(`BLUE_R142 status=${report.status} reason=${reason} attempted=${report.attempted} saved=${report.saved} rejected=${report.rejected}`);
   }
 }

@@ -89,3 +89,14 @@ Actions URL: https://github.com/ehdud6728-bit/BLUE-Signal-Lab/actions/workflows/
 - 시간제한이 끝나도 이미 저장된 Turso 시세는 자동 삭제하지 않습니다. 15분/30분은 **추가 쓰기 허용 시간**입니다.
 - 마지막 수집 회차가 파일럿 종료 전에 시작돼도 Turso 비동기 단계에서는 종료 시각을 한 번 더 검사합니다.
 - 리플레이 큐가 없으므로 Turso 오류 시 과거 누락 데이터는 자동 복구되지 않습니다. Turso는 아직 완전한 운영 백업도, 애플리케이션 읽기 원본도 아닙니다.
+
+## 7. 파일럿이 성공했는데 Turso가 0건인 경우: D1 SQL 없는 진단
+
+2026-11-18 최신 수집기 실배포 및 수동 파일럿 성공 후에도 [Turso-only 상태 확인 #44286642943](https://github.com/ehdud6728-bit/BLUE-Signal-Lab/actions/runs/44286642943)은 **0행**이었습니다. 연결 실패가 아닌 실제 복제/수집 단계의 미확인 문제입니다.
+
+1. [BLUE Collector Runtime Tail Diagnostic (READ ONLY)](https://github.com/ehdud6728-bit/BLUE-Signal-Lab/actions/workflows/blue_r142_collector_tail_diagnostic.yml)을 `main` 병합 후 수동 실행합니다.
+2. `capture_minutes=7`을 선택합니다. **7분 동안** Cloudflare에서 `blue-market-collector`의 **새로 발생하는** Worker 로그만 받아오며 기존 로그를 소급 조회하지 않습니다.
+3. `BLUE_COLLECTOR_TAIL`에서 수집기 `BLUE_R142` 상태와 저장 행 수, `BLUE_TURSO_MIRROR` 상태, `BLUE_TURSO_MIRROR_WRITE_FAILED` 여부를 확인합니다.
+4. `PAUSED_NO_FRESH_CANDIDATES`면 후보 원천/일봉 증빙 갱신, `PAUSED_TOKEN_EXPIRED_OR_MISSING`면 토큰 만료/캐시, `NO_VALID_QUOTES`면 KIS 응답 검증, `COLLECTOR_ERROR`면 DB 쓰기 등 수집 오류, `BLUE_TURSO_MIRROR_WRITE_FAILED`면 Turso 비동기 쓰기를 우선 조사합니다. 로그가 없으면 Cron과 관측 시간을 재확인합니다.
+
+**안전:** 이 Actions는 Cloudflare에 배포하지 않고 D1/KIS/Turso에 SQL·시세 요청을 보내지 않습니다. 구독/조회하는 로그도 사전에 지정한 상태·숫자 필드만 출력하므로 KIS 키, URL, SQL, 원시 시세 payload를 노출하지 않습니다. Cloudflare Worker Tail 권한이 없다면 실패 메시지만 출력하고 종료합니다. 계정의 Workers 로그 수집/쿼터 설정은 별도이며, 7분간 GitHub Actions 실행 시간을 소비합니다.
