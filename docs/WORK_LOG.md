@@ -2,6 +2,17 @@
 
 새 채팅에서 프로젝트를 이어가기 위한 **결정/구현/검증 이력**입니다. 대화 전체를 저장하지 않고 실제 개발에 필요한 내용만 보존합니다. 최신 항목을 위에 추가하고, 결과가 달라지면 추측 대신 검증된 상태로 수정합니다.
 
+## 2026-11-18 (KST) — 수집기 재배포·Turso 파일럿 실행 성공, 실제 복제 0건 진단
+
+- **확인 완료:** [PR #15](https://github.com/ehdud6728-bit/BLUE-Signal-Lab/pull/15) 병합 후 [Collector 실배포 #44284567795](https://github.com/ehdud6728-bit/BLUE-Signal-Lab/actions/runs/44284567795)에서 수집기 테스트 40/40, Wrangler 실배포 및 KIS Secrets 설치 성공. 일반 Turso 복제는 OFF.
+- **파일럿 재시작:** [#44284901016](https://github.com/ehdud6728-bit/BLUE-Signal-Lab/actions/runs/44284901016)에서 `start_15m` 성공. UTC 10:38:32.778 (= KST 19:38:32) 자동 만료, 회당 최대 2종목 제한.
+- **관측:** [Turso Status #44286642943](https://github.com/ehdud6728-bit/BLUE-Signal-Lab/actions/runs/44286642943), UTC 10:34 (= KST 19:34) `latest_symbols=0 history_rows=0`. Turso SQL 읽기는 정상이며 **실제 복제 성공은 아직 확인되지 않음**.
+- **원인 미확정:** 수집 자체의 `PAUSED_NO_FRESH_CANDIDATES`, `PAUSED_TOKEN_EXPIRED_OR_MISSING`, `NO_VALID_QUOTES`, `COLLECTOR_ERROR` 또는 Turso 비동기 오류 여부를 먼저 분리해야 함. Google OAuth/Turso 웹사이트 로그인 거부가 이 0건의 직접 원인이라는 근거 없음.
+- **이번 진단 PR:** `.github/workflows/blue_r142_collector_tail_diagnostic.yml`에 수동 3/7분 **Cloudflare Worker 실시간 로그 읽기만** 수행하는 Actions 추가. `collector/tools/tail-diagnostic.mjs`는 `BLUE_R142`·`BLUE_TURSO_MIRROR`의 정해진 상태 코드/숫자만 출력하며 토큰, SQL, 요청 URL, KIS 응답 원문은 버림. `collector/src/core.mjs`는 상태 코드의 안전한 원인 필드(`NO_VERIFIED_CANDIDATES`, `STALE_OR_FUTURE_EOD`, `SANITIZED_RUNTIME_FAILURE`)를 출력해 문제 원인 분류 향상. 이 진단은 **운영 D1 SQL 실행 없음**, 시세 수집을 인위적으로 실행하지 않음.
+- **주의:** Cloudflare Wrangler `tail`은 **미래의 실시간 로그**만 받아오므로 5분 수집 시점 포함 7분 캡처를 권장. 과거 수집 실패를 소급해 조회하지 못함. 코드 병합/재배포 전에는 새 `reason` 필드가 없을 수 있으나 구버전 상태 요약도 파싱 가능.
+- **로컬 검증 완료:** 수집기 `npm test` **44/44** 통과(진단 로그 필터 4개 테스트 신규), Wrangler `npm run build:check` dry-run 성공(`TURSO_MIRROR_ENABLED=false` 유지). GitHub Actions YAML 파싱 성공. **Cloudflare 실시간 tail은 아직 실행하지 않았으며 운영 Worker도 변경하지 않음.**
+- **후속:** 진단 PR 병합 → (필요시) Collector 재배포 후 한국 주식시장 거래 시간에 읽기 전용 진단 Actions 실행 → `BLUE_R142` 상태와 Turso 복제 결과로 실제 원인 확정 → 최소 범위 수정 및 재검증. 무근거 전체 복제 재실행/DB 이관 금지.
+
 ## 2026-11-18 (KST) — 수집기 실제 배포 성공 / 자동 만료 Turso 소량 복제 파일럿 준비
 
 - **확인 완료:** [Secrets 설치 #44279139920](https://github.com/ehdud6728-bit/BLUE-Signal-Lab/actions/runs/44279139920)에서 Cloudflare Worker Turso Secrets 두 개 등록 성공. [Turso 상태 확인 #44279543275](https://github.com/ehdud6728-bit/BLUE-Signal-Lab/actions/runs/44279543275)에서 최신/이력 모두 0행(복제 OFF이므로 정상). [Collector 실제 배포 #44279762372](https://github.com/ehdud6728-bit/BLUE-Signal-Lab/actions/runs/44279762372)에서 테스트 37개/드라이런 성공, 운영 `blue-market-collector`에 실제 배포 성공. 당시 `TURSO_MIRROR_ENABLED=false`.
