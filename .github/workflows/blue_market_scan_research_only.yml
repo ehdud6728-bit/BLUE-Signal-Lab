@@ -33,6 +33,15 @@ on:
           - 'dry_run'
           - 'apply_12'
           - 'apply_all'
+      turso_signals_mode:
+        description: 'D1-compatible research signals to Turso: off(default), dry_run(no DB calls), apply(requires audited EOD day)'
+        required: true
+        default: 'off'
+        type: choice
+        options:
+          - 'off'
+          - 'dry_run'
+          - 'apply'
 
 permissions:
   contents: read
@@ -127,12 +136,12 @@ jobs:
                 audit['matched_stocks'],audit.get('data_phase'),audit['target_day_source'])
           PY
       - name: Setup Node for opt-in Turso directory pilot
-        if: ${{ inputs.turso_directory_mode == 'dry_run' || inputs.turso_directory_mode == 'apply_12' || inputs.turso_directory_mode == 'apply_all' }}
+        if: ${{ inputs.turso_directory_mode == 'dry_run' || inputs.turso_directory_mode == 'apply_12' || inputs.turso_directory_mode == 'apply_all' || inputs.turso_signals_mode == 'dry_run' || inputs.turso_signals_mode == 'apply' }}
         uses: actions/setup-node@v4
         with:
           node-version: '22'
       - name: Install Turso client for opt-in pilot
-        if: ${{ inputs.turso_directory_mode == 'dry_run' || inputs.turso_directory_mode == 'apply_12' || inputs.turso_directory_mode == 'apply_all' }}
+        if: ${{ inputs.turso_directory_mode == 'dry_run' || inputs.turso_directory_mode == 'apply_12' || inputs.turso_directory_mode == 'apply_all' || inputs.turso_signals_mode == 'dry_run' || inputs.turso_signals_mode == 'apply' }}
         working-directory: tools/turso
         run: npm install --no-audit --no-fund --ignore-scripts --no-package-lock
       - name: Test and import selected verified EOD names to Turso (manual opt-in)
@@ -144,6 +153,19 @@ jobs:
         run: |
           node --test tools/turso/eod-directory-pilot.test.mjs
           node tools/turso/eod-directory-pilot.mjs --mode="$TURSO_EOD_MODE" --input-dir=output
+      - name: Export the same EOD signal and chart evidence as D1
+        if: ${{ inputs.turso_signals_mode == 'dry_run' || inputs.turso_signals_mode == 'apply' }}
+        run: |
+          python scripts/export_turso_signal_snapshot.py --input-dir output --out output/turso_signals
+      - name: Verify and optionally store independently audited signal snapshot in Turso
+        if: ${{ inputs.turso_signals_mode == 'dry_run' || inputs.turso_signals_mode == 'apply' }}
+        env:
+          TURSO_SIGNALS_MODE: ${{ inputs.turso_signals_mode }}
+          TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
+          TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
+        run: |
+          node --test tools/turso/signal-snapshot-import.test.mjs
+          node tools/turso/signal-snapshot-import.mjs --mode="$TURSO_SIGNALS_MODE" --input-dir=output/turso_signals
       - name: Generate D1 SQL and remove transaction statements
         run: |
           python scripts/csv_to_d1.py \

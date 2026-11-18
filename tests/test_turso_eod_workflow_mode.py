@@ -26,13 +26,33 @@ class TursoEodWorkflowModeTests(unittest.TestCase):
         self.assertRegex(mode_block, r"(?m)^\s+- ['\"]apply_all['\"]$")
 
     def test_optional_steps_only_run_for_allowlisted_modes(self):
-        condition = (
+        directory_only = (
             "if: ${{ inputs.turso_directory_mode == 'dry_run' || "
             "inputs.turso_directory_mode == 'apply_12' || "
             "inputs.turso_directory_mode == 'apply_all' }}"
         )
-        self.assertEqual(self.workflow.count(condition), 3)
+        shared_node_setup = (
+            "if: ${{ inputs.turso_directory_mode == 'dry_run' || "
+            "inputs.turso_directory_mode == 'apply_12' || "
+            "inputs.turso_directory_mode == 'apply_all' || "
+            "inputs.turso_signals_mode == 'dry_run' || "
+            "inputs.turso_signals_mode == 'apply' }}"
+        )
+        self.assertEqual(self.workflow.count(directory_only), 1)
+        self.assertEqual(self.workflow.count(shared_node_setup), 2)
         self.assertNotIn("inputs.turso_directory_mode != 'off'", self.workflow)
+        self.assertNotIn("inputs.turso_signals_mode != 'off'", self.workflow)
+
+    def test_turso_signal_export_is_explicit_and_d1_independent(self):
+        block = self.workflow.split("      turso_signals_mode:", 1)[1].split(
+            "\npermissions:", 1
+        )[0]
+        for literal in ('off', 'dry_run', 'apply'):
+            self.assertIn(f"- '{literal}'", block)
+        self.assertIn("default: 'off'", block)
+        condition = "if: ${{ inputs.turso_signals_mode == 'dry_run' || inputs.turso_signals_mode == 'apply' }}"
+        self.assertEqual(self.workflow.count(condition), 2)
+        self.assertIn('node tools/turso/signal-snapshot-import.mjs --mode="$TURSO_SIGNALS_MODE"', self.workflow)
 
     def test_full_name_backfill_blocks_any_d1_publication(self):
         self.assertIn("if: ${{ inputs.turso_directory_mode == 'apply_all' }}", self.workflow)
