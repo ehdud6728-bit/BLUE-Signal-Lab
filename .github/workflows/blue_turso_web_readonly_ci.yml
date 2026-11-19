@@ -1,0 +1,38 @@
+name: BLUE Turso Web Read-Only Safety Tests (NO SECRETS)
+
+on:
+  pull_request:
+    paths:
+      - 'web/src/turso-research-reader.ts'
+      - 'web/src/SmartBasket.tsx'
+      - 'web/src/StopLossRow.tsx'
+      - 'web/src/basket-supply-record.ts'
+      - 'web/src/price-compare.ts'
+      - 'tests/test_turso_research_reader.mjs'
+      - 'tests/test_turso_basket_browser.mjs'
+      - '.github/workflows/blue_turso_web_readonly_ci.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install offline-test TypeScript dependencies
+        working-directory: worker
+        run: npm install --no-package-lock --no-audit --no-fund
+      - name: Verify Turso-first browser API read contracts (no credentials)
+        run: node --test tests/test_turso_research_reader.mjs tests/test_turso_basket_browser.mjs tests/test_turso_basket_prices.mjs
+      - name: Install browser build dependencies
+        working-directory: web
+        run: npm install --no-package-lock --no-audit --no-fund
+      - name: Typecheck and bundle PWA (no deployment)
+        working-directory: web
+        run: npm run build

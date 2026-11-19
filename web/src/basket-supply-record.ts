@@ -1,5 +1,6 @@
 /** BLUE R1.5.10.13 — immutable basket discovery-day supply evidence. */
 import {dailySupplyProfile, type DailyOHLCV, type SupplyBin} from './supply-profile';
+import {fetchResearchChartTursoFirst} from './turso-research-reader';
 
 export type BasketSupplyOutlook={status:string;breakout:number|null;pullback:number|null;undecided:number|null;confidence:string;source:string;basisN:number;direction:string};
 export type BasketSupplyRecord={
@@ -9,7 +10,6 @@ export type BasketSupplyRecord={
  sharePct:number|null;relativePct:number|null;poc:number|null;
  bins:SupplyBin[];outlook5?:BasketSupplyOutlook;outlook10?:BasketSupplyOutlook;
 };
-const API=(import.meta.env.VITE_API_BASE||'https://blue-signal-lab-api-v2.ehdud6728.workers.dev').replace(/\/+$/,'');
 const numeric=(v:unknown):number|null=>{
  if(v==null||v==='')return null;
  const n=Number(v);return Number.isFinite(n)&&n>=0?n:null;
@@ -70,10 +70,8 @@ export function supplyFromChart(payload:unknown,day:string,discoveryClose:number
 
 export async function readSupplyAtDiscovery(code:string,day:string,discoveryClose:number):Promise<BasketSupplyRecord|null>{
  if(!/^\d{6}$/.test(code)||!validDate(day))return null;
- const u=new URL(API+'/api/chart');u.searchParams.set('code',code);u.searchParams.set('date',day);
- const res=await fetch(u.toString(),{credentials:'include',cache:'no-store'});
- if(!res.ok)return null;
- return supplyFromChart(await res.json(),day,discoveryClose);
+ const chart=await fetchResearchChartTursoFirst(code,day);
+ return supplyFromChart(chart,day,discoveryClose);
 }
 
 /** Fail closed on malformed local/backup data; older basket items need no supply record. */

@@ -2,6 +2,13 @@
 
 새 채팅에서 프로젝트를 이어가기 위한 **결정/구현/검증 이력**입니다. 대화 전체를 저장하지 않고 실제 개발에 필요한 내용만 보존합니다. 최신 항목을 위에 추가하고, 결과가 달라지면 추측 대신 검증된 상태로 수정합니다.
 
+## 2026-11-19 (KST) — D1 대기 중 Turso 우선 장바구니 연구 증거 읽기 개선
+
+- **운영 선행 확인:** [안전 감사 #44444330961](https://github.com/ehdud6728-bit/BLUE-Signal-Lab/actions/runs/44444330961)에서 `paused=true`, `pause_at_utc=2026-11-19T02:23:04.174Z`, `WAIT_24H_SINCE_D1_PAUSED` 확인. **2026-11-20 11:23:04 KST 이전 Turso 토큰 발급 금지.** 다음 재감사는 기존 수동 `blue_kis_cutover_audit.yml`에서 실행.
+- **코드 변경:** 브라우저 `web/src/turso-research-reader.ts`에 검증된 Turso `/api/research/chart`, `/api/research/search` **우선 읽기** 추가. 장바구니 손절선·발견일 매물대 및 과거 패턴 근거는 감사 완료 Turso 기록이 존재하면 D1 호출 없이 이용하고, 이전 Turso에 미이관된 날짜/가용성 오류에서만 기존 D1 조회를 보조 사용. Turso 유효한 빈 검색 결과는 D1로 대체하지 않고, 비정상 차트·401/403은 안전하게 실패. 저장된 발견가·메모·차트·성과 근거는 덮어쓰지 않음.
+- **로컬 검증:** `node --test tests/test_turso_research_reader.mjs tests/test_turso_basket_browser.mjs tests/test_turso_basket_prices.mjs` **23/23 통과**, `web` TypeScript+Vite `npm run build` 성공, `git diff --check` 이상 없음. 새 무시크릿 PR CI `.github/workflows/blue_turso_web_readonly_ci.yml`에서 동일 회귀 검사를 반복. 실제 원격 D1/Turso SQL, KIS 발급·시세 수집, Worker/PWA 배포, DB 변경은 **실행하지 않음**.
+- **미해결/다음:** 장바구니 `POST/GET /api/basket/watch` 및 AI·추적은 여전히 D1 의존. 예전 날짜 전체 연구 자료는 Turso에 없을 수 있고, 해당 날짜 D1 보조 읽기는 한도 차단 시 실패. 이 PR만으로 **앱 전체 D1 독립 또는 최신 시세 수집 성공**을 주장하지 않음. 사용자 병합/웹 배포 후 실제 Turso 자료가 있는 날짜의 손절선·매물대·패턴 표시를 확인하고, 다음 별도 PR에서 D1 watch 읽기와 등록 경로를 분리.
+
 
 ## 2026-11-19 (KST) — Turso 전환용 D1 발급 중단·최종 발급 시각 읽기 전용 감사
 
