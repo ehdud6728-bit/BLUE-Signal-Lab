@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """BLUE R1.5.9.7: conservative KIS token maintenance; never exposes tokens.
 
-Issue on expiry only, at most one ATTEMPT per KST day AND 24-hour rolling
-window, with an atomic Cloudflare D1 reservation BEFORE contacting tokenP.
+Renew when expiry approaches; permit one delayed retry for failed issuance,
+while retaining a 24-hour guard after a saved token and atomic D1 reservation.
 This job does not run any market-data or order endpoints. The preexisting
 collector reads the encrypted token vault as before.
 """
@@ -21,6 +21,8 @@ UTC = timezone.utc
 ISSUANCE_TABLE = 'blue_kis_token_issuance_r1597'
 COOLDOWN = timedelta(hours=24)
 SKEW = timedelta(minutes=5)
+RENEW_BEFORE = timedelta(hours=1)
+RETRY_DELAY = timedelta(minutes=30)
 
 
 def iso_utc(value: datetime) -> str:
@@ -79,18 +81,19 @@ def evaluate(metadata, now: datetime) -> tuple[str, str | None]:
         return 'INVALID_TOKEN_METADATA', None
     if saved > now + SKEW or expiry <= saved:
         return 'INVALID_TOKEN_METADATA', None
-    if expiry > now + SKEW:
+    if expiry > now + RENEW_BEFORE:
         return 'TOKEN_VALID', iso_utc(expiry)
     if now - saved < COOLDOWN:
         return 'WAIT_24H_FROM_LAST_SAVED', iso_utc(expiry)
-    return 'TOKEN_EXPIRED_ELIGIBLE', iso_utc(expiry)
+    return ('TOKEN_RENEWAL_DUE' if expiry > now + SKEW else 'TOKEN_EXPIRED_ELIGIBLE'), iso_utc(expiry)
 
 
-def acquire_attempt(db, scope: str, now: datetime) -> bool:
-    """Atomic D1 guard. Reserve BEFORE tokenP; failures remain charged as attempts.
+def acquire_attempt(db, scope: str, now: datetime) -> str | None:
+    """Atomically reserve an initial attempt or one delayed retry.
 
-    Enforces both one attempt per KST calendar day AND at least 24h between
-    reservations. SQLite RETURNING confirms the sole winner of a race.
+    Initial reservations require a new KST day and a rolling 24-hour gap.
+    A failed provider call may retry ONCE, no earlier than 30 minutes later
+    and only on the same KST day. Saving failures are never retried.
     """
     db.query(f'''CREATE TABLE IF NOT EXISTS {ISSUANCE_TABLE} (
       scope TEXT PRIMARY KEY,
@@ -105,17 +108,21 @@ def acquire_attempt(db, scope: str, now: datetime) -> bool:
         (scope,last_attempt_at_utc,last_attempt_day_kst,status,last_success_at_utc)
         VALUES(?,?,?,'CLAIMED',NULL)
         ON CONFLICT(scope) DO UPDATE SET
+          status=CASE WHEN last_attempt_day_kst=excluded.last_attempt_day_kst
+                         AND status='ISSUE_FAILED'
+                      THEN 'CLAIMED_RETRY' ELSE 'CLAIMED' END,
           last_attempt_at_utc=excluded.last_attempt_at_utc,
-          last_attempt_day_kst=excluded.last_attempt_day_kst,
-          status='CLAIMED'
-        WHERE last_attempt_day_kst < excluded.last_attempt_day_kst
-          AND (julianday(excluded.last_attempt_at_utc)-julianday(last_attempt_at_utc)) >= 1.0
-        RETURNING last_attempt_at_utc''', [scope, stamp, day])
-    return len(rows) == 1 and rows[0].get('last_attempt_at_utc') == stamp
-
+          last_attempt_day_kst=excluded.last_attempt_day_kst
+        WHERE (last_attempt_day_kst < excluded.last_attempt_day_kst
+                 AND (julianday(excluded.last_attempt_at_utc)-julianday(last_attempt_at_utc)) >= 1.0)
+           OR (last_attempt_day_kst = excluded.last_attempt_day_kst
+                 AND status='ISSUE_FAILED'
+                 AND (julianday(excluded.last_attempt_at_utc)-julianday(last_attempt_at_utc)) >= (30.0/1440.0))
+        RETURNING last_attempt_at_utc,status''', [scope, stamp, day])
+    return rows[0]['status'] if len(rows) == 1 and rows[0].get('last_attempt_at_utc') == stamp else None
 
 def finish_attempt(db, scope: str, stamp: str, status: str, now: datetime):
-    if status not in ('SAVED', 'ISSUE_FAILED', 'VAULT_SAVE_FAILED'):
+    if status not in ('SAVED', 'ISSUE_FAILED', 'ISSUE_RETRY_FAILED', 'VAULT_SAVE_FAILED'):
         raise ValueError('unsanitized attempt status')
     db.query(f'''UPDATE {ISSUANCE_TABLE}
        SET status=?,last_success_at_utc=CASE WHEN ?='SAVED' THEN ? ELSE last_success_at_utc END
@@ -141,15 +148,17 @@ def maintain(db, appkey: str, appsecret: str, *, now: datetime,
     # Metadata says expired/missing; the one-time endpoint may now be used.
     scope = vault_mod.scope_for(appkey)
     stamp = iso_utc(now)
-    if not acquire_attempt(db, scope, now):
+    claim = acquire_attempt(db, scope, now)
+    if not claim:
         return {'status':'ALREADY_ATTEMPTED_KST_DAY_OR_24H', 'issued':False}
     issuer = issue_once or vault_mod.issue_new_token_once
     try:
         token, new_expiry = issuer(appkey, appsecret)
     except Exception:
         # Do NOT retry ambiguous response failures: token may have been issued.
-        finish_attempt(db, scope, stamp, 'ISSUE_FAILED', now)
-        return {'status':'ISSUE_FAILED_NO_RETRY', 'issued':False}
+        final = claim == 'CLAIMED_RETRY'
+        finish_attempt(db, scope, stamp, 'ISSUE_RETRY_FAILED' if final else 'ISSUE_FAILED', now)
+        return {'status':'ISSUE_FAILED_FINAL' if final else 'ISSUE_FAILED_RETRY_AFTER_30M', 'issued':False}
     try:
         db.put(token,new_expiry,appkey,appsecret)
     except Exception:
@@ -159,14 +168,18 @@ def maintain(db, appkey: str, appsecret: str, *, now: datetime,
     return {'status':'TOKEN_SAVED', 'issued':True, 'expiry_utc':iso_utc(parse_utc(new_expiry))}
 
 
+def scheduled_window(now: datetime) -> bool:
+    kst = now.astimezone(KST)
+    return 6 <= kst.hour <= 19 and (kst.weekday() < 5 or kst.hour == 6)
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--mode', choices=('check','issue'), default='check')
-    parser.add_argument('--scheduled', action='store_true', help='Apply KST business-day 08-19 issuance gate')
+    parser.add_argument('--scheduled', action='store_true', help='Apply KST daily 06:00 and weekday 06-19 issuance gate')
     args = parser.parse_args()
     now = datetime.now(UTC)
-    kst = now.astimezone(KST)
-    if args.mode == 'issue' and args.scheduled and (kst.weekday() >= 5 or not 8 <= kst.hour <= 19):
+    if args.mode == 'issue' and args.scheduled and not scheduled_window(now):
         print(json.dumps({'status':'OUTSIDE_SCHEDULED_KST_WINDOW'}))
         return
     appkey = os.environ.get('KIS_APP_KEY','').strip()
@@ -177,7 +190,7 @@ def main():
         db = vault_mod.D1Vault()
         result = maintain(db,appkey,appsecret,now=now,issue_enabled=args.mode=='issue')
         print('R1597_RESULT '+json.dumps(result,sort_keys=True,ensure_ascii=True))
-        if result['status'] in ('ISSUE_FAILED_NO_RETRY','VAULT_SAVE_FAILED_NO_RETRY','INVALID_TOKEN_METADATA','TOKEN_CACHE_DECRYPT_FAILED','TOKEN_CACHE_INCONSISTENT'):
+        if result['status'] in ('ISSUE_FAILED_RETRY_AFTER_30M','ISSUE_FAILED_FINAL','VAULT_SAVE_FAILED_NO_RETRY','INVALID_TOKEN_METADATA','TOKEN_CACHE_DECRYPT_FAILED','TOKEN_CACHE_INCONSISTENT'):
             raise SystemExit(2)
     except vault_mod.VaultError as exc:
         # VaultError consists of sanitized identifiers, not upstream HTTP bodies.

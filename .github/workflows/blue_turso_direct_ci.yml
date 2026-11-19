@@ -8,6 +8,9 @@ on:
       - 'collector/test/turso-mirror.test.mjs'
       - 'collector/src/handler.mjs'
       - 'collector/turso-direct.test.mjs'
+      - 'scripts/blue_kis_daily_token_r1597.py'
+      - 'tests/test_blue_kis_daily_token_r1597.py'
+      - '.github/workflows/blue_kis_daily_token_r1597.yml'
       - 'tools/turso/kis-token-steward.mjs'
       - 'tools/turso/kis-token-steward.test.mjs'
       - '.github/workflows/blue_turso_direct_ci.yml'
@@ -27,6 +30,15 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install D1 token vault cryptography
+        run: python -m pip install 'cryptography>=43,<48'
+      - name: Test legacy D1 token vault and automatic renewal
+        run: |
+          python -m unittest discover -s tests -p 'test_blue_kis_token_vault_r131.py' -v
+          python -m unittest discover -s tests -p 'test_blue_kis_daily_token_r1597.py' -v
       - name: Install collector dependencies
         working-directory: collector
         run: npm install --no-audit --no-fund --no-package-lock

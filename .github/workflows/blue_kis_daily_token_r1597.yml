@@ -14,12 +14,12 @@ on:
         required: true
         type: boolean
         default: false
-  # Check twice per KST trading hour; a successful tokenP attempt is limited
-  # by both a rolling 24-hour D1 ledger and a KST-day check, NOT by cron timing.
-  # 23:00 UTC Sun-Thu = 08:00 KST Mon-Fri
-  # 00-10 UTC Mon-Fri = 09:00-19:00 KST Mon-Fri
+  # 21:00 UTC = 06:00 KST (every day); 06:30 is a recovery check.
+  # Weekdays continue every 30 minutes through 19:30 KST.
+  # Retries only after a failed attempt, at most once after 30 minutes.
   schedule:
-    - cron: '0,30 23 * * 0-4'
+    - cron: '0,30 21 * * *'
+    - cron: '0,30 22,23 * * 0-4'
     - cron: '0,30 0-10 * * 1-5'
 
 permissions:

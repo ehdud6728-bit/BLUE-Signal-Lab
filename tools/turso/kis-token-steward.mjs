@@ -8,6 +8,8 @@ import {createHash,createCipheriv,hkdfSync,randomBytes} from 'node:crypto';
 const KIS_TOKEN_URL='https://openapi.koreainvestment.com:9443/oauth2/tokenP';
 const DAY_MS=86_400_000;
 const GRACE_MS=5*60_000;
+const RENEW_BEFORE_MS=60*60_000;
+const RETRY_DELAY_MS=30*60_000;
 const hash=s=>createHash('sha256').update(s).digest('hex');
 export const scopeFor=key=>'KIS_PROD_READONLY_V1_'+hash(key).slice(0,20);
 const utc=now=>now.toISOString();
@@ -73,29 +75,43 @@ export async function steward(client,env,now=new Date(),{mode='check',issuer=iss
   const saved=existing?Date.parse(String(existing.saved_at_utc)):NaN;
   if(existing&&(!Number.isFinite(expires)||!Number.isFinite(saved)||saved>now.getTime()+GRACE_MS||
     expires<=saved))return {status:'INVALID_TOKEN_METADATA'};
-  const tokenValid=existing&&expires>now.getTime()+GRACE_MS;
-  if(mode==='check')return {status:tokenValid?'TOKEN_VALID':'TOKEN_MISSING_OR_EXPIRED',
+  const tokenValid=Boolean(existing&&expires>now.getTime()+GRACE_MS);
+  const renewalDue=!tokenValid||expires<=now.getTime()+RENEW_BEFORE_MS;
+  if(mode==='check')return {status:!existing?'TOKEN_MISSING':
+      !tokenValid?'TOKEN_EXPIRED':renewalDue?'TOKEN_EXPIRES_SOON':'TOKEN_VALID',
     expires_at_utc:existing?String(existing.expires_at_utc):null};
   const gate=cutoverReady(env,now);
   if(gate!=='READY')return {status:gate};
-  if(tokenValid)return {status:'TOKEN_VALID',expires_at_utc:String(existing.expires_at_utc)};
-  // Never request a new token within 24h of the last SAVED token.
-  if(existing&&now.getTime()-saved<DAY_MS)return {status:'WAIT_24H_FROM_LAST_SAVED'};
+  if(!renewalDue)return {status:'TOKEN_VALID',expires_at_utc:String(existing.expires_at_utc)};
+  // The previous saved token may remain usable during the renewal window.
+  // No new tokenP call is allowed until 24 hours after that saved token.
+  if(existing&&now.getTime()-saved<DAY_MS)return {
+    status:tokenValid?'TOKEN_VALID_RENEWAL_WAIT_24H':'WAIT_24H_FROM_LAST_SAVED',
+    expires_at_utc:String(existing.expires_at_utc)};
   const stamp=utc(now);
+  // Persist the reservation before tokenP. The only exception to the usual
+  // 24-hour/KST-day attempt guard is ONE retry after a failed provider call,
+  // at least 30 minutes later on that same KST day.
   const claimed=await client.execute({sql:`INSERT INTO blue_turso_kis_issuance_v1
     (scope,last_attempt_at_utc,last_attempt_day_kst,status,last_success_at_utc)
     VALUES(?,?,?,'CLAIMED',NULL)
     ON CONFLICT(scope) DO UPDATE SET
+      status=CASE WHEN last_attempt_day_kst=excluded.last_attempt_day_kst
+                       AND status='ISSUE_FAILED'
+                  THEN 'CLAIMED_RETRY' ELSE 'CLAIMED' END,
       last_attempt_at_utc=excluded.last_attempt_at_utc,
-      last_attempt_day_kst=excluded.last_attempt_day_kst,status='CLAIMED'
-    WHERE last_attempt_day_kst<excluded.last_attempt_day_kst
-      AND (julianday(excluded.last_attempt_at_utc)-julianday(last_attempt_at_utc))>=1.0
-    RETURNING last_attempt_at_utc`,args:[scope,stamp,kstDay(now)]});
+      last_attempt_day_kst=excluded.last_attempt_day_kst
+    WHERE (last_attempt_day_kst<excluded.last_attempt_day_kst
+      AND (julianday(excluded.last_attempt_at_utc)-julianday(last_attempt_at_utc))>=1.0)
+      OR (last_attempt_day_kst=excluded.last_attempt_day_kst AND status='ISSUE_FAILED'
+      AND (julianday(excluded.last_attempt_at_utc)-julianday(last_attempt_at_utc))>=(${RETRY_DELAY_MS}/86400000.0))
+    RETURNING last_attempt_at_utc,status`,args:[scope,stamp,kstDay(now)]});
   if(!claimed.rows?.length)return {status:'ALREADY_ATTEMPTED_KST_DAY_OR_24H'};
+  const retry=claimed.rows[0].status==='CLAIMED_RETRY';
   let issued;
   try{issued=await issuer(key,secret);}catch{
-    await client.execute({sql:"UPDATE blue_turso_kis_issuance_v1 SET status='ISSUE_FAILED' WHERE scope=? AND last_attempt_at_utc=?",args:[scope,stamp]});
-    return {status:'ISSUE_FAILED_NO_RETRY'};
+    await client.execute({sql:"UPDATE blue_turso_kis_issuance_v1 SET status=? WHERE scope=? AND last_attempt_at_utc=?",args:[retry?'ISSUE_RETRY_FAILED':'ISSUE_FAILED',scope,stamp]});
+    return {status:retry?'ISSUE_FAILED_FINAL':'ISSUE_FAILED_RETRY_AFTER_30M'};
   }
   try{
     if(!Number.isFinite(issued.expires)||issued.expires<=now.getTime()+GRACE_MS||
@@ -121,7 +137,7 @@ async function main(){
   try{
     const result=await steward(client,env,new Date(),{mode});
     console.log('BLUE_TURSO_KIS_TOKEN_STEWARD '+JSON.stringify(result));
-    if(['ISSUE_FAILED_NO_RETRY','SAVE_FAILED_NO_RETRY','INVALID_TOKEN_METADATA'].includes(result.status))
+    if(['ISSUE_FAILED_RETRY_AFTER_30M','ISSUE_FAILED_FINAL','SAVE_FAILED_NO_RETRY','INVALID_TOKEN_METADATA'].includes(result.status))
       process.exitCode=1;
   }finally{client.close();}
 }
