@@ -9,7 +9,9 @@ import {buildTursoMirrorStatements} from './turso-mirror.mjs';
 const MAX_PER_TICK=12;
 const MAX_PILOT_MS=30*60*1000;
 const MAX_SOURCE_AGE_DAYS=7;
-const CODE=/^\d{6}$/;
+// KRX stock codes include six-character uppercase alphanumerics (e.g. 00088K).
+// Match the validated EOD candidate and Turso price-comparison contracts.
+const CODE=/^[0-9A-Z]{6}$/;
 const DATE=/^20\d{2}-\d{2}-\d{2}$/;
 const sleep=(ms)=>new Promise(resolve=>setTimeout(resolve,ms));
 

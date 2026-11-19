@@ -84,3 +84,21 @@ test('stale research signals never masquerade as current candidates',async()=>{
   assert.equal(result.status,'STALE_RESEARCH_DAY');
   assert.equal(state.batches.length,0);
 });
+
+test('verified KRX alphanumeric stocks can be collected; invalid codes never reach KIS',async()=>{
+  const {db,state}=mockDb({expected:2,count:2,rows:[
+    {code:'00088K',close_price:'15000',signal_names:'ENV20'},
+    {code:'00-88K',close_price:'15000',signal_names:'ENV20'}
+  ]});
+  const queried=[]; const result=await collectTursoDirect(env(),NOW,{
+    clientFactory:()=>db,marketsFor:()=>[['J','KRX_REGULAR']],
+    token:async()=> 'fake-validated-token',
+    quote:async(_env,_token,_market,code)=>{queried.push(code);return response();},
+    receivedAt:NOW,noPacing:true
+  });
+  assert.equal(result.status,'SAVED');
+  assert.equal(result.saved,1);
+  assert.equal(result.rejected,1);
+  assert.deepEqual(queried,['00088K']);
+  assert.equal(state.batches[0].statements[0].args[2],'00088K');
+});

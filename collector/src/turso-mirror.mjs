@@ -25,7 +25,7 @@ export function buildTursoMirrorStatements(quotes) {
   for (const q of quotes) {
     if (!/^\d{4}-\d{2}-\d{2}$/.test(q?.trade_date_kst || '') ||
         !['J','NX'].includes(q?.market) ||
-        !/^\d{6}$/.test(q?.code || '') ||
+        ! /^[0-9A-Z]{6}$/.test(q?.code || '') ||
         !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/.test(q?.received_at_utc || '') ||
         !Number.isSafeInteger(q?.price) || q.price <= 0 ||
         !Number.isSafeInteger(q?.accumulated_volume) || q.accumulated_volume < 0 ||
