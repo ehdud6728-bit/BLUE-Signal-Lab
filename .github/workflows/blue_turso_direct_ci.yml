@@ -9,6 +9,10 @@ on:
       - 'collector/src/turso-mirror.mjs'
       - 'collector/test/turso-mirror.test.mjs'
       - 'collector/wrangler.jsonc'
+      - 'tools/turso/primary-readiness-audit.mjs'
+      - 'tools/turso/primary-readiness-audit.test.mjs'
+      - '.github/workflows/blue_turso_primary_readiness.yml'
+      - 'docs/TURSO_PRIMARY_DEPENDENCY_INVENTORY.md'
       - 'collector/src/handler.mjs'
       - 'collector/turso-direct.test.mjs'
       - 'worker/src/index.ts'
@@ -71,7 +75,7 @@ jobs:
         working-directory: tools/turso
         run: npm install --no-audit --no-fund --ignore-scripts --no-package-lock
       - name: Test shared token vault, D1 fallback and collector safety
-        run: node --test collector/turso-direct.test.mjs collector/test/turso-instant.test.mjs collector/test/turso-mirror.test.mjs tools/turso/kis-token-steward.test.mjs tools/turso/d1-token-backup.test.mjs tools/turso/quote-parity-audit.test.mjs
+        run: node --test collector/turso-direct.test.mjs collector/test/turso-instant.test.mjs collector/test/turso-mirror.test.mjs tools/turso/kis-token-steward.test.mjs tools/turso/d1-token-backup.test.mjs tools/turso/quote-parity-audit.test.mjs tools/turso/primary-readiness-audit.test.mjs
       - name: Test browser Turso-only manual refresh without D1 fallback
         run: |
           npm install --prefix worker --no-audit --no-fund --no-package-lock

@@ -2,6 +2,15 @@
 
 새 채팅에서 프로젝트를 이어가기 위한 **결정/구현/검증 이력**입니다. 대화 전체를 저장하지 않고 실제 개발에 필요한 내용만 보존합니다. 최신 항목을 위에 추가하고, 결과가 달라지면 추측 대신 검증된 상태로 수정합니다.
 
+## 2026-11-19 (KST) — Turso 주 DB 전환을 위한 D1 잔존 의존성 목록·안전 감사 PR 준비
+
+- **사용자 결정:** D1 중심 KIS 시세 미러가 최종 목표(Turso 주 DB, D1 보조)에 어긋난다는 지적. 과거 D1의 중요한 업무 데이터를 삭제하지 않고, D1 후보·큐에 의존하는 구형 미러는 확대하지 않음.
+- **안전 변경:** `collector/wrangler.jsonc`의 `TURSO_MIRROR_ENABLED` 기본값을 `true`→`false`로 되돌림. 기존 파일럿/긴급 정지 로직과 명시적 정식 미러 배포 확인 게이트는 보존. Turso 독립 Cron/즉시 KIS 조회의 플래그는 기본 OFF 유지. **기존 운영 Worker 배포 상태/Secret을 읽거나 변경하지 않음.**
+- **데이터 목록:** `docs/TURSO_PRIMARY_DEPENDENCY_INVENTORY.md`에 D1 과거 신호·차트, 장바구니 서버 추적, AI/분석 요청·종목 추적/큐, KIS 보조 토큰 원장을 코드 사용처와 함께 기록. Turso에 옮겨진 영역과 아직 완전 이관이 입증되지 않은 영역 구분.
+- **새 수동 감사:** `blue_turso_primary_readiness.yml`의 기본 `plan`은 DB 호출 0, `turso_recent`은 Turso 감사 완료 EOD/연구 8거래일 이내의 기대/실제 개수 및 7일 중 KIS 최신가 최대 3일의 집계만 SELECT. D1 SQL/Cloudflare API 자격 정보/KIS 호출/외부 쓰기는 포함하지 않음. 이것은 **과거 데이터 전량 이관 증명이나 D1 대비 동등성 감사가 아님**.
+- **로컬 검증:** Collector **61/61**, 신규 readiness+기존 Turso 감사 Node **16/16**, Python mirror 보호 **3/3** 및 D1 cutover **10/10**, `node tools/turso/primary-readiness-audit.mjs`의 `PLAN_ONLY`(Turso/D1 SQL 0회), Wrangler Collector `--dry-run` 바인딩 `TURSO_MIRROR_ENABLED="false"`, YAML 구문·`git diff --check` 성공. 원격 Turso/D1/KIS 호출, Secret 변경, 운영 배포는 하지 않음. PR CI는 별도 확인.
+- **다음:** PR CI 확인·사용자 병합 → 수동 `plan`/`turso_recent` 순서로 실제 Turso 집계 검증 → 사용자 승인 하에 Collector 전체 미러 OFF 상태에서 장중 Turso 독립 1종목 시세 실증 → 서버 장바구니 watch 및 과거 신호 자료의 Turso 이관을 개별 PR로 순차 진행. D1 원본 삭제 금지.
+
 ## 2026-11-19 (KST) — D1 중단과 관계없는 KIS 즉시조회 및 모바일 검색 단순화 PR 준비
 
 - **요청:** D1 무료 일일 사용량 제한을 24시간 기다리지 않고 Turso 독립 경로로 운영할 수 있게 하고, 사용자가 종목별 **KIS 최신가 조회** 버튼을 눌러 즉시 조회하도록 개발. 별도로 모바일 검색 화면에 새로 생긴 `기술 패턴 찾기` / `확정 일봉 전체` 대형 버튼과 긴 데이터 설명은 혼란스럽다는 피드백을 반영.

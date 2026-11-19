@@ -7,9 +7,11 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class MirrorRolloutSafety(unittest.TestCase):
-    def test_full_mirror_is_deploy_candidate_only(self):
+    def test_full_mirror_is_off_for_turso_primary_transition(self):
         config = json.loads((ROOT / 'collector/wrangler.jsonc').read_text())
-        self.assertEqual(config['vars']['TURSO_MIRROR_ENABLED'], 'true')
+        self.assertEqual(config['vars']['TURSO_MIRROR_ENABLED'], 'false')
+        self.assertNotIn('TURSO_DIRECT_QUOTES_ENABLED', config['vars'])
+        self.assertNotIn('TURSO_INSTANT_QUOTES_ENABLED', config['vars'])
         workflow = (ROOT / '.github/workflows/blue_r142_collector_deploy.yml').read_text()
         self.assertIn('workflow_dispatch:', workflow)
         self.assertNotIn('schedule:', workflow)
@@ -19,6 +21,8 @@ class MirrorRolloutSafety(unittest.TestCase):
         self.assertIn('FULL_MIRROR_DEPLOY_BLOCKED', workflow)
         self.assertLess(workflow.index('FULL_MIRROR_DEPLOY_BLOCKED'),
                         workflow.index('npx wrangler deploy'))
+        # Keep the future explicit full-mirror approval gate, even with OFF default.
+        self.assertIn('"TURSO_MIRROR_ENABLED"', workflow)
 
     def test_emergency_pause_overrides_full_mode(self):
         mirror = (ROOT / 'collector/src/turso-mirror.mjs').read_text()

@@ -2,6 +2,12 @@
 
 > 업데이트: 2026-11-19 (한국 시간). 이 파일은 개발 인계용 요약이며, 서버의 실시간 상태를 자동으로 반영하지 않습니다.
 
+## 2026-11-19 (KST) — Turso 주 DB 재확인 / D1 종속 전체 미러 기본 OFF
+
+- **확정 방향:** 새 검증 주가와 연구자료의 주 저장소는 Turso, D1은 과거 원본 보존 및 쿼터가 허용하는 보조 저장. 과거 D1 후보·장바구니 큐·분석 기록에 의존한 수집기 출력을 Turso에 복제하는 구형 전체 미러는 D1 무료 한도 장애를 해결하지 못하므로 `TURSO_MIRROR_ENABLED=false`를 새 Collector **배포 후보**에 반영. 기존 토큰 금고 이중 저장·발급 원장은 유지. PR 병합만으로 이미 배포된 Worker의 변수/Secrets가 바뀌지는 않음.
+- D1에 여전히 의존하는 중요 기능은 **과거 `runs/signals/chart_snapshots/daily_counts`**, 서버 장바구니 watch, 일부 종목 추적·우선순위, AI 캐시 및 작업 상태. 모든 테이블을 Turso에 이미 옮겼다고 판단하지 않음. 이력 삭제 및 D1 바인딩 제거 금지. 상세 목록·근거 코드·전환 우선순위는 [TURSO_PRIMARY_DEPENDENCY_INVENTORY.md](TURSO_PRIMARY_DEPENDENCY_INVENTORY.md).
+- 새 수동 [Turso Primary Readiness](../.github/workflows/blue_turso_primary_readiness.yml) 기본 `plan`은 DB 접근 0회, `turso_recent`은 최대 8개 감사 EOD/연구 날짜·3개 최근 KIS 날짜 집계만 Turso SELECT. 운영 D1 SQL은 수행하지 않고 KIS tokenP/실거래 호출도 없음. 실제 Turso 행 수·날짜는 Actions를 별도로 수동 실행하기 전까지 미검증.
+
 ## 2026-11-19 (KST) — 운영 토큰 복구·제한 시세 미러 성공, 정식 미러 배포는 별도 승인
 
 - 조기 감사 [#44465868952](https://github.com/ehdud6728-bit/BLUE-Signal-Lab/actions/runs/44465868952) 통과 및 사용자 외부 발급 부재 확인 후 [KIS 공유 발급 #44469823869](https://github.com/ehdud6728-bit/BLUE-Signal-Lab/actions/runs/44469823869) `TOKEN_SAVED_DUAL` 달성. 동일 KIS 접근토큰이 Turso·D1에 저장됨(만료 2026-11-20 15:07:25 KST). 기존 D1 발급 중단은 계속 유지, 재발급 반복 금지.

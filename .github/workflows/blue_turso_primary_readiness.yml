@@ -1,0 +1,48 @@
+name: BLUE Turso Primary Readiness (BOUNDED READ ONLY)
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: 'plan uses no DB; turso_recent reads only bounded audited Turso date counts'
+        type: choice
+        required: true
+        default: plan
+        options: [plan, turso_recent]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: blue-turso-primary-readiness
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - name: Confirm exact repository, main and audit mode
+        env:
+          MODE: ${{ inputs.mode }}
+        shell: bash
+        run: |
+          test "$GITHUB_REPOSITORY" = 'ehdud6728-bit/BLUE-Signal-Lab'
+          test "$GITHUB_REF" = 'refs/heads/main'
+          [[ "$MODE" = 'plan' || "$MODE" = 'turso_recent' ]]
+          echo "BLUE_TURSO_PRIMARY_READINESS mode=$MODE d1_queries=0 mutations=0"
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install Turso client without running package scripts
+        working-directory: tools/turso
+        run: npm install --no-audit --no-fund --ignore-scripts --no-package-lock
+      - name: Verify bounded audit with synthetic rows only
+        run: node --test tools/turso/primary-readiness-audit.test.mjs
+      - name: Produce D1 dependency plan or bounded Turso status
+        env:
+          AUDIT_MODE: ${{ inputs.mode }}
+          TURSO_DATABASE_URL: ${{ inputs.mode == 'turso_recent' && secrets.TURSO_DATABASE_URL || '' }}
+          TURSO_AUTH_TOKEN: ${{ inputs.mode == 'turso_recent' && secrets.TURSO_AUTH_TOKEN || '' }}
+        run: node tools/turso/primary-readiness-audit.mjs
