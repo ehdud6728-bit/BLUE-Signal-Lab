@@ -1,0 +1,33 @@
+name: BLUE Collector Runtime Settings Audit (READ ONLY)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: blue-collector-runtime-settings-audit
+  cancel-in-progress: false
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Confirm scope and repository
+        run: |
+          test "$GITHUB_REPOSITORY" = 'ehdud6728-bit/BLUE-Signal-Lab'
+          test "$GITHUB_REF" = 'refs/heads/main'
+          echo 'BLUE_COLLECTOR_SETTINGS_READ_ONLY method=GET d1_queries=0 mutations=0'
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Test sanitizer with synthetic bindings only
+        run: node --test tools/turso/collector-runtime-settings-audit.test.mjs
+      - name: Inspect deployed Collector metadata without exposing secrets
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_WORKER_DEPLOY_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: node tools/turso/collector-runtime-settings-audit.mjs
