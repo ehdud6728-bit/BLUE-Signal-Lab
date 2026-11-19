@@ -2,6 +2,15 @@
 
 새 채팅에서 프로젝트를 이어가기 위한 **결정/구현/검증 이력**입니다. 대화 전체를 저장하지 않고 실제 개발에 필요한 내용만 보존합니다. 최신 항목을 위에 추가하고, 결과가 달라지면 추측 대신 검증된 상태로 수정합니다.
 
+## 2026-11-19 (KST) — 감사 #44500952883 성공 / Turso 연구 신호 일별 누적 워크플로 PR 준비
+
+- **실제 운영 증거:** [Turso Primary Readiness #44500952883](https://github.com/ehdud6728-bit/BLUE-Signal-Lab/actions/runs/44500952883) `turso_recent` 실행 성공. `RECENT_TURSO_COUNTS_MATCH`, 최근 EOD 감사 8거래일 모두 원장 수와 실제 행 수 일치(11/18 2660/2660, 11/17 2661/2661 등), 연구 신호는 11/18 **189/189건 한 날짜**, 최근 KIS 시세는 11/19 **2종목**. Turso SELECT 3회, D1 SQL 0회. **D1 전체와의 동일성·과거 이관/실시간 전체 시세 증명이 아님.**
+- **이유:** 검색 화면과 패턴 필터·차트의 Turso 읽기 API는 이미 구현되어 있으나 Turso 감사 완료 연구 날짜가 1일에 그쳐 실제 과거/기간 검색 활용도가 낮음. 검증한 일봉을 바탕으로 동일 R1.1 연구 산출물을 매일 누적하도록 코드 준비. UI 변경 없음.
+- **안전 구현:** `.github/workflows/blue_turso_daily_research.yml`에 평일 20:15 KST 예약 경로와 수동 `trade_day`, `dry_run`(기본), `apply`(정확한 `blue-turso-research-only` 확인) 추가. 예약은 `BLUE_TURSO_RESEARCH_AUTO_ENABLED=true` 변수 없으면 실행 안 함. `scripts/turso_research_day_guard.py`가 한국 날짜/미래·주말/기준 브랜치/승인 문자열을 검사, 이전 날짜로 자동 대체하지 않음. 기존 R1.1 전체 시장 스캔 → 동일 신호/차트 export → 기존 엄격한 Turso 감사 EOD·종가 교차 검증, 해시 충돌 거부·멱등 read-back writer를 재사용. **D1 조회·KIS tokenP·Worker/PWA 배포 포함 안 함.**
+- **재실행 해시 안정화:** 기존 R1.1 `AUDIT.json`의 `source_verified_at_kst`가 달라지는 것만으로 Turso 원장 충돌이 발생하지 않도록, 새 export의 `source_audit_sha256`는 해당 단일 시각 필드만 제외한 정렬 JSON의 SHA256으로 계산. 원본 AUDIT 파일은 보존; 종가·원천 해시 등 변동은 여전히 감지. 기존에 저장된 11/18 원장과는 형식이 다를 수 있으므로 과거 날짜 재실행 충돌은 자동 무시/덮어쓰기 하지 않음.
+- **문서/테스트:** `docs/TURSO_DAILY_RESEARCH_RUNBOOK.md`와 무시크릿 PR CI 추가. 로컬 Python 새 guard **5/5**, 신호 export **6/6**, 기존 Turso 워크플로 회귀 **5/5**, Node 신호 importer+Primary Readiness **9/9**, 신규 Workflow YAML 2개 구문 검사 및 `git diff --check` 성공. [잔여 D1 의존성](TURSO_PRIMARY_DEPENDENCY_INVENTORY.md)에는 과거 원본/장바구니/AI 등 미완료 영역 유지. GitHub PR CI/운영 원격 실행은 별도 검증 전까지 미확인.
+- **배포:** 해당 기록 시점 **GitHub PR/병합/운영 자동 변수 설정/원격 DB 쓰기 없음**. 수동 dry-run → 동일 날짜 EOD 감사 확인 → 수동 apply → readiness와 PWA 확인 → 필요할 때만 예약 변수 활성화 순서. 다음 별도 우선 과제는 Turso 독립 KIS 장중 1종목 실제 조회와 서버 장바구니 watch 이관.
+
 ## 2026-11-19 (KST) — Turso 주 DB 전환을 위한 D1 잔존 의존성 목록·안전 감사 PR 준비
 
 - **사용자 결정:** D1 중심 KIS 시세 미러가 최종 목표(Turso 주 DB, D1 보조)에 어긋난다는 지적. 과거 D1의 중요한 업무 데이터를 삭제하지 않고, D1 후보·큐에 의존하는 구형 미러는 확대하지 않음.

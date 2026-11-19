@@ -4,6 +4,8 @@
 
 ## 2026-11-19 (KST) — Turso 주 DB 재확인 / D1 종속 전체 미러 기본 OFF
 
+**추가 확인과 다음 개발:** [읽기 전용 감사 #44500952883](https://github.com/ehdud6728-bit/BLUE-Signal-Lab/actions/runs/44500952883)의 `turso_recent`은 Turso 최근 8개 EOD 일자 수가 모두 감사 원장과 일치, 2026-11-18 연구 신호 **189/189건** 일치, 2026-11-19 KIS 저장 시세 **2종목**을 확인. Turso SQL 3회·D1 SQL 0회. D1와 과거 전체 동등성 및 전 앱 D1 독립 완료는 아님. 기존 기술 패턴 검색·차트는 Turso 조회 경로가 있으므로 다음 우선 개발은 **검증 완료 연구 날짜를 일별로 누적**하는 수동 기본 `dry_run`/명시적 `apply` 워크플로; 예약 자동 적재는 운영 변수로 별도 승인할 때까지 OFF. [운영 절차](TURSO_DAILY_RESEARCH_RUNBOOK.md).
+
 - **확정 방향:** 새 검증 주가와 연구자료의 주 저장소는 Turso, D1은 과거 원본 보존 및 쿼터가 허용하는 보조 저장. 과거 D1 후보·장바구니 큐·분석 기록에 의존한 수집기 출력을 Turso에 복제하는 구형 전체 미러는 D1 무료 한도 장애를 해결하지 못하므로 `TURSO_MIRROR_ENABLED=false`를 새 Collector **배포 후보**에 반영. 기존 토큰 금고 이중 저장·발급 원장은 유지. PR 병합만으로 이미 배포된 Worker의 변수/Secrets가 바뀌지는 않음.
 - **배포 위험 차단:** 기존 운영 Collector가 전체 미러를 실제 사용 중인지 아직 확인되지 않았으므로 OFF 구성을 배포해 수집이 끊기는 일을 막아야 함. `blue_r142_collector_deploy.yml`의 `deploy=true`에 `confirm_mirror_off=blue-turso-mirror-off` 수동 확인을 추가하고, 독립 Turso 수집·시세 재조회가 실증되기 전에는 사용하지 않음. 기존 FULL 모드 확인 문자열도 그대로 유지.
 - D1에 여전히 의존하는 중요 기능은 **과거 `runs/signals/chart_snapshots/daily_counts`**, 서버 장바구니 watch, 일부 종목 추적·우선순위, AI 캐시 및 작업 상태. 모든 테이블을 Turso에 이미 옮겼다고 판단하지 않음. 이력 삭제 및 D1 바인딩 제거 금지. 상세 목록·근거 코드·전환 우선순위는 [TURSO_PRIMARY_DEPENDENCY_INVENTORY.md](TURSO_PRIMARY_DEPENDENCY_INVENTORY.md).

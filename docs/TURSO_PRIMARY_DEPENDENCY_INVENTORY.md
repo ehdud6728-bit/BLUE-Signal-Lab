@@ -27,6 +27,7 @@
 
 ## 무해한 확인 수단
 
+- [BLUE Turso Daily Research Snapshot](../.github/workflows/blue_turso_daily_research.yml): 연구 신호/차트의 날짜 누적용 신규 코드 경로. 수동 기본 `dry_run`은 DB SQL 0회, 수동 `apply`는 정확한 승인 문자열과 같은 날짜 Turso 감사 EOD·종가 일치 후 연구 테이블에만 쓰기. 예약 실행은 저장소 변수 `BLUE_TURSO_RESEARCH_AUTO_ENABLED=true`가 없으면 비활성. 이 코드 준비는 실제 다음 날짜 적재 성공이나 과거 D1 이관 증거가 아님. 절차는 [runbook](TURSO_DAILY_RESEARCH_RUNBOOK.md).
 - [BLUE Turso Primary Readiness](../.github/workflows/blue_turso_primary_readiness.yml): 기본 `plan`은 **어느 DB에도 연결하지 않음**. `turso_recent`은 최근 감사된 EOD/연구 거래일 최대 각 8개와 최근 7일 중 KIS 저장일 최대 3개의 **Turso 집계만** 조회, 예상/실제 행 수의 일치 여부를 보고. D1 SQL 요청은 **0회**, KIS API 요청도 없습니다.
 - 기존 [BLUE D1 Query Insights](../.github/workflows/blue_data_coverage_audit_readonly.yml)는 Cloudflare GraphQL Analytics에서 쿼리 사용량을 확인합니다. **D1 직접 SQL은 하지 않지만 D1 테이블의 정확한 행 수/이관 완료를 증명하지는 못합니다.**
 - 기존 [Turso vs D1 KIS Quote Parity](../.github/workflows/blue_turso_quote_parity_audit.yml)는 기본 `turso_only`; `compare_small`만 별도 D1 소량 읽기 승인 문자열 필요. D1 쿼터 차단 중에는 실행하지 않습니다.
