@@ -4,6 +4,8 @@ on:
   pull_request:
     paths:
       - 'collector/src/turso-direct.mjs'
+      - 'collector/src/core.mjs'
+      - 'collector/test/core.test.mjs'
       - 'collector/src/turso-provisional.mjs'
       - 'collector/turso-provisional.test.mjs'
       - '.github/workflows/blue_turso_provisional_pilot.yml'

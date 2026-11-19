@@ -2,6 +2,13 @@
 
 새 채팅에서 프로젝트를 이어가기 위한 **결정/구현/검증 이력**입니다. 대화 전체를 저장하지 않고 실제 개발에 필요한 내용만 보존합니다. 최신 항목을 위에 추가하고, 결과가 달라지면 추측 대신 검증된 상태로 수정합니다.
 
+## 2026-11-19 (KST) — KIS 잠정 일봉 22:00까지 KRX 확정 EOD 미수신 보충
+
+- **문제 증빙:** [잠정 일봉 파일럿 #44517489569](https://github.com/ehdud6728-bit/BLUE-Signal-Lab/actions/runs/44517489569)은 20:44 KST에 `start_15m` Secret 설정까지 성공했지만, 기존 `turso-provisional.mjs`의 **09:00~15:20 시간 제한**으로 수집 경로에 도달하지 못함. 사용자 요구는 'KRX 확정 일봉이 없다면 21~22시까지 KIS에서 일봉을 보충 조회'. 해당 파일럿의 설정 성공은 시세 저장 성공이 아님.
+- **변경:** 09:00~15:20 기존 현재가 KIS API 유지. 15:20~22:00에는 당일 Turso KRX EOD 감사(`blue_eod_ingest_audit_v1`)와 실제 저장 행수 일치 시 수집을 생략하고, 미감사/불완전 시 KIS 공식 `inquire-daily-price`(`FHKST01010400`)를 요청. 공급자가 명시한 거래일이 KST 오늘과 정확히 같을 때만 `KRX_POST_CLOSE`·`KIS_REST_INQUIRE_DAILY_PRICE` 출처로 잠정 OHLCV 저장, 이전 거래일/날짜 없음은 거부. 주말/휴장일/22시 이후 및 기존 토큰 만료 시 중단. 기존 확정 EOD·연구·D1·tokenP 로직 불변.
+- **앱/DB:** 기존 Turso 최신/이력과 잠정 일봉에만 저장하며, API 비교기는 엄격한 날짜·잠정 플래그를 검증한 장외 KIS 자료를 최근 관측으로 인정. 같은 날짜의 독립 감사 완료 KRX EOD가 있으면 **확정 EOD가 우선**한다. 표시는 'KIS 저장 시세'이며 확정 종가로 오인하지 않음.
+- **로컬 검증:** Collector Node **74/74**(기존 69 + 신규 5), Turso API Node **35/35**, Collector/API Wrangler `deploy --dry-run` 성공, `git diff --check` 성공. 합성 KIS 응답으로 같은 날짜 검증·이전 날짜 거부·22시 종료·감사 EOD 우선·API 표시/위조 원본 거부 확인. 실제 KIS/API/Cloudflare Worker/Turso·D1 원격 쓰기 없음. PR 병합만으로 운영 Worker가 바뀌지 않으며 별도 Collector/API 배포 및 다음 거래일 파일럿 검증 필요. 기존 토큰 만료·Turso 연결 오류 시 성공으로 간주하지 않음.
+
 ## 2026-11-19 (KST) — Collector 운영 배포 완료 및 Turso KIS 토큰 상태 조회 보호 보완
 
 - **실제 배포 확인:** [#44515487283](https://github.com/ehdud6728-bit/BLUE-Signal-Lab/actions/runs/44515487283)에서 Collector 69/69 테스트·승인 확인·Cloudflare Worker 업로드 및 매분 트리거 배포·KIS_APP_KEY/SECRET Secret 등록 성공. Worker version `b0818fa5-674b-485e-b81e-a8053c6c08b4`. 운영 배포만으로 Turso 잠정 일봉 파일럿이 켜지지는 않음. 이전 [#44514827448](https://github.com/ehdud6728-bit/BLUE-Signal-Lab/actions/runs/44514827448)은 확인 문구 입력 위치 오류로 배포 단계 skipped.

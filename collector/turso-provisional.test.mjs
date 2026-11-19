@@ -4,6 +4,7 @@ import {collectTursoProvisional,tursoProvisionalMode,provisionalStatements}
   from './src/turso-provisional.mjs';
 
 const NOW=new Date('2026-11-19T00:05:12.000Z');
+const POST_CLOSE=new Date('2026-11-19T11:44:12.000Z'); // 20:44 KST
 const env=(extra={})=>({
   COLLECTOR_ENABLED:'true',
   TURSO_DATABASE_URL:'libsql://mock.example',TURSO_AUTH_TOKEN:'placeholder',
@@ -19,7 +20,8 @@ const quote=(overrides={})=>({rt_cd:'0',output:{
   ...overrides
 }});
 
-function mockDb({auditDay='2026-11-18',count=2601,expected=2601,rows=[
+function mockDb({auditDay='2026-11-18',count=2601,expected=2601,
+  currentAudit=null,currentCount=2601,rows=[
   {code:'005930',name:'삼성전자',close:'66000'},
   {code:'000660',name:'SK하이닉스',close:'160000'}
 ]}={}){
@@ -28,8 +30,11 @@ function mockDb({auditDay='2026-11-18',count=2601,expected=2601,rows=[
     async execute(query){
       const sql=typeof query==='string'?query:query.sql;
       state.queries.push({sql,args:query.args||[]});
+      if(sql.includes('SELECT row_count FROM blue_eod_ingest_audit_v1'))
+        return {rows:currentAudit===null?[]:[{row_count:currentAudit}]};
       if(sql.includes('SELECT trade_day,row_count'))return {rows:[{trade_day:auditDay,row_count:expected}]};
-      if(sql.includes('SELECT COUNT(*) AS n'))return {rows:[{n:count}]};
+      if(sql.includes('SELECT COUNT(*) AS n'))
+        return {rows:[{n:query.args?.[0]==='2026-11-19'?currentCount:count}]};
       if(sql.includes('SELECT code,name,close'))return {rows};
       if(sql.includes('SELECT ciphertext,expires_at_utc'))return {rows:[]};
       if(sql.includes('CREATE TABLE IF NOT EXISTS blue_kis_provisional_daily_v1'))return {rows:[]};
@@ -88,6 +93,61 @@ test('provider-reported matching date is retained only as provisional, mismatch 
   assert.equal(payload.provisional_status,'IN_PROGRESS');
 });
 
+test('post-close KIS daily OHLCV continues until 22:00 only when verified KRX EOD is unavailable',async()=>{
+  const {db,state}=mockDb();const requested=[];
+  const result=await collectTursoProvisional(env({TURSO_PROVISIONAL_QUOTES_ENABLED:'true'}),
+    POST_CLOSE,deps(db,{receivedAt:POST_CLOSE,
+      quote:async()=>{throw Error('CURRENT_PRICE_NOT_ALLOWED_AFTER_CLOSE');},
+      quoteDaily:async(_env,_token,market,code,day)=>{
+        requested.push([market,code,day]);return quote({stck_bsop_date:'20261119'});
+      }}));
+  assert.equal(result.status,'SAVED');
+  assert.equal(result.phase,'KRX_POST_CLOSE');
+  assert.equal(result.saved,2);
+  assert.deepEqual(requested,[['J','005930','2026-11-19'],['J','000660','2026-11-19']]);
+  assert.ok(state.queries.some(q=>q.sql.includes('SELECT row_count FROM blue_eod_ingest_audit_v1')));
+  const batch=state.batches[0].statements;
+  const payload=JSON.parse(batch[0].args[4]);
+  assert.equal(payload.source,'KIS_REST_INQUIRE_DAILY_PRICE');
+  assert.equal(payload.provisional_date_basis,'KIS_REPORTED_TRADE_DATE');
+  assert.equal(payload.is_confirmed_daily,false);
+  const provisional=batch.find(q=>q.sql.includes('INSERT INTO blue_kis_provisional_daily_v1'));
+  assert.equal(provisional.args[12],'KIS_REST_INQUIRE_DAILY_PRICE_PROVISIONAL');
+  assert.ok(!batch.some(q=>/UPDATE blue_eod|INSERT INTO blue_eod/.test(q.sql)));
+});
+
+test('post-close fallback skips KIS if same-day independently audited KRX EOD is complete',async()=>{
+  const {db,state}=mockDb({currentAudit:2601,currentCount:2601});
+  const result=await collectTursoProvisional(env({TURSO_PROVISIONAL_QUOTES_ENABLED:'true'}),
+    POST_CLOSE,{clientFactory:()=>db,
+      quoteDaily:async()=>{throw Error('KIS_MUST_NOT_BE_CALLED');}});
+  assert.equal(result.status,'VERIFIED_EOD_ALREADY_AVAILABLE');
+  assert.equal(state.queries.length,2);
+  assert.equal(state.batches.length,0);
+});
+
+test('post-close incomplete EOD audit permits date-verified KIS fallback',async()=>{
+  const {db,state}=mockDb({currentAudit:2601,currentCount:2500});
+  const result=await collectTursoProvisional(env({TURSO_PROVISIONAL_QUOTES_ENABLED:'true'}),
+    POST_CLOSE,deps(db,{receivedAt:POST_CLOSE,
+      quoteDaily:async()=>quote({stck_bsop_date:'20261119'})}));
+  assert.equal(result.status,'SAVED');
+  assert.equal(result.saved,2);
+  assert.equal(state.batches.length,1);
+});
+
+test('post-close rejects missing or stale business dates and never fabricates today',async()=>{
+  for(const businessDate of ['', '20261118']){
+    const {db,state}=mockDb();
+    const result=await collectTursoProvisional(env({TURSO_PROVISIONAL_QUOTES_ENABLED:'true'}),
+      POST_CLOSE,deps(db,{receivedAt:POST_CLOSE,
+        quoteDaily:async()=>quote({stck_bsop_date:businessDate})}));
+    assert.equal(result.status,'NO_VALID_QUOTES');
+    assert.equal(result.rejected,2);
+    assert.equal(state.batches.length,0);
+  }
+});
+
 test('incomplete EOD audit or stale reference fails closed before any provider request',async()=>{
   for(const setup of [{count:2500},{auditDay:'2026-11-01'}]){
     const {db,state}=mockDb(setup);
@@ -109,15 +169,17 @@ test('missing cached token does not issue tokenP or write data',async()=>{
   assert.equal(state.batches.length,0);
 });
 
-test('only KRX regular hours, weekdays and market-open dates are accepted',async()=>{
+test('market gating excludes pre-open, 22:00 and non-trading dates without accessing Turso',async()=>{
   const {db,state}=mockDb();
   for(const when of [new Date('2026-11-18T23:59:00.000Z'),
-    new Date('2026-11-19T06:30:00.000Z'),new Date('2026-11-21T00:05:00.000Z')]){
+    new Date('2026-11-19T13:00:00.000Z'),new Date('2026-11-21T11:05:00.000Z')]){
     const result=await collectTursoProvisional(env({TURSO_PROVISIONAL_QUOTES_ENABLED:'true'}),when,{
       clientFactory:()=>db,marketsFor:when.getUTCDay()===6?()=>[]:marketsFor
     });
-    assert.equal(result.status,'OUTSIDE_KRX_REGULAR_SESSION');
+    assert.equal(result.status,'OUTSIDE_COLLECTION_WINDOW');
   }
+  assert.equal((await collectTursoProvisional(env({TURSO_PROVISIONAL_QUOTES_ENABLED:'true',CLOSED_DATES:'2026-11-19'}),
+    POST_CLOSE,{clientFactory:()=>db})).status,'OUTSIDE_COLLECTION_WINDOW');
   assert.equal(state.queries.length,0);
 });
 
@@ -142,4 +204,12 @@ test('provisional writer rejects a final-day or non-KRX quote even with valid OH
   assert.equal(provisionalStatements([sample]).length,3);
   assert.throws(()=>provisionalStatements([{...sample,eod_asof:sample.trade_date_kst}]),/INVALID_PROVISIONAL_QUOTE/);
   assert.throws(()=>provisionalStatements([{...sample,market:'NX'}]),/INVALID_PROVISIONAL_QUOTE/);
+  const afterClose={...sample,phase:'KRX_POST_CLOSE',
+    source:'KIS_REST_INQUIRE_DAILY_PRICE',is_confirmed_daily:false,
+    reported_trade_date:'20261119',provisional_date_basis:'KIS_REPORTED_TRADE_DATE'};
+  assert.equal(provisionalStatements([afterClose]).length,3);
+  assert.throws(()=>provisionalStatements([{...afterClose,reported_trade_date:'20261118'}]),
+    /INVALID_PROVISIONAL_QUOTE/);
+  assert.throws(()=>provisionalStatements([{...afterClose,is_confirmed_daily:true}]),
+    /INVALID_PROVISIONAL_QUOTE/);
 });

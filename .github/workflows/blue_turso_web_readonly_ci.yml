@@ -8,6 +8,8 @@ on:
       - 'web/src/StopLossRow.tsx'
       - 'web/src/basket-supply-record.ts'
       - 'web/src/price-compare.ts'
+      - 'worker/src/turso-eod.ts'
+      - 'tests/test_turso_basket_prices.mjs'
       - 'tests/test_turso_research_reader.mjs'
       - 'tests/test_turso_basket_browser.mjs'
       - '.github/workflows/blue_turso_web_readonly_ci.yml'

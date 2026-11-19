@@ -101,6 +101,15 @@ const snapshot=(day='2026-11-19',price=23700,high=23950,code='225190')=>{
    source:'KIS_REST_INQUIRE_PRICE',research_only:true,reported_trade_date:day.replaceAll('-',''),
    price,high,low:price-300,phase:'KRX_REGULAR',exchange_tick_time_verified:false})};
 };
+const postCloseSnapshot=(overrides={})=>{
+ const day='2026-11-19',at='2026-11-19T11:44:12.000Z',code='225190';
+ return {trade_date:day,code,market:'J',received_at_utc:at,
+  payload_json:JSON.stringify({code,market:'J',trade_date_kst:day,received_at_utc:at,
+   source:'KIS_REST_INQUIRE_DAILY_PRICE',research_only:true,
+   reported_trade_date:'20261119',provisional_status:'IN_PROGRESS',
+   is_confirmed_daily:false,provisional_date_basis:'KIS_REPORTED_TRADE_DATE',
+   price:25000,high:25100,low:24800,phase:'KRX_POST_CLOSE',...overrides})};
+};
 
 test('newer KIS saved quote overrides old audited EOD with exact receive time, not a live claim',async()=>{
  const db=mock(prices,false,[snapshot()]);
@@ -127,6 +136,32 @@ test('same-day audited EOD wins over any saved intraday quote',async()=>{
  assert.equal(data.items[0].latest_price,4500);
  assert.equal(data.items[0].latest_source,'KRX_VERIFIED_EOD_CLOSE');
  assert.equal(data.items[0].period_high,4700);
+});
+
+test('verified-date KIS post-close daily fallback is visible but never counted as audited EOD',async()=>{
+ const db=mock(prices,false,[postCloseSnapshot()]);
+ const data=await tursoEodCompare(env,new URLSearchParams({items:'225190:2026-11-17'}),
+  '2026-11-19',db.factory);
+ assert.equal(data.items[0].latest_price,25000);
+ assert.equal(data.items[0].latest_source,'KIS_TURSO_SNAPSHOT');
+ assert.equal(data.items[0].latest_day,'2026-11-19');
+ assert.equal(data.items[0].high_complete,false);
+ assert.equal(data.items[0].period_high_source,'KIS_TURSO_DAY_HIGH');
+});
+
+test('post-close snapshot without same-day date and provisional flags fails closed',async()=>{
+ for(const mutation of [{reported_trade_date:'20261118'},{is_confirmed_daily:true},
+   {provisional_date_basis:'COLLECTOR_KST_REGULAR_SESSION'},{phase:'KRX_REGULAR'}]){
+  const db=mock([],false,[postCloseSnapshot(mutation)]);
+  const data=await tursoEodCompare(env,new URLSearchParams({items:'225190:2026-11-17'}),
+   '2026-11-19',db.factory);
+  assert.equal(data.items[0].status,'NO_LATER_PRICE');
+ }
+ const morning=postCloseSnapshot({received_at_utc:'2026-11-19T03:44:12.000Z'});
+ const db=mock([],false,[{...morning,received_at_utc:'2026-11-19T03:44:12.000Z'}]);
+ const data=await tursoEodCompare(env,new URLSearchParams({items:'225190:2026-11-17'}),
+  '2026-11-19',db.factory);
+ assert.equal(data.items[0].status,'NO_LATER_PRICE');
 });
 
 test('malformed, future-day, and pre-discovery KIS records never create an observed price',async()=>{

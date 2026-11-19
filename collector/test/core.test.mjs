@@ -2,7 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   kstParts,marketsFor,ageDays,vaultScope,decryptVault,cachedToken,inspectCachedToken,
-  normalizeCandidate,candidateSelection,parseQuote,batchStatements,ensureTables,collect,MAX_STOCKS
+  normalizeCandidate,candidateSelection,parseQuote,getKisDailyQuote,
+  batchStatements,ensureTables,collect,MAX_STOCKS
 } from '../src/core.mjs';
 
 const at=(h,m=0,s=0,day='2026-11-11')=>new Date(`${day}T${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}+09:00`);
@@ -55,6 +56,33 @@ test('KST conversion and weekday cutoff',()=>{
   assert.deepEqual(marketsFor(at(20)),[]);
   assert.deepEqual(marketsFor(at(10,0,0,'2026-11-14')),[]);
   assert.deepEqual(marketsFor(at(10), '2026-11-11,2026-11-12'),[]);
+});
+
+test('after-close KIS daily API requires exact business date and never substitutes a stale bar',async()=>{
+  const dates=[];const token='synthetic-not-real',app={KIS_APP_KEY:'fake-key',KIS_APP_SECRET:'fake-secret'};
+  const fetchFn=async(url,options)=>{
+    dates.push({url:String(url),tr:options.headers.tr_id,method:options.method});
+    return {ok:true,json:async()=>({rt_cd:'0',output:[
+      {stck_bsop_date:'20261118',stck_clpr:'400',stck_oprc:'390',
+        stck_hgpr:'410',stck_lwpr:'380',acml_vol:'120'},
+      {stck_bsop_date:'20261119',stck_clpr:'450',stck_oprc:'420',
+        stck_hgpr:'460',stck_lwpr:'415',acml_vol:'170'}
+    ]})};
+  };
+  const result=await getKisDailyQuote(app,token,'J','005930','2026-11-19',fetchFn);
+  assert.equal(result.output.stck_bsop_date,'20261119');
+  assert.equal(result.output.stck_prpr,'450');
+  assert.equal(dates[0].tr,'FHKST01010400');
+  assert.equal(dates[0].method,'GET');
+  assert.match(dates[0].url,/inquire-daily-price/);
+  assert.match(dates[0].url,/FID_ORG_ADJ_PRC=0/);
+  const stale=async()=>({ok:true,json:async()=>({rt_cd:'0',output:[
+    {stck_bsop_date:'20261118',stck_clpr:'400'}]})});
+  await assert.rejects(()=>getKisDailyQuote(app,token,'J','005930','2026-11-19',stale),
+    /KIS_DAILY_EXACT_DATE_MISSING/);
+  await assert.rejects(()=>getKisDailyQuote(app,token,'J','005930','2026-11-19',
+    async()=>({ok:true,json:async()=>({rt_cd:'0',output:[]})})),
+  /KIS_DAILY_EXACT_DATE_MISSING/);
 });
 
 test('Python R1.3.1 AES-GCM/HKDF vault decrypt is byte-compatible',async()=>{

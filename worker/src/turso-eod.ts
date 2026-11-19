@@ -127,12 +127,20 @@ export async function tursoEodCompare(env:TursoConfig,params:URLSearchParams,
         const payload=JSON.parse(String(r.payload_json)) as Record<string,unknown>;
         const price=Number(payload.price),high=Number(payload.high),low=Number(payload.low);
         const timestamp=Date.parse(at);
+        const kstClockSeconds=((timestamp+9*3600_000)%86400_000)/1000;
         // Verify stored row keys AND the original KIS evidence. Invalid rows
         // are omitted, never converted to prices or allowed to hide audited EOD.
+        const quoteSource=payload.source==='KIS_REST_INQUIRE_PRICE';
+        const postCloseSource=payload.source==='KIS_REST_INQUIRE_DAILY_PRICE'&&
+          payload.provisional_status==='IN_PROGRESS'&&payload.is_confirmed_daily===false&&
+          payload.provisional_date_basis==='KIS_REPORTED_TRADE_DATE'&&
+          payload.phase==='KRX_POST_CLOSE'&&market==='J'&&
+          kstClockSeconds>=15*3600+20*60&&kstClockSeconds<22*3600&&
+          payload.reported_trade_date===day.replaceAll('-','');
         if(!codes.includes(code)||!validDay(day)||day>today||
           !['J','NX'].includes(market)||payload.code!==code||
           payload.trade_date_kst!==day||payload.market!==market||
-          payload.received_at_utc!==at||payload.source!=='KIS_REST_INQUIRE_PRICE'||
+          payload.received_at_utc!==at||(!quoteSource&&!postCloseSource)||
           payload.research_only!==true||!Number.isFinite(timestamp)||
           new Date(timestamp+9*3600_000).toISOString().slice(0,10)!==day||
           !Number.isSafeInteger(price)||price<=0||
