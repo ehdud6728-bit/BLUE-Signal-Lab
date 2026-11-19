@@ -47,11 +47,21 @@ test('encrypted KIS token is readable with existing AES-GCM Worker vault decrypt
   assert.throws(()=>decryptKisToken(encrypted,base.KIS_APP_KEY,'bad-secret'),/KIS_TOKEN_DECRYPT_FAILED/);
   await assert.rejects(decryptVault(encrypted,base.KIS_APP_KEY,'wrong-key'),/TOKEN_DECRYPT_FAILED/);
 });
-test('check never issues token, creates only metadata tables',async()=>{
+test('check uses SELECT only and never issues tokens or creates metadata tables',async()=>{
   const c=client();
   const result=await steward(c,base,NOW,{mode:'check',issuer:async()=>{throw Error('UNEXPECTED_TOKENP');}});
   assert.equal(result.status,'TOKEN_MISSING');
-  assert.ok(c.statements.every(s=>!s.includes('INSERT INTO blue_turso_kis_issuance_v1')));
+  assert.equal(c.statements.length,1);
+  assert.ok(c.statements.every(s=>s.startsWith('SELECT ')));
+});
+test('check on an uninitialized Turso vault fails closed and creates no tables',async()=>{
+  const db=createClient({url:'file::memory:'});
+  try{
+    const result=await steward(db,base,NOW,{mode:'check',issuer:async()=>{throw Error('UNEXPECTED_TOKENP');}});
+    assert.equal(result.status,'TOKEN_VAULT_READ_UNAVAILABLE');
+    const tables=await db.execute("SELECT name FROM sqlite_master WHERE name LIKE 'blue_turso_kis_%'");
+    assert.deepEqual(tables.rows,[]);
+  }finally{db.close();}
 });
 test('pre-cutover issue is safely blocked before any reservation or KIS call',async()=>{
   const c=client(),gated={...base,BLUE_KIS_TURSO_CUTOVER_APPROVED:'false'};
