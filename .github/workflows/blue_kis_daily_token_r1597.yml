@@ -55,6 +55,7 @@ jobs:
         env:
           KIS_APP_KEY: ${{ secrets.KIS_APP_KEY }}
           KIS_APP_SECRET: ${{ secrets.KIS_APP_SECRET }}
+          BLUE_KIS_TOKEN_AUTO_PAUSED: ${{ vars.BLUE_KIS_TOKEN_AUTO_PAUSED }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           MODE: ${{ github.event_name == 'schedule' && 'issue' || inputs.mode }}
@@ -67,6 +68,9 @@ jobs:
           test -n "$KIS_APP_KEY" && test -n "$KIS_APP_SECRET"
           test -n "$CLOUDFLARE_API_TOKEN" && test -n "$CLOUDFLARE_ACCOUNT_ID"
           if [[ "$MODE" == 'issue' && "$ALLOW_ISSUE" == 'true' ]]; then
+            if [[ "$BLUE_KIS_TOKEN_AUTO_PAUSED" == 'true' ]]; then
+              echo 'D1_ISSUE_BLOCKED: legacy issuer paused for Turso cutover'; exit 2
+            fi
             if [[ "${{ github.event_name }}" == 'schedule' ]]; then
               python scripts/blue_kis_daily_token_r1597.py --mode issue --scheduled
             else
