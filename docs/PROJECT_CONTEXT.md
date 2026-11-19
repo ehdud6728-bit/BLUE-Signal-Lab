@@ -6,6 +6,7 @@
 ## 2026-11-19 (KST) — KIS 토큰 06:00 점검·복구 정책 추가 (PR 준비)
 
 - 매일 **06:00/06:30 KST**에 KIS 토큰 상태를 검사하고, 평일 07:00~19:30에는 30분마다 후속 점검. GitHub 예약 실행은 실제 시작 시간이 지연될 수 있으며, 06:00에 *무조건 새 토큰을 발급*하는 것이 아니라 1시간 이내 만료 예정·만료·미발급 상태에서 24시간 저장 쿨다운 및 원자적 예약 조건을 지켜 발급.
+- GitHub Actions 예약 작업이 의도한 시각보다 크게 지연되어 실제 KST 시각 제한을 통과하지 못하면 발급 점검이 통째로 생략될 수 있으므로, D1 예약 스크립트에서는 이중 시간대 차단을 제거합니다. 실제 실행이 지연되더라도 토큰 점검은 수행하고 발급 여부는 24시간/KST-day 상태표가 결정합니다. [과거 예약 실행 #44345601488](https://github.com/ehdud6728-bit/BLUE-Signal-Lab/actions/runs/44345601488)에서 01:18 KST `OUTSIDE_SCHEDULED_KST_WINDOW`로 스킵된 기록이 있습니다.
 - 발급 요청 자체가 실패했다면 동일 KST 날짜에 **최초 실패 후 최소 30분 경과·단 한 번** 재시도할 수 있도록 완화. 두 번째 실패는 다음 정상 발급 가능 기간까지 재시도 차단. 저장 실패나 메타데이터 오류는 재발급 근거로 사용하지 않음.
 - 기존 D1 토큰 매니저는 기존 D1 암호화 금고·발급 상태표를 유지. Turso 매니저는 별개 금고·상태표를 유지하고 `BLUE_KIS_TOKEN_AUTO_PAUSED=true` + 실제 D1 중단 시각 24시간 경과 + `BLUE_KIS_TURSO_CUTOVER_APPROVED=true`일 때만 발급 허용. **이번 코드 PR 자체로 운영 token cutover/신규 발급/Collector 활성화는 일어나지 않음.**
 - [Turso check Actions #44434674813](https://github.com/ehdud6728-bit/BLUE-Signal-Lab/actions/runs/44434674813) `TOKEN_MISSING_OR_EXPIRED`은 Turso 토큰 없음/만료 여부를 분리하지 못한 기존 진단. 새 코드에서 `TOKEN_MISSING`, `TOKEN_EXPIRED`, `TOKEN_EXPIRES_SOON`으로 구분.

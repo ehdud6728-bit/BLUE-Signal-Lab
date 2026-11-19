@@ -3,6 +3,14 @@
 새 채팅에서 프로젝트를 이어가기 위한 **결정/구현/검증 이력**입니다. 대화 전체를 저장하지 않고 실제 개발에 필요한 내용만 보존합니다. 최신 항목을 위에 추가하고, 결과가 달라지면 추측 대신 검증된 상태로 수정합니다.
 
 
+## 2026-11-19 (KST) — GitHub Actions 예약 지연 시 D1 토큰 점검 누락 보완
+
+- **병합 확인:** [PR #33](https://github.com/ehdud6728-bit/BLUE-Signal-Lab/pull/33)은 11월 19일 KST 10:30 병합. [CI #44437369022](https://github.com/ehdud6728-bit/BLUE-Signal-Lab/actions/runs/44437369022)에서 Python D1 테스트, Node Turso 테스트, Wrangler dry-run까지 모두 통과. 실제 tokenP/시세 수집/운영 DB 변경은 수행하지 않음.
+- **새 발견:** [D1 Token Steward 예약 실행 #44345601488](https://github.com/ehdud6728-bit/BLUE-Signal-Lab/actions/runs/44345601488)이 KST **01:18**에 완료됐지만, `OUTSIDE_SCHEDULED_KST_WINDOW`를 출력해 토큰 상태를 조회하거나 갱신하지 않았음. 따라서 PR #33의 06:00 예약 추가만으로는 GitHub 예약 지연 시 점검 누락을 해결하지 못함.
+- **보완:** D1 스크립트의 추가적인 실제 시작 시각(시계) 차단 로직을 제거. GitHub cron이 *의도한 예약 시각*을 정하고, 늦게 시작했더라도 DB의 24시간/KST-day 원자적 발급 상태표와 암호화 금고가 발급 제한을 책임짐. 긴급 정지 `BLUE_KIS_TOKEN_AUTO_PAUSED`는 그대로 유지. 기존 `--scheduled` 인자는 호환성을 위해 유지.
+- **검증:** 지연된 01:18 KST 실행을 재현한 회귀 테스트 추가. CI 결과·새 토큰 발급·운영 상태는 별도 확인 필요.
+- **다음:** PR 테스트 성공 후 사용자 병합. **운영 D1 토큰 점검 로그를 `R1597_RESULT`로 확인**하고, Turso 전환은 기존 중단 후 24시간 보호 절차를 별도로 진행.
+
 ## 2026-11-19 (KST) — KIS 접근토큰 06:00 자동 점검·제한 복구 PR 준비
 
 - **요청:** KIS 접근토큰이 24시간 후 만료되어 시세 수집이 중단되는 상황에 대비해 매일 06:00 KST 자동 점검, 만료 임박 시 갱신, 발급 실패 후 안전한 재시도를 구현. GitHub Secrets의 `KIS_APP_KEY`/`KIS_APP_SECRET`은 장기 자격 증명이고 토큰은 D1/Turso의 별도 암호화 금고에 보관.

@@ -6,7 +6,7 @@ import sys
 import unittest
 from contextlib import redirect_stdout
 from datetime import datetime, timedelta, timezone
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 SRC = pathlib.Path(__file__).resolve().parents[1] / 'scripts'
 sys.path.insert(0,str(SRC))
@@ -51,11 +51,24 @@ class Tests(unittest.TestCase):
         self.assertNotIn('BLUE_KIS_TOKEN_AUTO_ENABLED',workflow)
         self.assertIn('python scripts/blue_kis_daily_token_r1597.py --mode issue --scheduled',workflow)
         self.assertIn("cron: '0,30 21 * * *'",workflow)
-    def test_scheduled_window_includes_daily_0600_kst(self):
-        self.assertTrue(mod.scheduled_window(datetime(2026,11,18,21,0,tzinfo=UTC)))
-        self.assertTrue(mod.scheduled_window(datetime(2026,11,21,21,30,tzinfo=UTC)))
-        self.assertFalse(mod.scheduled_window(datetime(2026,11,21,22,0,tzinfo=UTC)))
-        self.assertFalse(mod.scheduled_window(datetime(2026,11,18,20,30,tzinfo=UTC)))
+    def test_delayed_scheduled_action_still_checks_token(self):
+        # Historical run #44345601488 started at 01:18 KST and was silently
+        # skipped by the old wall-clock guard; a delayed GitHub schedule must
+        # still execute the atomic token ledger check.
+        class DelayedClock:
+            @staticmethod
+            def now(tz):
+                return datetime(2026,11,18,16,18,tzinfo=UTC)
+        with patch.object(mod,'datetime',DelayedClock), \
+             patch.object(mod.vault_mod,'D1Vault',return_value=Mock()), \
+             patch.object(mod,'maintain',return_value={'status':'TOKEN_VALID','issued':False}) as check, \
+             patch.dict('os.environ',{'KIS_APP_KEY':'key','KIS_APP_SECRET':'secret'}), \
+             patch.object(sys,'argv',['script','--mode','issue','--scheduled']):
+            out=io.StringIO()
+            with redirect_stdout(out):
+                mod.main()
+        self.assertIn('R1597_RESULT',out.getvalue())
+        check.assert_called_once()
 
     def test_readonly_no_mutation_no_issue(self):
         db=SQLiteDB(metadata(NOW-timedelta(hours=25),NOW-timedelta(minutes=1)))

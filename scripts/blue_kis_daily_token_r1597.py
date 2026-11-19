@@ -168,20 +168,12 @@ def maintain(db, appkey: str, appsecret: str, *, now: datetime,
     return {'status':'TOKEN_SAVED', 'issued':True, 'expiry_utc':iso_utc(parse_utc(new_expiry))}
 
 
-def scheduled_window(now: datetime) -> bool:
-    kst = now.astimezone(KST)
-    return 6 <= kst.hour <= 19 and (kst.weekday() < 5 or kst.hour == 6)
-
-
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--mode', choices=('check','issue'), default='check')
-    parser.add_argument('--scheduled', action='store_true', help='Apply KST daily 06:00 and weekday 06-19 issuance gate')
+    parser.add_argument('--scheduled', action='store_true', help='Mark GitHub scheduled run; cron determines intended time, never skip a delayed run')
     args = parser.parse_args()
     now = datetime.now(UTC)
-    if args.mode == 'issue' and args.scheduled and not scheduled_window(now):
-        print(json.dumps({'status':'OUTSIDE_SCHEDULED_KST_WINDOW'}))
-        return
     appkey = os.environ.get('KIS_APP_KEY','').strip()
     appsecret = os.environ.get('KIS_APP_SECRET','').strip()
     if not appkey or not appsecret:
