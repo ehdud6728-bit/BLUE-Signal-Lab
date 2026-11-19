@@ -9,6 +9,8 @@ import {buildTursoMirrorStatements} from './turso-mirror.mjs';
 const MAX_PER_TICK=12;
 const MAX_PILOT_MS=30*60*1000;
 const MAX_SOURCE_AGE_DAYS=7;
+const INSTANT_PER_CODE_SECONDS=20;
+const INSTANT_PER_MINUTE=12;
 // KRX stock codes include six-character uppercase alphanumerics (e.g. 00088K).
 // Match the validated EOD candidate and Turso price-comparison contracts.
 const CODE=/^[0-9A-Z]{6}$/;
@@ -21,6 +23,11 @@ export function tursoDirectMode(env,now=new Date()){
   if(!/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z$/.test(expiry))return 'OFF';
   const delta=Date.parse(expiry)-now.getTime();
   return delta>0&&delta<=MAX_PILOT_MS?'PILOT':'OFF';
+}
+
+export function tursoInstantEnabled(env){
+  return String(env?.TURSO_INSTANT_QUOTES_ENABLED||'false').toLowerCase()==='true' &&
+    String(env?.COLLECTOR_ENABLED||'false').toLowerCase()==='true';
 }
 
 export async function tursoDirectCachedToken(client,env,now){
@@ -112,5 +119,68 @@ export async function collectTursoDirect(env,now=new Date(),deps={}){
     await client.batch(buildTursoMirrorStatements(accepted),'write');
     return {status:'SAVED',mode,asof:day,page,pages,
       attempted:rows.rows.length,saved:accepted.length,rejected};
+  }finally{client.close();}
+}
+
+/** Access-protected service-binding RPC only. Independently selects a verified
+ * EOD reference and cached KIS token from Turso, then saves the observed quote
+ * to Turso latest/history. D1 is NEVER consulted, including on failure.
+ * The API Worker authenticates the caller; the flag and atomic Turso limits
+ * prevent a public or unattended KIS polling loop.
+ */
+export async function collectTursoInstant(env,code,now=new Date(),deps={}){
+  if(typeof code!=='string'||!CODE.test(code))return {status:'INVALID_CODE'};
+  if(!tursoInstantEnabled(env))return {status:'DISABLED'};
+  const phases=(deps.marketsFor||marketsFor)(now,env.CLOSED_DATES||'');
+  if(!phases.length)return {status:'MARKET_CLOSED'};
+  const url=String(env.TURSO_DATABASE_URL||'').trim();
+  const authToken=String(env.TURSO_AUTH_TOKEN||'').trim();
+  if(!/^(libsql|https):\/\//.test(url)||!authToken)return {status:'TURSO_NOT_CONFIGURED'};
+  const client=(deps.clientFactory||createClient)({url,authToken,intMode:'string'});
+  try{
+    const day=kstParts(now).date;
+    const reference=await client.execute({sql:`SELECT e.trade_day,e.close,e.name
+      FROM blue_eod_daily_v1 e JOIN blue_eod_ingest_audit_v1 a
+        ON a.trade_day=e.trade_day AND a.row_count>=1700
+      WHERE e.code=? AND e.trade_day<? ORDER BY e.trade_day DESC LIMIT 1`,args:[code,day]});
+    const row=reference.rows?.[0];
+    if(!row)return {status:'NO_VERIFIED_EOD_REFERENCE'};
+    const sourceDay=String(row.trade_day),close=Number(row.close);
+    if(!DATE.test(sourceDay)||!Number.isSafeInteger(close)||close<=0||
+      ageDays(day,sourceDay)<1||ageDays(day,sourceDay)>MAX_SOURCE_AGE_DAYS)
+      return {status:'STALE_OR_INVALID_EOD_REFERENCE'};
+    // No D1 token fallback for an explicitly Turso-only immediate quote.
+    const found=deps.token?{token:await deps.token(client,env,now)}:
+      await tursoDirectCachedToken(client,env,now);
+    if(!found.token)return {status:found.status||'TURSO_TOKEN_MISSING'};
+    // Atomic limits are stored in Turso, so a D1 quota failure cannot bypass
+    // them or allow extra provider traffic. A DB failure fails closed.
+    await client.execute(`CREATE TABLE IF NOT EXISTS blue_turso_instant_code_limit_v1
+      (code TEXT PRIMARY KEY,next_allowed_utc TEXT NOT NULL)`);
+    await client.execute(`CREATE TABLE IF NOT EXISTS blue_turso_instant_minute_budget_v1
+      (minute_utc TEXT PRIMARY KEY,used INTEGER NOT NULL)`);
+    const stamp=now.toISOString(),next=new Date(now.getTime()+INSTANT_PER_CODE_SECONDS*1000).toISOString();
+    const claimed=await client.execute({sql:`INSERT INTO blue_turso_instant_code_limit_v1
+      (code,next_allowed_utc) VALUES(?,?) ON CONFLICT(code) DO UPDATE SET
+      next_allowed_utc=excluded.next_allowed_utc
+      WHERE blue_turso_instant_code_limit_v1.next_allowed_utc<=?`,args:[code,next,stamp]});
+    if(claimed.rowsAffected!==1)return {status:'COOLDOWN'};
+    const minute=stamp.slice(0,16);
+    const budget=await client.execute({sql:`INSERT INTO blue_turso_instant_minute_budget_v1
+      (minute_utc,used) VALUES(?,1) ON CONFLICT(minute_utc) DO UPDATE SET
+      used=used+1 WHERE blue_turso_instant_minute_budget_v1.used<?`,args:[minute,INSTANT_PER_MINUTE]});
+    if(budget.rowsAffected!==1)return {status:'RATE_LIMITED'};
+    const [market,phase]=phases.find(p=>p[0]==='J')||phases[0];
+    const raw=await (deps.quote||getKisQuote)(env,found.token,market,code);
+    const received=deps.receivedAt||new Date();
+    const quote=parseQuote({code,name:String(row.name||'').slice(0,70),
+      eod_close:close,eod_asof:sourceDay,eod_signals:'',
+      origin:'TURSO_VERIFIED_EOD_INSTANT'},market,phase,raw,received,day);
+    await client.batch(buildTursoMirrorStatements([quote]),'write');
+    return {status:'SAVED',code,market,price:quote.price,
+      trade_date:day,received_at_utc:quote.received_at_utc};
+  }catch{
+    // No credentials, raw provider payload, SQL or token ever reaches the API.
+    return {status:'QUOTE_UNAVAILABLE'};
   }finally{client.close();}
 }

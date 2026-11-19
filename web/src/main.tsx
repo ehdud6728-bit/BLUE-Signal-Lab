@@ -5,7 +5,8 @@ import PriceCompareMini from './PriceCompareMini';
 import SymbolAnalysisPanel from './SymbolAnalysisPanel';
 import TursoEodRecovery, {type TursoDay} from './TursoEodRecovery';
 import {requestSearchPriority} from './search-priority';
-import {comparisonKey,fetchCompared,fetchComparedTursoFirst,type PriceCompare} from './price-compare';
+import {comparisonKey,fetchCompared,fetchComparedTursoFirst,fetchComparedTursoOnly,
+  refreshKisQuoteToTurso,type PriceCompare} from './price-compare';
 import './r1595-group-price.css';
 import AiWidget from './AiWidget';
 import React, {useCallback,useEffect, useRef, useState} from 'react';
@@ -589,8 +590,8 @@ function App(){
     else setR1594AiRefresh(v=>v+1);
   };
   const aiReportDay=mode==='single'?(latest&&date>latest?latest:date):latest||end;
-  // Turso research rechecks saved observations only. D1 research retains the
-  // existing protected server-side priority KIS collection flow.
+  // A user click requests one Access-protected KIS quote through the Turso-only
+  // Collector RPC. It never enters the D1 queue, even when D1 is exhausted.
   async function requestMissingQuote(r:Signal){
     const key=comparisonKey(r);
     if(r1595Requesting||r1595Timers.current.size>=3)return;
@@ -598,12 +599,18 @@ function App(){
     setR1595Requesting(key);setR1595RequestNote('');
     try{
       if(patternBackend==='turso'){
-        const saved=await fetchComparedTursoFirst([{code:r.code,day:r.day}]);
-        setR1593Prices(prev=>({...prev,...saved}));
-        const price=saved[key];
-        setR1595RequestNote(price?.status==='READY'
-          ?`${r.name||r.code}: ${price.latest_day} 저장된 시세를 다시 확인했습니다. 장중 실시간 가격은 아닙니다.`
-          :`${r.name||r.code}: ${r.day} 검색 이후 검증된 시세가 아직 없습니다. Turso 저장 자료만 다시 확인했으며 신규 수집 요청은 하지 않았습니다.`);
+        const result=await refreshKisQuoteToTurso(r.code);
+        if(['SAVED','COOLDOWN','MARKET_CLOSED'].includes(result.status)){
+          const saved=await fetchComparedTursoOnly([{code:r.code,day:r.day}]);
+          setR1593Prices(prev=>({...prev,...saved}));
+        }
+        const received=result.received_at_utc?new Date(result.received_at_utc):null;
+        const observed=received&&Number.isFinite(received.getTime())
+          ?new Intl.DateTimeFormat('ko-KR',{timeZone:'Asia/Seoul',month:'2-digit',day:'2-digit',
+              hour:'2-digit',minute:'2-digit',hour12:false}).format(received):'';
+        const latest=result.status==='SAVED'&&typeof result.price==='number'&&result.price>0
+          ?` · KIS 조회가 ${result.price.toLocaleString('ko-KR')}원${observed?' ('+observed+' 수신)':''}`:'';
+        setR1595RequestNote(`${r.name||r.code}: ${result.message}${latest}`);
         return;
       }
       if(!/^\d{6}$/.test(r.code))return;
@@ -654,23 +661,9 @@ function App(){
       <button type="button" disabled={activeView==='research'&&(busy||requestBusy)}
         onClick={refreshCurrentView}><RefreshCw size={16}/> 새로고침</button>
     </div>
-    {activeView==='research'&&storageMode==='turso'&&<div className="blue-search-source-switch" role="group" aria-label="검색 종류 선택">
-      <button type="button" className={searchSource==='patterns'?'active':''} aria-pressed={searchSource==='patterns'} onClick={()=>setSearchSource('patterns')}><ScanSearch size={17}/> 기술 패턴 찾기</button>
-      <button type="button" className={searchSource==='daily'?'active':''} aria-pressed={searchSource==='daily'} onClick={()=>setSearchSource('daily')}><Database size={17}/> 확정 일봉 전체</button>
-    </div>}
-    {activeView==='research'&&storageMode==='turso'&&searchSource==='patterns'&&<div className="blue-pattern-source-note" role="status">
-      <strong>기술 패턴 검색 · {patternBackend==='turso'?'Turso 주 DB 검증 자료':'D1 보조 DB 분석 자료'}</strong>
-      <span>BLUE20/30/40 · ENV20/40 중심선 · RSI/스토캐스틱/MACD · 112/224일선 · 과거 패턴 검증</span>
-      {patternStatus==='checking'?<p>저장된 분석 거래일을 확인 중입니다.</p>:patternStatus==='ready'?<p>
-        최근 분석일: <b>{latest}</b> · {patternBackend==='turso'
-          ?'검증된 연구 신호를 Turso에서 직접 조회합니다. 과거 전체 이관은 아직 진행 중이며, 이후 최고·최저가 순위는 저장된 일봉 범위의 부분 관측입니다.'
-          :'Turso 조회 불가 또는 과거 날짜 조회를 위해 기존 D1 분석 결과를 사용합니다.'}
-        {' '}{patternSourceError&&<span className="blue-pattern-source-error">{patternSourceError} · </span>}
-        {patternBackend==='turso'?<button type="button" onClick={()=>void loadPatternDates(true)}>D1 과거 자료 보기</button>
-          :<button type="button" onClick={()=>void loadPatternDates()}>Turso 주 DB 다시 확인</button>}
-      </p>:
-        <p className="blue-pattern-source-error">패턴 분석 조회 불가: {patternSourceError} <button type="button" onClick={()=>void loadPatternDates()}>다시 확인</button></p>}
-    </div>}
+    {activeView==='research'&&storageMode==='turso'&&searchSource==='daily'&&
+      <div className="blue-daily-return"><button type="button" onClick={()=>setSearchSource('patterns')}>
+        ← 종목 검색으로 돌아가기</button><span>전체 종목 · 검증된 일봉 자료</span></div>}
     {storageMode==='d1'&&<div className="turso-fallback-banner" role="status">보조 DB · D1 분석 모드 {error&&'· Turso 일봉 조회 불가'} · 상단 새로고침으로 Turso 재연결 시도</div>}
     {storageMode==='unavailable'&&<div className="turso-unavailable-banner" role="alert">{error}<button type="button" onClick={()=>{void loadDates();}}>다시 연결</button></div>}
     {patternSearchActive&&(watchDate||completedDate||scanInfo)&&<div className="r1581-scan-monitor" role="status">
@@ -696,7 +689,23 @@ function App(){
     <main className={"app-main "+(activeView!=='research'?'r152-full-mode':'')+(storageMode==='turso'&&activeView==='research'&&searchSource==='daily'?' eod-recovery-active':'')}>
       <aside className={'panel search-panel '+(filterOpen?'filter-open':'filter-closed')} ref={formRef} id="search-panel">
         <div className="search-heading"><h2><SlidersHorizontal size={18}/> 검색 조건</h2><button type="button" className="filter-toggle" onClick={()=>setFilterOpen(v=>!v)} aria-expanded={filterOpen} aria-controls="filter-body">{filterOpen?'조건 접기':'조건 변경'} <ListFilter size={16}/></button></div>
+        {activeView==='research'&&storageMode==='turso'&&searchSource==='patterns'&&
+          <div className="blue-search-subsource">
+            <span>{patternBackend==='turso'?'Turso 분석 자료':'D1 보조 분석 자료'} · {patternStatus==='checking'?'확인 중':patternStatus==='unavailable'?'연결 오류':latest||'날짜 미확인'}</span>
+            <button type="button" onClick={()=>setSearchSource('daily')}>전체 종목 보기</button>
+          </div>}
         <div className="filter-body" id="filter-body">
+          {activeView==='research'&&storageMode==='turso'&&searchSource==='patterns'&&
+            <details className="blue-source-details"><summary>분석 데이터 안내</summary>
+              <p>{patternBackend==='turso'
+                ?'기술 신호는 Turso에 저장된 검증 연구 결과를 사용합니다. 과거 전체 이력과 이후 가격 관측은 아직 일부입니다.'
+                :'Turso 분석 자료가 부족하거나 조회할 수 없어 기존 D1 분석 결과를 사용합니다.'}</p>
+              {patternSourceError&&<p className="blue-pattern-source-error">{patternSourceError}</p>}
+              {patternStatus==='unavailable'&&<p className="blue-pattern-source-error">분석 데이터 연결에 문제가 있습니다.</p>}
+              <button type="button" onClick={()=>void loadPatternDates(patternBackend==='turso')}>
+                {patternBackend==='turso'?'D1 과거 자료 확인':'Turso 분석 다시 확인'}
+              </button>
+            </details>}
           <p className="latest-label"><Database size={14}/> 저장된 최신 거래일 <strong>{latest||'확인 중'}</strong></p>
           <label>검색 방법</label><div className="switch"><button className={mode==='single'?'active':''} type="button" onClick={()=>setMode('single')}>지정 날짜</button><button className={mode==='range'?'active':''} type="button" onClick={()=>setMode('range')}>기간 검색</button></div>
           {mode==='single'?<><label htmlFor="scan-date">검색 날짜</label><input id="scan-date" type="date" value={date} onChange={e=>{setDate(e.target.value);setDataStatus('');}}/></>:
@@ -801,7 +810,7 @@ function App(){
           {r1593Error&&<p className="r1593-comparison-status" role="status">가격 비교: {r1593Error}</p>}
           {r1595RequestNote&&<p className="r1595-request-status" role="status">{r1595RequestNote}</p>}
           {rows.length>0&&<p className="r1594-quote-note" role="status">{patternBackend==='turso'
-            ?'Turso 검증 일봉·저장된 KIS 시세만 확인합니다. 검색일 이후 새로운 거래일 자료가 없으면 최근 확인가는 비어 있습니다. ↻ 저장 시세 확인은 새 수집 요청이 아닙니다.'
+            ?'저장된 확정 일봉을 기본으로 표시합니다. 장중에는 종목별 ‘KIS 최신가 조회’를 누르면 Turso에 새 시세를 저장합니다. KIS 수신 시각은 체결 시각과 다를 수 있습니다.'
             :r1594QueueStatus+' · 수집 가능한 시장 시간에만 KIS 가격이 갱신됩니다.'}</p>}
           <div className="gc-filter-panel r15102-unified-filter" aria-label="골든크로스 및 다중 조건 과거 패턴 필터">
               <div className="gc-filter-heading"><strong><ListFilter size={15}/> 골든크로스 필터</strong><span>검색 전체 결과에 적용 · 당일 발생만</span></div>
@@ -928,7 +937,7 @@ function App(){
               <td>{r.signals.map(s=><span className="tag" key={s}>{showSignal(s)}</span>)}{techBadges(r).map(t=><span className="r1591-search-tech" key={t}>{t}</span>)}{supplyTag(r)}</td><td className="r1593-price-cell"><strong>{money(r.close_price)}원</strong><small> · 검색일 종가</small>
                 <PriceCompareMini data={r1593Prices[comparisonKey(r)]} baseline={r.close_price} loading={r1593Busy&&!r1593Prices[comparisonKey(r)]}
                   onRequest={()=>{void requestMissingQuote(r);}} requesting={r1595Requesting===comparisonKey(r)}
-                  requestLabel={patternBackend==='turso'?'↻ 저장 시세 확인':'↻ 시세 갱신'}
+                  requestLabel={patternBackend==='turso'?'↻ KIS 최신가 조회':'↻ 시세 갱신'}
                   requestDisabled={!!r1595Requesting||r1595Timers.current.size>=3}/>
               </td>
               <td>{fmt(r,'rsi')} <small>{crossed(r,'rsi_gc')}</small></td><td>{fmt(r,'slow_14_3_3_k')} / {fmt(r,'slow_14_3_3_d')} <small>{crossed(r,'slow_14_3_3_gc')}</small></td>
@@ -944,7 +953,7 @@ function App(){
               {patternEvidenceBlock(r)}
               <PriceCompareMini compact data={r1593Prices[comparisonKey(r)]} baseline={r.close_price} loading={r1593Busy&&!r1593Prices[comparisonKey(r)]}
                 onRequest={()=>{void requestMissingQuote(r);}} requesting={r1595Requesting===comparisonKey(r)}
-                requestLabel={patternBackend==='turso'?'↻ 저장 시세 확인':'↻ 시세 갱신'}
+                requestLabel={patternBackend==='turso'?'↻ KIS 최신가 조회':'↻ 시세 갱신'}
                 requestDisabled={!!r1595Requesting||r1595Timers.current.size>=3}/>
               <div className="stock-tags">{r.signals.slice(0,4).map(s=><span className="tag" key={s}>{showSignal(s)}</span>)}{r.signals.length>4&&<span className="tag tag-more">+{r.signals.length-4}</span>}{supplyTag(r)}</div>
               <div className="r1599-mobile-meta">{amountLabel(r)}</div>
@@ -985,7 +994,7 @@ function App(){
         <div className="detail-head"><div><small>{selected.code} · {selected.day}</small><h2>{displayName(selected)}</h2></div><div className="detail-close"><span>종가</span><strong>{money(selected.close_price)} <small>원</small></strong></div></div>
         <PriceCompareMini compact data={r1593Prices[comparisonKey(selected)]} baseline={selected.close_price} loading={r1593Busy&&!r1593Prices[comparisonKey(selected)]}
           onRequest={()=>{void requestMissingQuote(selected);}} requesting={r1595Requesting===comparisonKey(selected)}
-          requestLabel={patternBackend==='turso'?'↻ 저장 시세 확인':'↻ 시세 갱신'}
+          requestLabel={patternBackend==='turso'?'↻ KIS 최신가 조회':'↻ 시세 갱신'}
           requestDisabled={!!r1595Requesting||r1595Timers.current.size>=3}/>
         <div className="study-tags">{selected.signals.map(s=><span key={s}>{showSignal(s)}</span>)}</div>
         <StockChart key={'chart-'+selected.code+'-'+selected.day} code={selected.code}

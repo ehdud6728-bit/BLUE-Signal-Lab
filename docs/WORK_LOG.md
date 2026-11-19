@@ -2,6 +2,15 @@
 
 새 채팅에서 프로젝트를 이어가기 위한 **결정/구현/검증 이력**입니다. 대화 전체를 저장하지 않고 실제 개발에 필요한 내용만 보존합니다. 최신 항목을 위에 추가하고, 결과가 달라지면 추측 대신 검증된 상태로 수정합니다.
 
+## 2026-11-19 (KST) — D1 중단과 관계없는 KIS 즉시조회 및 모바일 검색 단순화 PR 준비
+
+- **요청:** D1 무료 일일 사용량 제한을 24시간 기다리지 않고 Turso 독립 경로로 운영할 수 있게 하고, 사용자가 종목별 **KIS 최신가 조회** 버튼을 눌러 즉시 조회하도록 개발. 별도로 모바일 검색 화면에 새로 생긴 `기술 패턴 찾기` / `확정 일봉 전체` 대형 버튼과 긴 데이터 설명은 혼란스럽다는 피드백을 반영.
+- **구현:** `collector/src/turso-direct.mjs`의 새로운 `collectTursoInstant`는 검증·감사된 이전 Turso KRX 일봉을 종목 기준값으로 사용하고 **Turso 암호화 금고의 기존 유효 KIS 토큰만** 읽어 KIS REST 1회 호출·응답 검증 뒤 Turso 최신가/이력 테이블에 함께 기록. D1 DB/발급기/큐에 접근하지 않음. 토큰이 만료·누락되어도 **새 tokenP 발급하지 않음**. Cloudflare Collector 서비스 바인딩을 통해서만 호출하고 HTTP API는 `Origin` + Access 인증 후에만 전달. 종목별 20초, 전체 분당 12회 원자적 Turso 제한. `TURSO_INSTANT_QUOTES_ENABLED` Worker Secret 기본 OFF이며 수동 확인 workflow로만 활성화.
+- **PWA:** 기술 패턴 검색은 그대로 기본 화면. 두 개의 큰 모드 버튼을 없애고 `전체 종목 보기`를 보조 링크로 축소, 긴 Turso/D1 설명은 `분석 데이터 안내`의 접힌 세부 안내로 이동. 기존 확정 일봉 전체 조회·복귀 경로, 날짜/기술 조건, D1 보조 분석, 장바구니/다른 탭 보존. Turso 모드의 `KIS 최신가 조회`는 새 POST에 성공하면 Turso 시세만 다시 읽으며 **D1 한도 오류 시 신규 D1 요청을 만들지 않음**. 검증 가격과 실제 수신 시각은 별도 안내하고 KIS REST 스냅샷을 거래소 체결/실시간 스트리밍으로 표시하지 않음.
+- **테스트:** `collector/test/turso-instant.test.mjs`, `tests/test_turso_instant_api.mjs`, `tests/test_turso_basket_browser.mjs`에 비활성·장외·토큰 없음·요청 제한·인증·저장·Turso 실패 시 D1 미호출 회귀 추가. 전체 Collector **61/61**, 관련 browser/API **53/53**, 웹 TypeScript+Vite 빌드, Collector/API Wrangler `--dry-run` 모두 성공. PR 후 GitHub CI는 별도 확인.
+- **운영:** 실제 시세 KIS 호출/토큰 발급/원격 Turso·D1 SQL/Cloudflare 설정/Worker·PWA 배포 **아직 없음**. 마지막 단일 토큰 발급 #44469823869은 2026-11-20 15:07:25 KST 만료 예정이며 별도 토큰 관리자가 보호 정책에 따라 갱신. 지난 `turso_only` 감사 #44485333770은 Turso 6개 샘플 성공 증거이고 이번 즉시조회 실가동 증거는 아님.
+- **다음:** PR CI → 사용자 병합 → 현재 Collector `TURSO_MIRROR_ENABLED=true`의 **full-mirror 배포 보호 확인** 및 별도 명시적 운영 승인 → Collector/API/PWA 수동 배포 → 장중 1종목만 인증·토큰·KIS 가격 및 Turso 저장/조회 시험 → `TURSO_INSTANT_QUOTES_ENABLED` 수동 enable → 분당/종목별 제한 및 D1 쓰기 백업·정합 재처리는 후속 안전 단계로 검증. 기존 코드만으로 Turso에서 D1에 모든 신규 시세를 자동 복제한다고 주장하지 않음.
+
 ## 2026-11-19 (KST) — 실토큰 복구·2종목 미러링 검증 후 정식 이중 저장 PR 준비
 
 - **운영에서 실제 확인된 상태:** 읽기 전용 조기 감사 [#44465868952](https://github.com/ehdud6728-bit/BLUE-Signal-Lab/actions/runs/44465868952)는 `EARLY_READY_FOR_MANUAL_REVIEW`, `early_cutover_ready=true`. 사용자 외부 발급 부재 확인 후 [단일 발급 #44469823869](https://github.com/ehdud6728-bit/BLUE-Signal-Lab/actions/runs/44469823869)에서 `TOKEN_SAVED_DUAL`(하나의 토큰을 Turso·D1에 암호화 저장, 만료 2026-11-20 15:07 KST). **재발급 금지**. [D1 시세 감사 #44471939334](https://github.com/ehdud6728-bit/BLUE-Signal-Lab/actions/runs/44471939334)에서는 신규 토큰 이후 D1 수집 `PARTIAL_QUOTES` 24시도/17저장/7거절 및 11/19 저장 스냅샷 17종목 확인.

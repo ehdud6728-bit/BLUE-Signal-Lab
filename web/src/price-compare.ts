@@ -8,6 +8,21 @@ export type PriceCompare = {
 };
 export const comparisonKey=(v:{code:string;day:string})=>`${v.code}:${v.day}`;
 const API=(import.meta.env.VITE_API_BASE||'https://blue-signal-lab-api-v2.ehdud6728.workers.dev').replace(/\/+$/,'');
+export type TursoInstantResult={status:string;storage:'TURSO';code:string;
+ price?:number|null;market?:string|null;trade_date?:string|null;
+ received_at_utc?:string|null;message:string};
+/** Explicit user click only; the API/Collector own KIS authentication and
+ * rate limits. Never contact the legacy D1 quote queue from this request. */
+export async function refreshKisQuoteToTurso(code:string,signal?:AbortSignal):Promise<TursoInstantResult>{
+ if(!/^[0-9A-Z]{6}$/.test(code))throw Error('INVALID_CODE');
+ const response=await fetch(API+'/api/eod/quotes/refresh',{method:'POST',credentials:'include',cache:'no-store',signal,
+  headers:{'Content-Type':'text/plain;charset=UTF-8'},body:JSON.stringify({code})});
+ if(response.status===401||response.status===403)throw Error('CLOUDFLARE_ACCESS_REQUIRED');
+ const body=await response.json() as TursoInstantResult;
+ if(!body||body.storage!=='TURSO'||body.code!==code||typeof body.status!=='string'||
+  typeof body.message!=='string')throw Error('TURSO_KIS_INVALID_RESPONSE');
+ return body;
+}
 export function sourceName(s:string|null|undefined):string {
  switch(s){
   case 'KIS_DAILY_CLOSE':return 'KIS 일봉 종가';
@@ -35,6 +50,16 @@ export function sourceName(s:string|null|undefined):string {
  */
 export async function fetchComparedTursoFirst(items:{code:string;day:string}[],signal?:AbortSignal,
  onBatch?:(partial:Record<string,PriceCompare>)=>void):Promise<Record<string,PriceCompare>>{
+ return fetchComparedTursoInternal(items,signal,onBatch,true);
+}
+/** Used after a Turso-only KIS request. A D1 error must not create another
+ * dependency or make a saved Turso price look unavailable. */
+export async function fetchComparedTursoOnly(items:{code:string;day:string}[],signal?:AbortSignal,
+ onBatch?:(partial:Record<string,PriceCompare>)=>void):Promise<Record<string,PriceCompare>>{
+ return fetchComparedTursoInternal(items,signal,onBatch,false);
+}
+async function fetchComparedTursoInternal(items:{code:string;day:string}[],signal:AbortSignal|undefined,
+ onBatch:((partial:Record<string,PriceCompare>)=>void)|undefined,allowD1Fallback:boolean):Promise<Record<string,PriceCompare>>{
  const unique=[...new Map(items.filter(x=>/^[0-9A-Z]{6}$/.test(x.code)&&/^20\d{2}-\d{2}-\d{2}$/.test(x.day))
   .map(x=>[comparisonKey(x),x] as const)).values()];
  const out:Record<string,PriceCompare>={};
@@ -62,6 +87,7 @@ export async function fetchComparedTursoFirst(items:{code:string;day:string}[],s
    turso=valid;
   }catch(e){
    if(signal?.aborted)throw e;
+   if(!allowD1Fallback)throw e;
    // Only a Turso transport/provider problem warrants using the D1 fallback.
    // Authorization errors also affect the protected D1 route, so surface them.
    if(e instanceof Error&&/TURSO_EOD_HTTP_(400|401|403)/.test(e.message))throw e;

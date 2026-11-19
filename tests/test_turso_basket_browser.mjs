@@ -9,7 +9,8 @@ const source=(await readFile(new URL('../web/src/price-compare.ts',import.meta.u
  .replace('import.meta.env.VITE_API_BASE','undefined');
 const js=ts.transpileModule(source,{compilerOptions:{module:ts.ModuleKind.ESNext,
  target:ts.ScriptTarget.ES2022}}).outputText;
-const {fetchComparedTursoFirst}=await import(`data:text/javascript;base64,${Buffer.from(js).toString('base64')}`);
+const {fetchComparedTursoFirst,fetchComparedTursoOnly,refreshKisQuoteToTurso}=
+ await import(`data:text/javascript;base64,${Buffer.from(js).toString('base64')}`);
 
 function response(body,status=200){return {ok:status>=200&&status<300,status,
  async json(){return body;}};}
@@ -55,11 +56,59 @@ test('Turso reader supports audited alphanumeric KRX symbols',async()=>{
  }finally{globalThis.fetch=prev;}
 });
 
-test('pattern search price and manual recheck both use Turso reader',async()=>{
+test('pattern search price is Turso-first; manual KIS refresh saves and then reads Turso only',async()=>{
  const main=await readFile(new URL('../web/src/main.tsx',import.meta.url),'utf8');
  assert.match(main,/const readPrices=patternBackend==='turso'\?fetchComparedTursoFirst:fetchCompared/);
- assert.match(main,/if\(patternBackend==='turso'\)\{\s*const saved=await fetchComparedTursoFirst/);
- assert.match(main,/requestLabel=\{patternBackend==='turso'\?'↻ 저장 시세 확인':'↻ 시세 갱신'\}/);
+ assert.match(main,/if\(patternBackend==='turso'\)\{\s*const result=await refreshKisQuoteToTurso\(r\.code\)/);
+ assert.match(main,/const saved=await fetchComparedTursoOnly/);
+ assert.match(main,/requestLabel=\{patternBackend==='turso'\?'↻ KIS 최신가 조회':'↻ 시세 갱신'\}/);
+});
+
+test('mobile search removes large technical/EOD split and keeps secondary data view',async()=>{
+ const main=await readFile(new URL('../web/src/main.tsx',import.meta.url),'utf8');
+ assert.doesNotMatch(main,/className="blue-search-source-switch"/);
+ assert.doesNotMatch(main,/className="blue-pattern-source-note"/);
+ assert.match(main,/className="blue-search-subsource"/);
+ assert.match(main,/전체 종목 보기/);
+ assert.match(main,/종목 검색으로 돌아가기/);
+ assert.match(main,/<details className="blue-source-details">/);
+});
+
+test('manual request calls one protected POST, no D1, then reads saved Turso quote',async()=>{
+ const prev=globalThis.fetch,calls=[];
+ try{
+  globalThis.fetch=async (url,options={})=>{
+   calls.push({path:new URL(url).pathname,options});
+   if(new URL(url).pathname==='/api/eod/quotes/refresh')return response({
+    storage:'TURSO',code:'225190',status:'SAVED',message:'조회했습니다.',
+    trade_date:'2026-11-19',price:4710,market:'J',received_at_utc:'2026-11-19T00:10:00Z'});
+   return response({storage:'TURSO',items:[{...snapshot,latest_day:'2026-11-19',
+    latest_price:4710,latest_source:'KIS_TURSO_SNAPSHOT',
+    latest_at:'2026-11-19T00:10:00Z',latest_market:'J'}]});
+  };
+  const result=await refreshKisQuoteToTurso('225190');
+  assert.equal(result.status,'SAVED');
+  assert.equal(result.price,4710);
+  const saved=await fetchComparedTursoOnly(request);
+  assert.equal(saved['225190:2026-11-17'].latest_source,'KIS_TURSO_SNAPSHOT');
+  assert.deepEqual(calls.map(x=>x.path),['/api/eod/quotes/refresh','/api/eod/prices/compare']);
+  assert.equal(calls[0].options.method,'POST');
+  assert.equal(calls[0].options.credentials,'include');
+  assert.deepEqual(JSON.parse(calls[0].options.body),{code:'225190'});
+ }finally{globalThis.fetch=prev;}
+});
+
+test('manual quote fails closed on Access denial or Turso outage, with zero D1 reads',async()=>{
+ const prev=globalThis.fetch,paths=[];
+ try{
+  globalThis.fetch=async (url)=>{
+   const path=new URL(url).pathname;paths.push(path);
+   return path==='/api/eod/quotes/refresh'?response({error:'ACCESS_REQUIRED'},401):response({},503);
+  };
+  await assert.rejects(()=>refreshKisQuoteToTurso('225190'),/CLOUDFLARE_ACCESS_REQUIRED/);
+  await assert.rejects(()=>fetchComparedTursoOnly(request),/TURSO_EOD_HTTP_503/);
+  assert.deepEqual(paths,['/api/eod/quotes/refresh','/api/eod/prices/compare']);
+ }finally{globalThis.fetch=prev;}
 });
 
 test('Turso outage falls back exactly once to existing D1 endpoint',async()=>{
