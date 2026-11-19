@@ -8,6 +8,7 @@ Does not contain stock order logic. One explicit token issuance at most per invo
 from __future__ import annotations
 
 import base64
+import binascii
 import hashlib
 import json
 import os
@@ -60,7 +61,13 @@ def encrypt_token(token, appkey, appsecret):
 
 def decrypt_token(encoded, appkey, appsecret):
     try:
-        blob = base64.urlsafe_b64decode(encoded)
+        # The shared Turso issuer writes Node's unpadded base64url ciphertext;
+        # legacy Python-issued D1 ciphertext includes RFC 4648 '=' padding.
+        # Accept both representations without changing the AES-GCM format.
+        if not isinstance(encoded, str) or len(encoded) > 8192 or not re.fullmatch(r'[A-Za-z0-9_-]+={0,2}', encoded):
+            raise ValueError('bad encoding')
+        raw = encoded.rstrip('=')
+        blob = base64.urlsafe_b64decode(raw + '=' * (-len(raw) % 4))
         if len(blob) < 29:
             raise ValueError('short')
         token = AESGCM(cipher_key(appkey, appsecret)).decrypt(
@@ -69,7 +76,7 @@ def decrypt_token(encoded, appkey, appsecret):
         if not token:
             raise ValueError('empty')
         return token
-    except (ValueError, InvalidTag, UnicodeError):
+    except (ValueError, binascii.Error, InvalidTag, UnicodeError):
         raise VaultError('DECRYPT_FAILED') from None
 
 

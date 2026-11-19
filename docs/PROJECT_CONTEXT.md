@@ -2,6 +2,13 @@
 
 > 업데이트: 2026-11-19 (한국 시간). 이 파일은 개발 인계용 요약이며, 서버의 실시간 상태를 자동으로 반영하지 않습니다.
 
+## 2026-11-19 (KST) — 운영 토큰 복구·제한 시세 미러 성공, 정식 미러 배포는 별도 승인
+
+- 조기 감사 [#44465868952](https://github.com/ehdud6728-bit/BLUE-Signal-Lab/actions/runs/44465868952) 통과 및 사용자 외부 발급 부재 확인 후 [KIS 공유 발급 #44469823869](https://github.com/ehdud6728-bit/BLUE-Signal-Lab/actions/runs/44469823869) `TOKEN_SAVED_DUAL` 달성. 동일 KIS 접근토큰이 Turso·D1에 저장됨(만료 2026-11-20 15:07:25 KST). 기존 D1 발급 중단은 계속 유지, 재발급 반복 금지.
+- [D1 시세 감사 #44471939334](https://github.com/ehdud6728-bit/BLUE-Signal-Lab/actions/runs/44471939334)에서 토큰 갱신 이후 D1 수집 17건 확인. [Turso 제한 파일럿 #44472224119](https://github.com/ehdud6728-bit/BLUE-Signal-Lab/actions/runs/44472224119) 이후 [Turso 상태 #44475510723](https://github.com/ehdud6728-bit/BLUE-Signal-Lab/actions/runs/44475510723)에서 2종목·이력 6건 수신 확인. **정확한 동일행 비교·전량 복제·앱 최신시세 표시 완료는 아직 아님.**
+- 다음 코드 PR은 Python 기존 KIS vault의 Node unpadded Base64URL 호환 오류([R1.4.1 실패 #44474905492](https://github.com/ehdud6728-bit/BLUE-Signal-Lab/actions/runs/44474905492))를 수정하고, D1 최대 6개 정확한 이력 키만 수동 조회하는 정합성 감사/전체 미러 수동 배포 확인 문자열/긴급 정지 Secret을 추가한다. `TURSO_MIRROR_ENABLED=true`는 **코드에 준비하지만 GitHub PR 병합만으로 운영 Worker가 변경되지 않으며** 감사 후 별도 수동 배포가 필요하다. D1 수집 코드·KIS 발급 기능/토큰은 건드리지 않는다.
+- 사용자는 Turso 주 DB/D1 보조 DB의 **동일한 검증 시세**를 원한다. 현 단계 미러는 D1 후보·우선순위·관심 목록을 읽어서 얻은 관측을 D1과 Turso에 쓰는 best-effort 구조다. D1 무료 한도로 후보 조회 자체가 차단되면 미러만으로는 해결되지 않으며, 이전에 준비한 별도 Turso 연구 후보 기반 독립 수집과 누락 복구/원장 재처리를 검증한 뒤 다음 전환을 진행한다.
+
 ## 2026-11-19 (KST) — KIS 최신 시세 조기 복구 예외 준비 (발급 미실행)
 
 - **사용자 요청:** 현재 KIS 토큰이 만료돼 최신 시세 수집이 중단된 상태이므로 내일 24시간 중단 대기 완료 전의 안전한 조기 복구 가능성을 우선 검토. 확인된 D1 마지막 `TOKEN_SAVED`는 2026-11-17 16:20 KST, 만료 11/18 16:20 KST. [읽기 전용 감사 #44444330961](https://github.com/ehdud6728-bit/BLUE-Signal-Lab/actions/runs/44444330961)에서 D1 자동 발급 중단 기록 2026-11-19 11:23:04 KST, 최근 발급 시도/성공은 중단 이전, 현재 일반 보호 상태 `WAIT_24H_SINCE_D1_PAUSED`. 이 기록은 감사 이후 또는 외부 수동 tokenP 발급 부재까지 증명하지는 않음.

@@ -2,6 +2,16 @@
 
 새 채팅에서 프로젝트를 이어가기 위한 **결정/구현/검증 이력**입니다. 대화 전체를 저장하지 않고 실제 개발에 필요한 내용만 보존합니다. 최신 항목을 위에 추가하고, 결과가 달라지면 추측 대신 검증된 상태로 수정합니다.
 
+## 2026-11-19 (KST) — 실토큰 복구·2종목 미러링 검증 후 정식 이중 저장 PR 준비
+
+- **운영에서 실제 확인된 상태:** 읽기 전용 조기 감사 [#44465868952](https://github.com/ehdud6728-bit/BLUE-Signal-Lab/actions/runs/44465868952)는 `EARLY_READY_FOR_MANUAL_REVIEW`, `early_cutover_ready=true`. 사용자 외부 발급 부재 확인 후 [단일 발급 #44469823869](https://github.com/ehdud6728-bit/BLUE-Signal-Lab/actions/runs/44469823869)에서 `TOKEN_SAVED_DUAL`(하나의 토큰을 Turso·D1에 암호화 저장, 만료 2026-11-20 15:07 KST). **재발급 금지**. [D1 시세 감사 #44471939334](https://github.com/ehdud6728-bit/BLUE-Signal-Lab/actions/runs/44471939334)에서는 신규 토큰 이후 D1 수집 `PARTIAL_QUOTES` 24시도/17저장/7거절 및 11/19 저장 스냅샷 17종목 확인.
+- **Turso 증거:** [30분 제한 파일럿 #44472224119](https://github.com/ehdud6728-bit/BLUE-Signal-Lab/actions/runs/44472224119) 시작·자동 종료 15:57 KST. [Turso 상태 #44475510723](https://github.com/ehdud6728-bit/BLUE-Signal-Lab/actions/runs/44475510723)에서 11/19 종목 2개·시세 이력 6행·최근 수신 15:51 KST 확인. 이것은 **미러 경로 작동 증거**이지 D1/Turso 정확한 행 일치 또는 전체 종목 복제 증거는 아님.
+- **별도 기존 GitHub 시세조회 오류:** [#44474905492](https://github.com/ehdud6728-bit/BLUE-Signal-Lab/actions/runs/44474905492) `TOKEN_VAULT_DECRYPT_FAILED`. 새 Node 발급기의 Base64URL 암호문은 `=` 패딩이 없는데 기존 Python 복호화기는 패딩을 요구함을 가짜 토큰으로 재현하고, 양쪽 포맷 수용으로 고침. 실토큰 조회/발급 없이 Node→Python 가짜 암호문 교차 검증 통과.
+- **이번 코드:** `collector/wrangler.jsonc`의 `TURSO_MIRROR_ENABLED=true`를 **정식 배포 후보로만** 설정(병합해도 자동 Worker 배포 없음). 기존 `blue_r142_collector_deploy.yml`은 `deploy=true` 외에 별도 `confirm_full_mirror=blue-turso-full-mirror` 없이 정식 배포를 차단. `TURSO_MIRROR_PAUSED` 비밀값으로 전체/파일럿 미러를 즉시 끌 수 있고, 별도 수동 Emergency Workflow는 기본 dry-run/승인 후 pause·resume만 가능. 기존 D1 시세 수집·저장, 비밀값 및 tokenP 발급 정책 변경 없음.
+- **새 읽기 전용 정합성 감사:** `blue_turso_quote_parity_audit.yml` 기본 `turso_only`는 Turso 이력 최대 6건만 조회. `compare_small`은 `confirm_d1_read=blue-d1-bounded-read` 명시 시에만 같은 `(거래일,시장,코드,수신시각)` 키로 D1 **정확히 최대 6건**을 조회해 가격·누적거래량·시장단계를 비교. D1 Free 한도에 막힌 경우 성공 처리하지 않고 원문/토큰/SQL을 로그에 출력하지 않음. **원격 정합성 감사 미실행**이며 누락 재전송·전체 자료 동기화는 아직 없음.
+- **로컬 검증:** Collector **55/55**, Python KIS 계열 **69/69**, 신규 무시크릿 정합성 감사 **6/6**, Workflow YAML 파싱 및 Worker Wrangler `--dry-run` (FULL 바인딩) 통과, Node→Python 가짜 암호문 호환 검증 및 `git diff --check` 통과. **실제 운영 full mirror 배포/원격 D1·Turso 쿼리/KIS 재발급은 수행하지 않음.**
+- **병합 후 다음:** 새 감사 `turso_only` → D1 무료 한도 정상 시 `compare_small` 수동 승인 후 11/19 시험 이력 6건 일치 여부 검증 → 결과·쓰기량 확인 후 명시적 승인으로 Collector `deploy=true`, `confirm_full_mirror=blue-turso-full-mirror` → Turso 저장 수치/시각 재검증 및 별도 R1.4.1 Python cache-only 실행 확인. D1 쓰기 실패 시 Turso 경로가 살아도 D1 후보 조회 전체 장애에서는 여전히 수집 불완전. 장기 누락 재처리와 D1 독립 수집기는 별개 후속 개발.
+
 ## 2026-11-19 (KST) — 만료된 KIS 토큰의 조기 복구 안전 예외 (PR 준비)
 
 - **사용자 결정:** 11/20 11:23 KST까지 일률적으로 기다려 최신 시세가 중단되는 상황보다는, 제공처 마지막 발급이 24시간 이상 전임을 검증한 뒤 **가능하면 조기 복구**. 읽기 전용 감사 #44444330961 `paused=true`, `pause_at_utc=2026-11-19T02:23:04.174Z`, `last_attempt_status=SAVED`, `last_saved_at_utc=2026-11-17T07:20:08.600Z`, `WAIT_24H_SINCE_D1_PAUSED`. D1 마지막 check #44438538538 `TOKEN_EXPIRED_ELIGIBLE`; **감사 이후 외부 수동 tokenP 부재는 이 증거만으로 입증할 수 없음**.

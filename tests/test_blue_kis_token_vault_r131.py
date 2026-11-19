@@ -27,6 +27,19 @@ class TokenVaultTests(unittest.TestCase):
         self.assertEqual(vault.decrypt_token(c,'key','secret'),'secret bearer token')
         with self.assertRaises(vault.VaultError):vault.decrypt_token(c,'key','other-secret')
 
+    def test_shared_turso_issuer_unpadded_base64url_is_decryptable(self):
+        # Node Buffer.toString('base64url') drops '=' padding, unlike Python.
+        # Use multiple token lengths so both one- and two-character padding
+        # cases are covered without storing any real token or key.
+        for raw_token in ('fake-shared-kis-token', 'fake-shared-kis-token-more'):
+            padded = vault.encrypt_token(raw_token, 'fake-app-key', 'fake-secret')
+            unpadded = padded.rstrip('=')
+            self.assertEqual(vault.decrypt_token(unpadded, 'fake-app-key', 'fake-secret'), raw_token)
+            self.assertEqual(vault.decrypt_token(padded, 'fake-app-key', 'fake-secret'), raw_token)
+        for invalid in ('=', '!!broken!!', 'a' * 8193):
+            with self.assertRaisesRegex(vault.VaultError, 'DECRYPT_FAILED'):
+                vault.decrypt_token(invalid, 'fake-app-key', 'fake-secret')
+
     def test_scope_independent_per_appkey(self):
         self.assertNotEqual(vault.scope_for('accountA'),vault.scope_for('accountB'))
 

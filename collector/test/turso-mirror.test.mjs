@@ -11,6 +11,8 @@ test('mirror is opt-in and off for missing/default flag',()=>{
   assert.equal(tursoMirrorEnabled({}),false);
   assert.equal(tursoMirrorEnabled({TURSO_MIRROR_ENABLED:'false'}),false);
   assert.equal(tursoMirrorEnabled({TURSO_MIRROR_ENABLED:'true'}),true);
+  assert.equal(tursoMirrorEnabled({TURSO_MIRROR_ENABLED:'true',TURSO_MIRROR_PAUSED:'true'}),false);
+  assert.equal(tursoMirrorMode({TURSO_MIRROR_ENABLED:'true',TURSO_MIRROR_PAUSED:'true'}),'OFF');
 });
 
 test('pilot only runs within its strict UTC expiry window, with full mode independent',()=>{
@@ -88,6 +90,8 @@ test('disabled/missing-secrets never creates a connection',async()=>{
   const unexpected=()=>{throw Error('Should not connect');};
   assert.deepEqual(await mirrorQuotesToTurso({},[sample()],{createClientFn:unexpected}),{status:'DISABLED',saved:0});
   assert.deepEqual(await mirrorQuotesToTurso({TURSO_MIRROR_ENABLED:'true'},[sample()],{createClientFn:unexpected}),{status:'MISSING_SECRETS',saved:0});
+  assert.deepEqual(await mirrorQuotesToTurso({TURSO_MIRROR_ENABLED:'true',TURSO_MIRROR_PAUSED:'true'},
+    [sample()],{createClientFn:unexpected}),{status:'DISABLED',saved:0});
 });
 
 test('Turso error closes the client but does not include credentials in messages',async()=>{
