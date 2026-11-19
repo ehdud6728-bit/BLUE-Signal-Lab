@@ -8,6 +8,11 @@ on:
         type: boolean
         required: true
         default: false
+      confirm_full_mirror:
+        description: 'If full Turso mirror is enabled, type exactly blue-turso-full-mirror to deploy.'
+        type: string
+        required: false
+        default: ''
 
 permissions:
   contents: read
@@ -33,6 +38,18 @@ jobs:
           npm install --no-package-lock --no-audit --no-fund
           npm test
           npm run build:check
+      - name: Guard explicit production full-mirror approval
+        if: inputs.deploy
+        env:
+          CONFIRM_FULL_MIRROR: ${{ inputs.confirm_full_mirror }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if grep -Eq '"TURSO_MIRROR_ENABLED"[[:space:]]*:[[:space:]]*"true"' collector/wrangler.jsonc; then
+            if [[ "$CONFIRM_FULL_MIRROR" != 'blue-turso-full-mirror' ]]; then
+              echo 'FULL_MIRROR_DEPLOY_BLOCKED: explicit production approval required'; exit 1
+            fi
+          fi
       - name: Deploy collector, isolated from existing API Worker
         if: inputs.deploy
         working-directory: collector

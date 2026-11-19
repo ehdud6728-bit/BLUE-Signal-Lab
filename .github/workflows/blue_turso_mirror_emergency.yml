@@ -1,0 +1,76 @@
+name: BLUE Turso Full Mirror Emergency Pause (MANUAL)
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: 'dry_run changes nothing; pause stops Turso mirrored writes; resume requires explicit review'
+        type: choice
+        required: true
+        default: dry_run
+        options: [dry_run, pause, resume]
+      confirm_worker:
+        description: 'For pause/resume enter exactly blue-market-collector'
+        type: string
+        required: false
+        default: ''
+      confirm_resume:
+        description: 'For resume enter exactly blue-turso-mirror-resume'
+        type: string
+        required: false
+        default: ''
+
+permissions:
+  contents: read
+
+concurrency:
+  group: blue-turso-mirror-emergency-control
+  cancel-in-progress: false
+
+jobs:
+  control:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Confirm safe scope
+        env:
+          MODE: ${{ inputs.mode }}
+        run: |
+          test "$GITHUB_REPOSITORY" = 'ehdud6728-bit/BLUE-Signal-Lab'
+          test "$GITHUB_REF" = 'refs/heads/main'
+          echo "BLUE_TURSO_MIRROR_EMERGENCY mode=$MODE"
+          echo 'No D1 SQL, no KIS tokenP, no order endpoint.'
+          echo 'Worker secret changes can publish a new Worker version.'
+      - uses: actions/checkout@v4
+        if: inputs.mode != 'dry_run'
+      - uses: actions/setup-node@v4
+        if: inputs.mode != 'dry_run'
+        with:
+          node-version: '22'
+      - name: Install Wrangler
+        if: inputs.mode != 'dry_run'
+        working-directory: collector
+        run: npm install --no-audit --no-fund --no-package-lock
+      - name: Apply emergency mirror pause or explicitly resume
+        if: inputs.mode != 'dry_run'
+        working-directory: collector
+        shell: bash
+        env:
+          MODE: ${{ inputs.mode }}
+          CONFIRM_WORKER: ${{ inputs.confirm_worker }}
+          CONFIRM_RESUME: ${{ inputs.confirm_resume }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_WORKER_DEPLOY_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          [[ "$CONFIRM_WORKER" == 'blue-market-collector' ]] || { echo 'INVALID_WORKER_CONFIRMATION'; exit 1; }
+          [[ -n "$CLOUDFLARE_API_TOKEN" && -n "$CLOUDFLARE_ACCOUNT_ID" ]] || { echo 'CLOUDFLARE_SECRETS_MISSING'; exit 1; }
+          if [[ "$MODE" == 'pause' ]]; then
+            VALUE=true
+          elif [[ "$MODE" == 'resume' && "$CONFIRM_RESUME" == 'blue-turso-mirror-resume' ]]; then
+            VALUE=false
+          else
+            echo 'MIRROR_RESUME_NOT_APPROVED'; exit 1
+          fi
+          printf '%s' "$VALUE" | npx wrangler secret put TURSO_MIRROR_PAUSED --name blue-market-collector
+          echo "BLUE_TURSO_MIRROR_EMERGENCY_APPLIED mode=$MODE"

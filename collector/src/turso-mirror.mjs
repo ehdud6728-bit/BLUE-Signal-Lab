@@ -7,6 +7,8 @@ const PILOT_MAX_DURATION_MS=30*60*1000;
 const PILOT_MAX_QUOTES_PER_RUN=2;
 
 export function tursoMirrorMode(env,now=new Date()) {
+  // The emergency Worker-secret kill switch overrides even full mirroring.
+  if (String(env?.TURSO_MIRROR_PAUSED || 'false').toLowerCase() === 'true') return 'OFF';
   if (String(env?.TURSO_MIRROR_ENABLED || 'false').toLowerCase() === 'true') return 'FULL';
   const deadline=String(env?.TURSO_MIRROR_PILOT_UNTIL_UTC || '');
   if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(deadline)) return 'OFF';

@@ -6,6 +6,7 @@ on:
       - 'collector/src/turso-direct.mjs'
       - 'collector/src/turso-mirror.mjs'
       - 'collector/test/turso-mirror.test.mjs'
+      - 'collector/wrangler.jsonc'
       - 'collector/src/handler.mjs'
       - 'collector/turso-direct.test.mjs'
       - 'scripts/blue_kis_cutover_audit.py'
@@ -18,6 +19,14 @@ on:
       - 'tools/turso/kis-token-steward.test.mjs'
       - 'tools/turso/d1-token-backup.mjs'
       - 'tools/turso/d1-token-backup.test.mjs'
+      - 'tools/turso/quote-parity-audit.mjs'
+      - 'tools/turso/quote-parity-audit.test.mjs'
+      - 'scripts/blue_kis_token_vault_r131.py'
+      - 'tests/test_blue_kis_token_vault_r131.py'
+      - 'tests/test_turso_mirror_rollout.py'
+      - '.github/workflows/blue_r142_collector_deploy.yml'
+      - '.github/workflows/blue_turso_quote_parity_audit.yml'
+      - '.github/workflows/blue_turso_mirror_emergency.yml'
       - '.github/workflows/blue_turso_direct_ci.yml'
       - '.github/workflows/blue_turso_kis_token_steward.yml'
       - '.github/workflows/blue_turso_direct_quotes_pilot.yml'
@@ -45,6 +54,7 @@ jobs:
           python -m unittest discover -s tests -p 'test_blue_kis_token_vault_r131.py' -v
           python -m unittest discover -s tests -p 'test_blue_kis_daily_token_r1597.py' -v
           python -m unittest discover -s tests -p 'test_blue_kis_cutover_audit.py' -v
+          python -m unittest discover -s tests -p 'test_turso_mirror_rollout.py' -v
       - name: Install collector dependencies
         working-directory: collector
         run: npm install --no-audit --no-fund --no-package-lock
@@ -52,7 +62,7 @@ jobs:
         working-directory: tools/turso
         run: npm install --no-audit --no-fund --ignore-scripts --no-package-lock
       - name: Test shared token vault, D1 fallback and collector safety
-        run: node --test collector/turso-direct.test.mjs collector/test/turso-mirror.test.mjs tools/turso/kis-token-steward.test.mjs tools/turso/d1-token-backup.test.mjs
+        run: node --test collector/turso-direct.test.mjs collector/test/turso-mirror.test.mjs tools/turso/kis-token-steward.test.mjs tools/turso/d1-token-backup.test.mjs tools/turso/quote-parity-audit.test.mjs
       - name: Bundle collector without deployment
         working-directory: collector
         run: npx wrangler deploy --dry-run --outdir ../.blue-turso-direct-test-build
