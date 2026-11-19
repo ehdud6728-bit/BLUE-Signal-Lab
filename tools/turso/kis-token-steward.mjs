@@ -104,10 +104,22 @@ export async function steward(client,env,now=new Date(),{mode='check',issuer=iss
   if(!['check','issue','sync'].includes(mode))throw Error('INVALID_MODE');
   const key=String(env.KIS_APP_KEY||''),secret=String(env.KIS_APP_SECRET||'');
   if(!key||!secret)throw Error('KIS_CONFIG_MISSING');
-  await client.execute('CREATE TABLE IF NOT EXISTS blue_turso_kis_vault_v1 (scope TEXT PRIMARY KEY,ciphertext TEXT NOT NULL,expires_at_utc TEXT NOT NULL,saved_at_utc TEXT NOT NULL)');
-  await client.execute('CREATE TABLE IF NOT EXISTS blue_turso_kis_issuance_v1 (scope TEXT PRIMARY KEY,last_attempt_at_utc TEXT NOT NULL,last_attempt_day_kst TEXT NOT NULL,status TEXT NOT NULL,last_success_at_utc TEXT)');
+  // Metadata checks must never issue DDL, even if the vault tables are missing.
+  // Only the explicit issue/sync modes are allowed to initialize schema.
+  if(mode!=='check'){
+    await client.execute('CREATE TABLE IF NOT EXISTS blue_turso_kis_vault_v1 (scope TEXT PRIMARY KEY,ciphertext TEXT NOT NULL,expires_at_utc TEXT NOT NULL,saved_at_utc TEXT NOT NULL)');
+    await client.execute('CREATE TABLE IF NOT EXISTS blue_turso_kis_issuance_v1 (scope TEXT PRIMARY KEY,last_attempt_at_utc TEXT NOT NULL,last_attempt_day_kst TEXT NOT NULL,status TEXT NOT NULL,last_success_at_utc TEXT)');
+  }
   const scope=scopeFor(key);
-  const result=await client.execute({sql:'SELECT expires_at_utc,saved_at_utc FROM blue_turso_kis_vault_v1 WHERE scope=? LIMIT 1',args:[scope]});
+  let result;
+  try{
+    result=await client.execute({sql:'SELECT expires_at_utc,saved_at_utc FROM blue_turso_kis_vault_v1 WHERE scope=? LIMIT 1',args:[scope]});
+  }catch{
+    // Missing table, permissions, or connectivity are not evidence of a missing
+    // token. Fail closed without leaking database/credential error details.
+    if(mode==='check')return {status:'TOKEN_VAULT_READ_UNAVAILABLE'};
+    throw error;
+  }
   const existing=result.rows?.[0];
   const expires=existing?Date.parse(String(existing.expires_at_utc)):NaN;
   const saved=existing?Date.parse(String(existing.saved_at_utc)):NaN;
@@ -224,7 +236,8 @@ async function main(){
     const result=await steward(client,env,new Date(),{mode,backup});
     console.log('BLUE_TURSO_KIS_TOKEN_STEWARD '+JSON.stringify(result));
     if(['ISSUE_FAILED_RETRY_AFTER_30M','ISSUE_FAILED_FINAL','SAVE_FAILED_NO_RETRY',
-      'INVALID_TOKEN_METADATA','TOKEN_SAVED_BACKUP_PENDING','D1_BACKUP_SYNC_FAILED',
+      'INVALID_TOKEN_METADATA','TOKEN_VAULT_READ_UNAVAILABLE',
+      'TOKEN_SAVED_BACKUP_PENDING','D1_BACKUP_SYNC_FAILED',
       'D1_BACKUP_NO_PRIMARY_TOKEN','D1_BACKUP_PRIMARY_EXPIRED',
       'D1_BACKUP_NOT_CONFIGURED','D1_BACKUP_INSPECTION_FAILED_NO_ISSUE',
       'EARLY_D1_AUDIT_UNAVAILABLE','EARLY_D1_AUDIT_BLOCKED'].includes(result.status))

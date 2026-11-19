@@ -31,7 +31,7 @@
 
 - 하나의 Turso 관리자가 **`tokenP`를 최대 1회** 호출해 얻은 동일 KIS 접근토큰을 Turso `blue_turso_kis_vault_v1` 및 기존 D1 `blue_kis_token_vault_v1`에 각각 AES-256-GCM 암호화 저장합니다. 암호문은 임의 nonce 때문에 서로 다를 수 있지만 복호화되는 토큰·발급/만료 시각은 같습니다. KIS App Key/Secret는 기존 GitHub/Worker Secrets에만 둡니다.
 - D1 백업은 **별도의 발급기가 아닙니다**. 기존 D1 발급 워크플로는 `BLUE_KIS_TOKEN_AUTO_PAUSED=true`로 계속 중단해야 하며, Turso 발급 역시 D1 중단 감사 완료 + 24시간 대기 + 수동 승인 전에는 불가합니다.
-- 새 저장소 변수 `BLUE_KIS_DUAL_VAULT_ENABLED=true`를 **코드 검증 및 전환 승인 후에만** 설정합니다. 이 값이 없으면 `mode=issue`와 `mode=sync`를 모두 차단합니다. 기존 `mode=check`는 Turso 메타데이터 읽기만 수행합니다.
+- 새 저장소 변수 `BLUE_KIS_DUAL_VAULT_ENABLED=true`를 **코드 검증 및 전환 승인 후에만** 설정합니다. 이 값이 없으면 `mode=issue`와 `mode=sync`를 모두 차단합니다. `mode=check`는 Turso 메타데이터 **SELECT 한 번만** 수행하고 테이블을 만들지 않습니다. 금고 테이블 누락·권한/연결 오류는 `TOKEN_VAULT_READ_UNAVAILABLE`로 실패 처리합니다. 이 보장은 해당 보완 PR 병합 후 실행부터 적용됩니다.
 - `mode=sync`는 Turso의 **현재 유효한 토큰**을 D1에 재암호화 복제·재조회·복호화 비교만 수행합니다. KIS 발급이 전혀 없으므로 D1 백업 실패(`TOKEN_SAVED_BACKUP_PENDING`/`D1_BACKUP_SYNC_FAILED`) 후 토큰 재발급 대신 `sync`로 복구할 수 있습니다. 예약된 `issue` 점검에서도 대기 중 백업 복제를 다시 시도합니다.
 - 최초 Turso 토큰이 비어 있으면 KIS에 요청하기 전에 D1 백업을 검사합니다. 유효한 D1 토큰이 있으면 Turso로 복원해 **추가 발급을 막습니다**. D1 조회 불가·손상·24시간 미경과 상태를 새 발급 근거로 사용하지 않습니다.
 - Collector의 Turso 독립 시세 경로는 기본적으로 Turso 금고의 암호문을 읽습니다. 별도로 **Cloudflare Collector Worker에** `BLUE_KIS_DUAL_VAULT_ENABLED=true`를 명시 설치한 경우, Turso 토큰 금고만 조회 실패/누락/만료일 때 D1에 남은 **유효한 동일 토큰**을 읽습니다. 복호화 오류·메타데이터 손상은 폴백하지 않고 차단합니다. 이 바인딩은 GitHub 저장소 Variables와 별개이며 수동 Worker 설정/배포가 필요합니다.

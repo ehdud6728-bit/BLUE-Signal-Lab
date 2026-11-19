@@ -2,6 +2,13 @@
 
 새 채팅에서 프로젝트를 이어가기 위한 **결정/구현/검증 이력**입니다. 대화 전체를 저장하지 않고 실제 개발에 필요한 내용만 보존합니다. 최신 항목을 위에 추가하고, 결과가 달라지면 추측 대신 검증된 상태로 수정합니다.
 
+## 2026-11-19 (KST) — Collector 운영 배포 완료 및 Turso KIS 토큰 상태 조회 보호 보완
+
+- **실제 배포 확인:** [#44515487283](https://github.com/ehdud6728-bit/BLUE-Signal-Lab/actions/runs/44515487283)에서 Collector 69/69 테스트·승인 확인·Cloudflare Worker 업로드 및 매분 트리거 배포·KIS_APP_KEY/SECRET Secret 등록 성공. Worker version `b0818fa5-674b-485e-b81e-a8053c6c08b4`. 운영 배포만으로 Turso 잠정 일봉 파일럿이 켜지지는 않음. 이전 [#44514827448](https://github.com/ehdud6728-bit/BLUE-Signal-Lab/actions/runs/44514827448)은 확인 문구 입력 위치 오류로 배포 단계 skipped.
+- **사전 점검에서 발견:** `BLUE Shared KIS Token Steward`의 `mode=check`는 문서상 읽기 전용이지만 `steward()`가 진입 시 `CREATE TABLE IF NOT EXISTS` 2회를 실행할 수 있었음. 실제 운영에서 이 쿼리의 테이블 생성 여부는 확인하지 않았으며, 이번에 `check`를 실행하지 않음.
+- **보완:** `mode=check`는 토큰·만료 메타데이터 `SELECT` 한 번만 사용하고 테이블을 절대 생성하지 않게 변경. 테이블 누락/연결·권한 실패는 `TOKEN_VAULT_READ_UNAVAILABLE`로 고정하여 오류/원본 비밀값을 출력하지 않고 실패. 기존 승인된 `issue`/`sync`의 초기화·D1 백업·24시간 발급 보호는 변경하지 않음. 로컬 검증 및 PR/Actions는 별도 기록 필요.
+- **다음:** 보완 PR CI 및 사용자 병합 → [Shared KIS Token Steward](https://github.com/ehdud6728-bit/BLUE-Signal-Lab/actions/workflows/blue_turso_kis_token_steward.yml) `mode=check` 결과로 Turso 저장 토큰 만료 상태 확인 → `TOKEN_VALID`일 때만 장중 Turso 잠정 일봉 15분 파일럿 준비. 장외 파일럿 미시작, Turso/D1/KIS 운영 쓰기 없음.
+
 ## 2026-11-19 (KST) — Cloudflare Collector 운영 플래그 읽기 전용 감사 준비
 
 - **확인된 순서:** 사용자 PR #44 병합(`main` 병합 커밋 `62c8d4e`); Collector 수동 검증 [#44508508392](https://github.com/ehdud6728-bit/BLUE-Signal-Lab/actions/runs/44508508392) **69/69 테스트와 Wrangler dry-run 성공**, 실제 배포는 skipped. [Turso Mirror Status #44509040935](https://github.com/ehdud6728-bit/BLUE-Signal-Lab/actions/runs/44509040935) 당일 KIS 저장 시세 2종목·이력 8건·마지막 수신 2026-11-19 15:56:10 KST. 이 정보만으로 구형 미러/독립 Turso/신규 잠정 수집기 중 어느 경로가 켜졌는지 확정하지 않음.
