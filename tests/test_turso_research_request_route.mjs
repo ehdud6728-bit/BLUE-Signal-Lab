@@ -38,8 +38,11 @@ test('status is Access-gated and never uses the D1 scan table',async()=>{
 
 test('web date-specific search offers Turso request and persisted status polling',async()=>{
   const web=await readFile(new URL('../web/src/main.tsx',import.meta.url),'utf8');
-  assert.match(web,/if\(patternBackend==='turso'\)\{\s*setStatus\([\s\S]*?await requestTursoScan\(queryDate\)/);
+  const progress=await readFile(new URL('../web/src/TursoResearchProgress.tsx',import.meta.url),'utf8');
+  assert.match(web,/if\(patternBackend==='turso'\)\{[\s\S]*?setStatus\(''\);[\s\S]*?await requestTursoScan\(queryDate\)/);
   assert.match(web,/API\+'\/api\/research\/request\/status\?date='/);
   assert.match(web,/localStorage\.setItem\(TURSO_WATCH_KEY,tursoWatchDate\)/);
-  assert.match(web,/Turso 패턴 분석 중/);
+  assert.match(web,/<TursoResearchProgress/);
+  assert.match(progress,/패턴 분석 진행 중/);
+  assert.match(progress,/formatTursoElapsed/);
 });

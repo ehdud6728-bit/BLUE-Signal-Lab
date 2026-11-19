@@ -62,7 +62,7 @@ async function findWorkflow(env:Env,day:string,requestedAt:string,fetcher:Fetche
     const r=await fetcher(RUNS_URL,{headers:ghHeaders(env.GITHUB_TOKEN)});
     if(!r.ok)return null;
     const payload=await r.json() as {workflow_runs?:Array<{
-      display_title?:string;created_at?:string;status?:string;conclusion?:string;
+      id?:number;display_title?:string;created_at?:string;status?:string;conclusion?:string;
       html_url?:string;updated_at?:string}>};
     const from=Date.parse(requestedAt);
     const candidates=(payload.workflow_runs||[]).filter(run=>
@@ -73,6 +73,26 @@ async function findWorkflow(env:Env,day:string,requestedAt:string,fetcher:Fetche
     // A unique date+dispatch window is required before attributing failures.
     return candidates.length===1?candidates[0]:null;
   }catch{return null;}
+}
+
+// The UI must never guess a percentage from elapsed time. Only audited
+// GitHub job steps may advance its phase labels; failed reads stay generic.
+async function githubResearchStage(env:Env,runId:number,fetcher:Fetcher){
+  if(!Number.isSafeInteger(runId)||runId<=0||!env.GITHUB_TOKEN)return 'RUNNING';
+  try{
+    const url=`https://api.github.com/repos/${OWNER}/${REPO}/actions/runs/${runId}/jobs?per_page=10`;
+    const response=await fetcher(url,{headers:ghHeaders(env.GITHUB_TOKEN)});
+    if(!response.ok)return 'RUNNING';
+    const payload=await response.json() as {jobs?:Array<{name?:string;steps?:Array<{
+      name?:string;conclusion?:string}>}>};
+    const steps=payload.jobs?.find(job=>job.name==='daily_eod')?.steps;
+    if(!steps?.length)return 'RUNNING';
+    const finished=(name:string)=>steps.some(step=>step.name===name&&step.conclusion==='success');
+    if(finished('Save research only after Turso EOD audit and exact close match'))return 'VERIFYING';
+    if(finished('Scan full market patterns for the SAME verified KST date'))return 'SAVING';
+    if(finished('Write verified KRX EOD into Turso only and audit read-back'))return 'RESEARCH';
+    return 'EOD';
+  }catch{return 'RUNNING';}
 }
 
 export async function requestTursoResearch(env:Env,day:string,{
@@ -143,6 +163,9 @@ export async function tursoResearchRequestStatus(env:Env,day:string,{
     if(gh?.status==='completed'&&gh.conclusion==='success'&&
       now.getTime()-Date.parse(gh.updated_at||'')>120000)return {
       status:'FAILED',day,reason:'Actions 완료 후 Turso 패턴 기록이 확인되지 않습니다.',actions_url};
-    return {status:'PENDING',day,actions_url};
+    const stage=!gh?'REQUESTED':gh.status==='queued'?'QUEUED':
+      gh.status==='completed'?'VERIFYING':
+      await githubResearchStage(env,gh.id||0,fetcher);
+    return {status:'PENDING',day,actions_url,stage,requested_at_utc:stamp};
   },factory);
 }
