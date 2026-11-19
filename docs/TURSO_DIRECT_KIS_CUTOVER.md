@@ -1,6 +1,7 @@
 # BLUE Signal Lab — Turso 단독 KIS 장중 시세 수집 준비 (PR #31)
 
 ## 구현 범위
+- **2026-11-19 추가 — 종목별 사용자 클릭 시 KIS 즉시조회(아직 미배포):** 별도 `POST /api/eod/quotes/refresh`는 Access + 정확한 웹 Origin을 요구하고 Collector의 `collectNowTurso` 비공개 서비스 바인딩으로만 연결됩니다. Turso 검증된 이전 일봉·Turso에 암호화 저장된 기존 유효 KIS 토큰으로 KIS REST 한 종목을 즉시 조회·검증·Turso의 최신/이력 두 표에 함께 저장합니다. D1 쿼리·D1 백업 토큰 참조·토큰 신규 발급/주문은 수행하지 않습니다. 종목별 20초 및 전체 분당 12번 Turso 원자 제한이 적용되고, `TURSO_INSTANT_QUOTES_ENABLED` Cloudflare Collector Worker Secret은 **기본 OFF**입니다. `blue_turso_instant_quotes_control.yml`의 `dry_run` 후 승인자가 `enable`과 정확한 Worker 이름을 지정해야만 켤 수 있습니다. **Collector와 API 및 PWA를 먼저 배포하고 이전 KIS 토큰 상태를 확인**해야 합니다. 실거래 KIS 응답·수신 시각을 보장하는 스트리밍 호가가 아니므로 `KIS 저장 시세 (체결 시각 미검증)`으로 표시합니다. KIS 만료 시 새로 발급하지 않고 별도 토큰 관리자 상태를 명시합니다.
 - `collector/src/turso-direct.mjs`: D1을 **읽지도 쓰지도 않는 별도 Cron 수집기**. 기존 5분 주기를 재사용하되 Turso의 `blue_research_signal_audit_v1`, `blue_research_signals_v1`, `blue_eod_ingest_audit_v1`을 근거로 검증된 최신 연구 신호 종목을 순환 선택합니다.
 - 한 번에 최대 **12종목**을 조회하고 호출 사이를 최소 450ms로 제한합니다. 189종목은 약 16번의 5분 주기를 거쳐 한 번씩 순환하므로 **각 종목이 5분마다 갱신되는 것은 아닙니다.**
 - KIS의 실제 응답을 기존 `parseQuote`로 검증해 Turso `blue_kis_live_quotes_r141`과 `blue_kis_live_history_r141`에 저장합니다. 비교 API가 후속 거래일의 최신 확인가로 읽습니다.

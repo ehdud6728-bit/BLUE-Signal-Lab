@@ -1,0 +1,70 @@
+name: BLUE Turso KIS Instant Quote Control (MANUAL)
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: 'Safe default; enable or disable Access-protected Turso KIS instant quotes'
+        type: choice
+        required: true
+        default: dry_run
+        options: [dry_run, enable, disable]
+      confirm_worker:
+        description: 'To change the Worker secret type exactly blue-market-collector'
+        type: string
+        required: false
+        default: ''
+
+permissions:
+  contents: read
+
+concurrency:
+  group: blue-turso-instant-control
+  cancel-in-progress: false
+
+jobs:
+  control:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Confirm exact repository and safe action
+        env:
+          MODE: ${{ inputs.mode }}
+        run: |
+          test "$GITHUB_REPOSITORY" = 'ehdud6728-bit/BLUE-Signal-Lab'
+          test "$GITHUB_REF" = 'refs/heads/main'
+          echo "BLUE_TURSO_INSTANT_CONTROL mode=$MODE"
+          echo 'No tokenP, no D1 reads/writes, no order endpoints.'
+      - uses: actions/checkout@v4
+        if: inputs.mode != 'dry_run'
+      - uses: actions/setup-node@v4
+        if: inputs.mode != 'dry_run'
+        with:
+          node-version: '22'
+      - name: Install Wrangler
+        if: inputs.mode != 'dry_run'
+        working-directory: collector
+        run: npm install --no-audit --no-fund --no-package-lock
+      - name: Change exact Turso-only instant quote flag
+        if: inputs.mode != 'dry_run'
+        working-directory: collector
+        env:
+          MODE: ${{ inputs.mode }}
+          CONFIRM: ${{ inputs.confirm_worker }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_WORKER_DEPLOY_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$CONFIRM" == 'blue-market-collector' ]] || { echo 'INVALID_CONFIRMATION'; exit 1; }
+          [[ -n "${CLOUDFLARE_API_TOKEN:-}" && -n "${CLOUDFLARE_ACCOUNT_ID:-}" ]] || { echo 'MISSING_DEPLOY_SECRETS'; exit 1; }
+          grep -q 'collectTursoInstant' src/turso-direct.mjs
+          grep -q 'collectNowTurso' src/index.mjs
+          case "$MODE" in
+            enable) VALUE='true' ;;
+            disable) VALUE='false' ;;
+            *) echo 'INVALID_MODE'; exit 1 ;;
+          esac
+          printf '%s' "$VALUE" | npx wrangler secret put TURSO_INSTANT_QUOTES_ENABLED --name blue-market-collector
+          echo "BLUE_TURSO_INSTANT_FLAG_SET mode=$MODE"
+          echo 'Always deploy and verify Collector + API code before enabling.'

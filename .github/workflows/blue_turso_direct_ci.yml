@@ -4,11 +4,20 @@ on:
   pull_request:
     paths:
       - 'collector/src/turso-direct.mjs'
+      - 'collector/src/index.mjs'
+      - 'collector/test/turso-instant.test.mjs'
       - 'collector/src/turso-mirror.mjs'
       - 'collector/test/turso-mirror.test.mjs'
       - 'collector/wrangler.jsonc'
       - 'collector/src/handler.mjs'
       - 'collector/turso-direct.test.mjs'
+      - 'worker/src/index.ts'
+      - 'web/src/main.tsx'
+      - 'web/src/price-compare.ts'
+      - 'web/src/turso-eod-recovery.css'
+      - 'tests/test_turso_basket_browser.mjs'
+      - 'tests/test_turso_instant_api.mjs'
+      - '.github/workflows/blue_turso_instant_quotes_control.yml'
       - 'scripts/blue_kis_cutover_audit.py'
       - 'tests/test_blue_kis_cutover_audit.py'
       - '.github/workflows/blue_kis_cutover_audit.yml'
@@ -62,7 +71,18 @@ jobs:
         working-directory: tools/turso
         run: npm install --no-audit --no-fund --ignore-scripts --no-package-lock
       - name: Test shared token vault, D1 fallback and collector safety
-        run: node --test collector/turso-direct.test.mjs collector/test/turso-mirror.test.mjs tools/turso/kis-token-steward.test.mjs tools/turso/d1-token-backup.test.mjs tools/turso/quote-parity-audit.test.mjs
+        run: node --test collector/turso-direct.test.mjs collector/test/turso-instant.test.mjs collector/test/turso-mirror.test.mjs tools/turso/kis-token-steward.test.mjs tools/turso/d1-token-backup.test.mjs tools/turso/quote-parity-audit.test.mjs
+      - name: Test browser Turso-only manual refresh without D1 fallback
+        run: |
+          npm install --prefix worker --no-audit --no-fund --no-package-lock
+          node --test tests/test_turso_basket_browser.mjs tests/test_turso_instant_api.mjs
+      - name: Typecheck and bundle mobile browser (no deployment)
+        run: |
+          npm install --prefix web --no-audit --no-fund --no-package-lock
+          npm --prefix web run build
       - name: Bundle collector without deployment
         working-directory: collector
         run: npx wrangler deploy --dry-run --outdir ../.blue-turso-direct-test-build
+      - name: Bundle API service binding without deployment
+        working-directory: worker
+        run: npx wrangler deploy --dry-run --outdir ../.blue-turso-instant-api-test-build

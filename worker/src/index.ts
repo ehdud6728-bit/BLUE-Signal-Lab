@@ -15,7 +15,9 @@ interface Env {
   DB: D1Database;
   TURSO_DATABASE_URL?:string;
   TURSO_AUTH_TOKEN?:string;
-  KIS_COLLECTOR?: {collectNow(code:string):Promise<{status:string;code?:string}>};
+  KIS_COLLECTOR?: {collectNow(code:string):Promise<{status:string;code?:string}>;
+    collectNowTurso?(code:string):Promise<{status:string;code?:string;market?:string;
+      price?:number;trade_date?:string;received_at_utc?:string}>};
   CORS_ORIGIN?: string;
   GITHUB_TOKEN?: string;
   GEMINI_API_KEY?: string;
@@ -156,6 +158,51 @@ export default {
         catch(e){if(e instanceof InvalidEodQuery)return respond({error:e.message},400);
           return respond({error:'TURSO_EOD_COMPARE_UNAVAILABLE',fallback:'D1',
             message:'Turso 검증 일봉 가격 비교가 불가능합니다.'},503);}
+      }
+      // Turso-first manual KIS quote refresh: never access D1 or dispatch
+      // tokenP. Access + same-origin POST and the collector's Turso rate limits
+      // are mandatory; GET remains a separately audited saved-data read.
+      if(p==='/api/eod/quotes/refresh'&&request.method==='POST'){
+        if(request.headers.get('Origin')!==origin)return respond({error:'ORIGIN_DENIED'},403);
+        if(!access)return respond({error:'ACCESS_REQUIRED'},401);
+        let payload:{code?:unknown};
+        try{payload=await request.json() as typeof payload;}
+        catch{return respond({error:'INVALID_JSON'},400);}
+        const code=payload&&typeof payload.code==='string'?payload.code.trim().toUpperCase():'';
+        if(!validLiveCode(code))return respond({error:'INVALID_CODE'},400);
+        let result:{status:string;code?:string;market?:string;price?:number;
+          trade_date?:string;received_at_utc?:string}={status:'NOT_CONNECTED'};
+        try{
+          if(env.KIS_COLLECTOR?.collectNowTurso)
+            result=await env.KIS_COLLECTOR.collectNowTurso(code);
+        }catch{result={status:'QUOTE_UNAVAILABLE'};}
+        const notice:Record<string,string>={
+          SAVED:'KIS 최신 조회 결과를 Turso에 저장했습니다. 실제 체결 시각은 미검증입니다.',
+          COOLDOWN:'이 종목은 최근 조회했습니다. Turso 저장 시세를 확인하세요.',
+          RATE_LIMITED:'KIS 조회 요청 한도에 도달했습니다. 잠시 후 다시 시도하세요.',
+          MARKET_CLOSED:'KIS 장중 조회 가능 시간이 아닙니다. 저장 시세를 확인하세요.',
+          DISABLED:'Turso 즉시조회가 아직 운영에서 승인되지 않았습니다.',
+          NO_VERIFIED_EOD_REFERENCE:'Turso의 이전 검증 일봉이 없어 조회하지 않았습니다.',
+          STALE_OR_INVALID_EOD_REFERENCE:'Turso의 기준 일봉이 오래됐거나 유효하지 않습니다.',
+          TURSO_TOKEN_MISSING:'Turso 금고에서 KIS 토큰을 찾을 수 없습니다. 새로 발급하지 않았습니다.',
+          TURSO_TOKEN_EXPIRED:'Turso 금고의 KIS 토큰이 만료됐습니다. 발급 관리자 점검이 필요합니다.',
+          TURSO_TOKEN_VAULT_UNAVAILABLE:'Turso KIS 토큰 금고에 접근할 수 없습니다.',
+          TURSO_TOKEN_DECRYPT_FAILED:'Turso KIS 토큰을 복호화하지 못했습니다.',
+          TURSO_NOT_CONFIGURED:'Turso 저장소 연결 설정이 필요합니다.',
+          KIS_CONFIG_MISSING:'Collector의 KIS 인증 설정이 필요합니다.',
+          NOT_CONNECTED:'Collector의 Turso 즉시조회 기능 배포가 필요합니다.',
+          QUOTE_UNAVAILABLE:'KIS 조회 또는 Turso 저장에 실패했습니다. 기존 시세는 유지됩니다.'
+        };
+        const status=result.status||'QUOTE_UNAVAILABLE';
+        const http=status==='SAVED'||status==='COOLDOWN'||status==='MARKET_CLOSED'?200:
+          status==='RATE_LIMITED'?429:status==='INVALID_CODE'?400:
+          status==='NO_VERIFIED_EOD_REFERENCE'?404:503;
+        return respond({status,storage:'TURSO',code,
+          price:status==='SAVED'&&typeof result.price==='number'&&
+            Number.isSafeInteger(result.price)&&result.price>0?result.price:null,
+          market:status==='SAVED'?result.market||null:null,
+          trade_date:result.trade_date||null,received_at_utc:result.received_at_utc||null,
+          message:notice[status]||'Turso KIS 시세를 새로 확보하지 못했습니다.'},http);
       }
       // Current KIS quote research is independent of today's confirmed KRX EOD.
       // The saved quote is always available immediately. The optional private
