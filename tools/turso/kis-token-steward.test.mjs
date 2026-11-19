@@ -31,6 +31,12 @@ test('D1 issuer must be paused and cutover must have 24h buffer',()=>{
     'WAIT_24H_SINCE_LEGACY_ISSUER_PAUSED');
   assert.equal(cutoverReady(base,NOW),'READY');
 });
+test('early cutover remains blocked by default; explicit approval requires another live D1 audit',()=>{
+  const paused={...base,BLUE_KIS_D1_DISABLED_AT_UTC:'2026-11-19T00:00:00.000Z'};
+  assert.equal(cutoverReady(paused,NOW),'WAIT_24H_SINCE_LEGACY_ISSUER_PAUSED');
+  assert.equal(cutoverReady({...paused,BLUE_KIS_EARLY_CUTOVER_APPROVED:'true'},NOW),
+    'EARLY_D1_AUDIT_REQUIRED');
+});
 test('encrypted KIS token is readable with existing AES-GCM Worker vault decryptor',async()=>{
   const token='sample-not-a-real-token';
   assert.match(scopeFor(base.KIS_APP_KEY),/^KIS_PROD_READONLY_V1_[a-f\d]{20}$/);
@@ -164,5 +170,37 @@ test('missing primary with an unreachable or recently-issued D1 standby fails cl
       backup:{...standby,inspect:async()=>({status:'EXPIRED',expiresAt:'2026-11-19T00:00:00.000Z',
         savedAt:'2026-11-18T18:00:00.000Z'})}});
     assert.equal(fresh.status,'WAIT_24H_FROM_BACKUP_SAVED');
+  }finally{db.close();}
+});
+test('early cutover refuses to call KIS when D1 issuance audit is missing or unsafe',async()=>{
+  const db=createClient({url:'file::memory:'});
+  const early={...base,BLUE_KIS_D1_DISABLED_AT_UTC:'2026-11-19T00:00:00.000Z',
+    BLUE_KIS_EARLY_CUTOVER_APPROVED:'true'};
+  const issuer=async()=>{throw Error('UNEXPECTED_KIS_ISSUE');};
+  try{
+    const missing=await steward(db,early,NOW,{mode:'issue',backup:standby,issuer});
+    assert.equal(missing.status,'EARLY_D1_AUDIT_UNAVAILABLE');
+    const rejected=await steward(db,early,NOW,{mode:'issue',issuer,
+      backup:{...standby,auditIssuer:async()=>({status:'EARLY_D1_AUDIT_WAIT_24H_LAST_ISSUE'})}});
+    assert.equal(rejected.status,'EARLY_D1_AUDIT_BLOCKED');
+  }finally{db.close();}
+});
+test('verified early cutover issues once into both vaults without skipping issuer reservation',async()=>{
+  const db=createClient({url:'file::memory:'});
+  const early={...base,BLUE_KIS_D1_DISABLED_AT_UTC:'2026-11-19T00:00:00.000Z',
+    BLUE_KIS_EARLY_CUTOVER_APPROVED:'true'};
+  let audited=0,issued=0,backedUp=0;
+  try{
+    const result=await steward(db,early,NOW,{mode:'issue',backup:{
+      ...standby,
+      auditIssuer:async()=>{audited++;return {status:'EARLY_D1_ISSUER_VERIFIED'};},
+      mirror:async()=>{backedUp++;}
+    },issuer:async()=>{issued++;return {token:'test-early-token',expires:NOW.getTime()+86400000};}});
+    assert.equal(result.status,'TOKEN_SAVED_DUAL');
+    assert.deepEqual([audited,issued,backedUp],[1,1,1]);
+    const second=await steward(db,early,new Date(NOW.getTime()+60_000),{
+      mode:'issue',backup:{...standby,auditIssuer:async()=>({status:'EARLY_D1_ISSUER_VERIFIED'})},
+      issuer:async()=>{throw Error('UNEXPECTED_REISSUE');}});
+    assert.equal(second.status,'TOKEN_VALID');
   }finally{db.close();}
 });

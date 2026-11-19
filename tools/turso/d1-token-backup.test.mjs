@@ -49,3 +49,47 @@ test('D1 outage raises only a sanitized failure; no token gets reissued',async()
     /D1_BACKUP_UNAVAILABLE/);
   assert.equal(cf.calls.length,1);
 });
+test('early D1 audit is read-only and accepts a saved issuance older than 24h',async()=>{
+  const now=new Date('2026-11-19T05:00:00.000Z');
+  const pauseAt='2026-11-19T02:23:04.174Z';
+  const saved={saved_at_utc:'2026-11-17T07:20:08.600Z',
+    expires_at_utc:'2026-11-18T07:20:08.000Z'};
+  const issuer={last_attempt_at_utc:'2026-11-17T07:20:07.205Z',
+    last_success_at_utc:'2026-11-17T07:20:08.100Z',status:'SAVED',
+    last_attempt_day_kst:'2026-11-17'};
+  const calls=[];
+  const fetchFn=async (_url,opts)=>{
+    const {sql}=JSON.parse(opts.body);calls.push(sql);
+    const rows=sql.includes('blue_kis_token_issuance_r1597')?[issuer]:[saved];
+    return {ok:true,async json(){return {success:true,result:[{success:true,results:rows}]};}};
+  };
+  const backup=createD1Backup(env,{fetchFn,dbId:'e'.repeat(36)});
+  assert.equal((await backup.auditIssuer({key:ISSUED.key,now,pauseAt})).status,
+    'EARLY_D1_ISSUER_VERIFIED');
+  assert.equal(calls.length,2);
+  assert.ok(calls.every(q=>q.trimStart().startsWith('SELECT ')&&
+    !q.includes('ciphertext')&&!q.includes('access_token')&&!q.includes('appsecret')));
+  issuer.status='ISSUE_FAILED';
+  assert.equal((await backup.auditIssuer({key:ISSUED.key,now,pauseAt})).status,
+    'EARLY_D1_AUDIT_UNVERIFIED');
+  issuer.status='SAVED';
+  issuer.last_attempt_at_utc='2026-11-19T02:30:00.000Z';
+  assert.equal((await backup.auditIssuer({key:ISSUED.key,now,pauseAt})).status,
+    'EARLY_D1_AUDIT_UNVERIFIED');
+});
+test('early audit refuses a recent provider issuance even when D1 pause is recent',async()=>{
+  const now=new Date('2026-11-19T05:00:00.000Z');
+  const pauseAt='2026-11-19T04:00:00.000Z';
+  const saved={saved_at_utc:'2026-11-18T12:00:08.600Z',
+    expires_at_utc:'2026-11-19T12:00:08.000Z'};
+  const issuer={last_attempt_at_utc:'2026-11-18T12:00:07.205Z',
+    last_success_at_utc:'2026-11-18T12:00:08.100Z',status:'SAVED'};
+  const fetchFn=async (_url,opts)=>{
+    const {sql}=JSON.parse(opts.body);
+    return {ok:true,async json(){return {success:true,result:[{success:true,
+      results:[sql.includes('blue_kis_token_issuance_r1597')?issuer:saved]}]};}};
+  };
+  const backup=createD1Backup(env,{fetchFn,dbId:'e'.repeat(36)});
+  assert.equal((await backup.auditIssuer({key:ISSUED.key,now,pauseAt})).status,
+    'EARLY_D1_AUDIT_WAIT_24H_LAST_ISSUE');
+});

@@ -34,10 +34,21 @@
 - **중요한 장애 한계:** Turso 전체가 중단되면 Turso 독립 수집기의 후보 선택과 시세 *저장* 자체도 불가능합니다. D1 경로는 정상 D1 수집 기능·쿼터 및 백업 토큰이 살아 있을 때만 운영을 이어갈 수 있습니다. Turso 장애가 토큰 만료 시점까지 지속되면 현재 중앙 발급 관리자는 안전상 새 `tokenP`를 실행하지 않습니다. Turso 불가 시 D1만으로 새 토큰을 발급하는 별도의 단일 원장·잠금 복구 절차는 **미구현**이며, 자동 발급 가능하다고 주장하면 안 됩니다.
 - D1 무료 읽기/쓰기 한도가 차단되면 백업 기록·조회도 실패할 수 있습니다. Turso에 저장된 유효 토큰은 유지하고 복제 대기로 표시하되, **두 DB 모두 유효 토큰을 읽을 수 없는 경우 발급을 반복하지 않습니다.**
 
+### 조기 복구 예외 (명시적 수동 승인 + 발급 원장 실시간 검증)
+
+- 기본은 기존 **D1 issuer 중단 후 24시간** 대기입니다. 이 시간은 KIS 제공자가 의무화한 전환 지연이 아닌 우리 내부의 보수적인 이중 발급 방지 조건입니다.
+- 유효한 토큰이 없어 장중 시세가 중단된 경우, KIS 마지막 발급 시도/성공/금고 저장 시각이 모두 **실행 시점보다 24시간 이상 전**이고, D1 자동·수동 발급이 중단됐으며 중단 이후 새 발급 활동이 없다는 D1 원장 증거가 있을 때만 조기 복구를 검토합니다.
+- **외부 수동 `tokenP` 호출 여부는 D1 원장으로 증명할 수 없습니다.** 운영자가 외부/다른 시스템에서 추가 발급이 없었음을 직접 확인한 뒤 GitHub Repo Variable `BLUE_KIS_EARLY_CUTOVER_APPROVED=true`로 그 사실을 명시 승인해야 합니다. 불분명하면 조기 복구를 시도하지 않습니다.
+- `.github/workflows/blue_kis_cutover_audit.yml` 읽기 전용 감사에서 `EARLY_READY_FOR_MANUAL_REVIEW`, `early_cutover_ready=true`를 먼저 확인합니다. 이는 토큰 발급 성공을 의미하지 않으며, 기존 일반 `cutover_ready=false`와 구별됩니다.
+- KIS 실제 발급은 **수동 `workflow_dispatch`에만** 조기 예외를 허용합니다. `BLUE Shared KIS Token Steward`에서 `mode=issue`, `confirm_cutover=blue-turso-kis-cutover`, `allow_early_cutover=true`, `confirm_early_cutover=blue-early-cutover-verified`를 명시합니다. GitHub 변수 `BLUE_KIS_TOKEN_AUTO_PAUSED=true`, `BLUE_KIS_TURSO_CUTOVER_APPROVED=true`, `BLUE_KIS_DUAL_VAULT_ENABLED=true`도 필요합니다.
+- 실행 중 관리자는 D1의 `blue_kis_token_vault_v1` **발급/만료 시각만**, `blue_kis_token_issuance_r1597` **마지막 발급 시도·성공 시각/고정 상태만** 다시 SELECT합니다. 원장 없거나, 상태가 `SAVED`가 아니거나, 중단 이후 D1 활동이 있거나, 마지막 발급 시도/저장 후 24시간 미경과/DB 읽기 실패면 새 `tokenP`를 실행하지 않습니다. 토큰 암호문·앱 시크릿은 이 감사에서 읽지 않습니다.
+- 예약 실행에서는 `BLUE_KIS_EARLY_CUTOVER_APPROVED`를 **무조건 false로 주입**하므로 24시간 이전 자동 우회는 불가능합니다. 조기 수동 발급 후에는 원래 24시간 저장 쿨다운 및 일자별 발급 원장이 그대로 유지됩니다. 사용자 PR 병합/변수 설정만으로 토큰이 자동 발급되지는 않습니다.
+- 조기 복구 후 D1에 `TOKEN_SAVED_DUAL`이 실제 확인되고, 기존 D1 수집기가 정상 검증 시세를 저장했는지 장중 파일럿/로그로 확인합니다. **주가 자동 이중 저장·재처리까지 완료됐다는 뜻은 아닙니다.**
+
 ### 안전한 활성화 순서
 
 1. 이 변경 PR의 무시크릿 CI, D1 암호화 포맷 호환, 실패 복구 테스트를 검증합니다. PR 병합만으로 비밀값·운영 DB·발급기를 변경하지 않습니다.
-2. 기존 읽기 전용 cutover 감사가 `READY_FOR_MANUAL_REVIEW`이고 24시간 중단 및 외부 수동 발급 부재를 **사람이 확인**한 후 `BLUE_KIS_TURSO_CUTOVER_APPROVED=true`를 승인합니다.
+2. 기존 읽기 전용 cutover 감사가 `READY_FOR_MANUAL_REVIEW`이고 24시간 중단 및 외부 수동 발급 부재를 **사람이 확인**한 후 `BLUE_KIS_TURSO_CUTOVER_APPROVED=true`를 승인합니다. **조기 복구**는 위 별도 예외 조건과 `EARLY_READY_FOR_MANUAL_REVIEW` 및 외부 발급 부재 수동 확인을 모두 충족한 경우에만 가능합니다.
 3. GitHub Actions Repo Variable `BLUE_KIS_DUAL_VAULT_ENABLED=true`를 설정한 후, 새 `BLUE Shared KIS Token Steward`를 `mode=check`로 검사하고 필요 시 `mode=sync`(유효한 Turso 토큰이 있을 경우) 또는 `mode=issue`(발급 가능 시)로 수동 실행합니다. 수동 `sync`/`issue`는 `confirm_cutover=blue-turso-kis-cutover` 확인이 필요합니다.
 4. `TOKEN_SAVED_DUAL`, `D1_BACKUP_VERIFIED`, `TOKEN_RESTORED_FROM_D1` 등 안전한 상태를 확인합니다. 백업 실패 상태는 토큰 발급 재시도를 하지 않고 원인 확인/동기화합니다.
 5. Collector Worker에도 `BLUE_KIS_DUAL_VAULT_ENABLED=true`를 별도로 반영·배포하고 장중 제한 파일럿으로 D1 백업 폴백을 검증합니다. **GitHub Variables만 바꿔서는 Worker 폴백이 활성화되지 않습니다.**
