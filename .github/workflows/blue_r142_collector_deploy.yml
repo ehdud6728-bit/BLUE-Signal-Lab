@@ -37,6 +37,12 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
+      # collector/turso-direct.test.mjs imports the Turso token steward in
+      # tools/turso, which resolves @libsql/client from its own package root.
+      # A fresh Actions runner needs both dependency trees before npm test.
+      - name: Install Turso test dependencies
+        working-directory: tools/turso
+        run: npm install --no-package-lock --no-audit --no-fund --ignore-scripts
       - name: Install and run collector tests
         working-directory: collector
         run: |

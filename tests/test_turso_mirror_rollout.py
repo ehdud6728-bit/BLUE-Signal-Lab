@@ -22,6 +22,12 @@ class MirrorRolloutSafety(unittest.TestCase):
         self.assertIn("blue-turso-mirror-off", workflow)
         self.assertIn('FULL_MIRROR_DEPLOY_BLOCKED', workflow)
         self.assertIn('MIRROR_OFF_DEPLOY_BLOCKED', workflow)
+        # The Collector suite imports tools/turso/kis-token-steward.mjs;
+        # a clean Actions runner must install that package's @libsql/client.
+        self.assertIn('working-directory: tools/turso', workflow)
+        self.assertIn('npm install --no-package-lock --no-audit --no-fund --ignore-scripts', workflow)
+        self.assertLess(workflow.index('Install Turso test dependencies'),
+                        workflow.index('Install and run collector tests'))
         self.assertLess(workflow.index('FULL_MIRROR_DEPLOY_BLOCKED'),
                         workflow.index('npx wrangler deploy'))
         self.assertLess(workflow.index('MIRROR_OFF_DEPLOY_BLOCKED'),
