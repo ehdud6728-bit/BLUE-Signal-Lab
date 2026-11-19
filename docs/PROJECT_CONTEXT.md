@@ -3,6 +3,13 @@
 > 업데이트: 2026-11-19 (한국 시간). 이 파일은 개발 인계용 요약이며, 서버의 실시간 상태를 자동으로 반영하지 않습니다.
 
 
+## 2026-11-19 (KST) — KIS 토큰 06:00 점검·복구 정책 추가 (PR 준비)
+
+- 매일 **06:00/06:30 KST**에 KIS 토큰 상태를 검사하고, 평일 07:00~19:30에는 30분마다 후속 점검. GitHub 예약 실행은 실제 시작 시간이 지연될 수 있으며, 06:00에 *무조건 새 토큰을 발급*하는 것이 아니라 1시간 이내 만료 예정·만료·미발급 상태에서 24시간 저장 쿨다운 및 원자적 예약 조건을 지켜 발급.
+- 발급 요청 자체가 실패했다면 동일 KST 날짜에 **최초 실패 후 최소 30분 경과·단 한 번** 재시도할 수 있도록 완화. 두 번째 실패는 다음 정상 발급 가능 기간까지 재시도 차단. 저장 실패나 메타데이터 오류는 재발급 근거로 사용하지 않음.
+- 기존 D1 토큰 매니저는 기존 D1 암호화 금고·발급 상태표를 유지. Turso 매니저는 별개 금고·상태표를 유지하고 `BLUE_KIS_TOKEN_AUTO_PAUSED=true` + 실제 D1 중단 시각 24시간 경과 + `BLUE_KIS_TURSO_CUTOVER_APPROVED=true`일 때만 발급 허용. **이번 코드 PR 자체로 운영 token cutover/신규 발급/Collector 활성화는 일어나지 않음.**
+- [Turso check Actions #44434674813](https://github.com/ehdud6728-bit/BLUE-Signal-Lab/actions/runs/44434674813) `TOKEN_MISSING_OR_EXPIRED`은 Turso 토큰 없음/만료 여부를 분리하지 못한 기존 진단. 새 코드에서 `TOKEN_MISSING`, `TOKEN_EXPIRED`, `TOKEN_EXPIRES_SOON`으로 구분.
+
 ## 2026-11-19 (KST) — D1 독립 KIS→Turso 장중 시세 수집 파일럿 준비
 
 - [PR #30](https://github.com/ehdud6728-bit/BLUE-Signal-Lab/pull/30) 병합 확인. Turso 일봉 예약 적재는 18:35 KST 기준이며 실제 당일 수집 성공 여부는 별도 Actions 로그 확인이 필요.
