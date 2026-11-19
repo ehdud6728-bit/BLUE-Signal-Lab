@@ -16,6 +16,8 @@ on:
       - '.github/workflows/blue_kis_daily_token_r1597.yml'
       - 'tools/turso/kis-token-steward.mjs'
       - 'tools/turso/kis-token-steward.test.mjs'
+      - 'tools/turso/d1-token-backup.mjs'
+      - 'tools/turso/d1-token-backup.test.mjs'
       - '.github/workflows/blue_turso_direct_ci.yml'
       - '.github/workflows/blue_turso_kis_token_steward.yml'
       - '.github/workflows/blue_turso_direct_quotes_pilot.yml'
@@ -49,8 +51,8 @@ jobs:
       - name: Install Turso steward dependencies
         working-directory: tools/turso
         run: npm install --no-audit --no-fund --ignore-scripts --no-package-lock
-      - name: Test direct collector and isolated token vault
-        run: node --test collector/turso-direct.test.mjs collector/test/turso-mirror.test.mjs tools/turso/kis-token-steward.test.mjs
+      - name: Test shared token vault, D1 fallback and collector safety
+        run: node --test collector/turso-direct.test.mjs collector/test/turso-mirror.test.mjs tools/turso/kis-token-steward.test.mjs tools/turso/d1-token-backup.test.mjs
       - name: Bundle collector without deployment
         working-directory: collector
         run: npx wrangler deploy --dry-run --outdir ../.blue-turso-direct-test-build

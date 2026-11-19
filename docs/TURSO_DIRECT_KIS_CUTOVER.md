@@ -23,8 +23,28 @@
 - 제공처 발급 요청 실패 시 그날 30분 후 **한 번만** 재시도하며, 재시도도 실패하면 추가 자동 발급 금지입니다. 암호화 저장 실패·메타데이터 오류는 자동 재시도하지 않습니다. 발급 장애 원인 진단과 수동 조치는 별도 검토가 필요합니다.
 - 기존 D1 발급과 Turso 발급 작업은 **동시에 켜면 안 됩니다.** 아래의 24시간 전환 보호 절차가 우선입니다.
 
+## KIS 단일 발급·Turso/D1 이중 암호화 금고 (코드 준비, 운영 미활성)
+
+- 하나의 Turso 관리자가 **`tokenP`를 최대 1회** 호출해 얻은 동일 KIS 접근토큰을 Turso `blue_turso_kis_vault_v1` 및 기존 D1 `blue_kis_token_vault_v1`에 각각 AES-256-GCM 암호화 저장합니다. 암호문은 임의 nonce 때문에 서로 다를 수 있지만 복호화되는 토큰·발급/만료 시각은 같습니다. KIS App Key/Secret는 기존 GitHub/Worker Secrets에만 둡니다.
+- D1 백업은 **별도의 발급기가 아닙니다**. 기존 D1 발급 워크플로는 `BLUE_KIS_TOKEN_AUTO_PAUSED=true`로 계속 중단해야 하며, Turso 발급 역시 D1 중단 감사 완료 + 24시간 대기 + 수동 승인 전에는 불가합니다.
+- 새 저장소 변수 `BLUE_KIS_DUAL_VAULT_ENABLED=true`를 **코드 검증 및 전환 승인 후에만** 설정합니다. 이 값이 없으면 `mode=issue`와 `mode=sync`를 모두 차단합니다. 기존 `mode=check`는 Turso 메타데이터 읽기만 수행합니다.
+- `mode=sync`는 Turso의 **현재 유효한 토큰**을 D1에 재암호화 복제·재조회·복호화 비교만 수행합니다. KIS 발급이 전혀 없으므로 D1 백업 실패(`TOKEN_SAVED_BACKUP_PENDING`/`D1_BACKUP_SYNC_FAILED`) 후 토큰 재발급 대신 `sync`로 복구할 수 있습니다. 예약된 `issue` 점검에서도 대기 중 백업 복제를 다시 시도합니다.
+- 최초 Turso 토큰이 비어 있으면 KIS에 요청하기 전에 D1 백업을 검사합니다. 유효한 D1 토큰이 있으면 Turso로 복원해 **추가 발급을 막습니다**. D1 조회 불가·손상·24시간 미경과 상태를 새 발급 근거로 사용하지 않습니다.
+- Collector의 Turso 독립 시세 경로는 기본적으로 Turso 금고의 암호문을 읽습니다. 별도로 **Cloudflare Collector Worker에** `BLUE_KIS_DUAL_VAULT_ENABLED=true`를 명시 설치한 경우, Turso 토큰 금고만 조회 실패/누락/만료일 때 D1에 남은 **유효한 동일 토큰**을 읽습니다. 복호화 오류·메타데이터 손상은 폴백하지 않고 차단합니다. 이 바인딩은 GitHub 저장소 Variables와 별개이며 수동 Worker 설정/배포가 필요합니다.
+- **중요한 장애 한계:** Turso 전체가 중단되면 Turso 독립 수집기의 후보 선택과 시세 *저장* 자체도 불가능합니다. D1 경로는 정상 D1 수집 기능·쿼터 및 백업 토큰이 살아 있을 때만 운영을 이어갈 수 있습니다. Turso 장애가 토큰 만료 시점까지 지속되면 현재 중앙 발급 관리자는 안전상 새 `tokenP`를 실행하지 않습니다. Turso 불가 시 D1만으로 새 토큰을 발급하는 별도의 단일 원장·잠금 복구 절차는 **미구현**이며, 자동 발급 가능하다고 주장하면 안 됩니다.
+- D1 무료 읽기/쓰기 한도가 차단되면 백업 기록·조회도 실패할 수 있습니다. Turso에 저장된 유효 토큰은 유지하고 복제 대기로 표시하되, **두 DB 모두 유효 토큰을 읽을 수 없는 경우 발급을 반복하지 않습니다.**
+
+### 안전한 활성화 순서
+
+1. 이 변경 PR의 무시크릿 CI, D1 암호화 포맷 호환, 실패 복구 테스트를 검증합니다. PR 병합만으로 비밀값·운영 DB·발급기를 변경하지 않습니다.
+2. 기존 읽기 전용 cutover 감사가 `READY_FOR_MANUAL_REVIEW`이고 24시간 중단 및 외부 수동 발급 부재를 **사람이 확인**한 후 `BLUE_KIS_TURSO_CUTOVER_APPROVED=true`를 승인합니다.
+3. GitHub Actions Repo Variable `BLUE_KIS_DUAL_VAULT_ENABLED=true`를 설정한 후, 새 `BLUE Shared KIS Token Steward`를 `mode=check`로 검사하고 필요 시 `mode=sync`(유효한 Turso 토큰이 있을 경우) 또는 `mode=issue`(발급 가능 시)로 수동 실행합니다. 수동 `sync`/`issue`는 `confirm_cutover=blue-turso-kis-cutover` 확인이 필요합니다.
+4. `TOKEN_SAVED_DUAL`, `D1_BACKUP_VERIFIED`, `TOKEN_RESTORED_FROM_D1` 등 안전한 상태를 확인합니다. 백업 실패 상태는 토큰 발급 재시도를 하지 않고 원인 확인/동기화합니다.
+5. Collector Worker에도 `BLUE_KIS_DUAL_VAULT_ENABLED=true`를 별도로 반영·배포하고 장중 제한 파일럿으로 D1 백업 폴백을 검증합니다. **GitHub Variables만 바꿔서는 Worker 폴백이 활성화되지 않습니다.**
+6. 주가 데이터 Turso→D1 정합 복제·내구성 재시도는 **토큰 금고 이중화와 별개 개발 단계**입니다. 토큰 이중 저장만으로 주가 이중 저장 완료를 주장하지 않습니다.
+
 ## 토큰 전환을 위한 필수 보호
-- `tools/turso/kis-token-steward.mjs`: KIS 토큰을 HKDF-SHA256+AES-256-GCM으로 암호화하여 Turso의 `blue_turso_kis_vault_v1`에 보관합니다. 기존 D1 토큰 복호화 형식과 호환되지만 **D1에서 토큰을 읽어오지는 않습니다**.
+ - `tools/turso/kis-token-steward.mjs`: KIS 토큰을 HKDF-SHA256+AES-256-GCM으로 암호화하여 Turso에 보관하고, 별도 활성화된 경우 `d1-token-backup.mjs`로 기존 D1 금고에 동일 토큰을 복제합니다. 신규 발급 전 Turso에 토큰이 없으면 D1 백업을 확인해 중복 발급을 차단합니다.
 - KIS 토큰 발급은 GitHub Actions의 `BLUE Turso KIS Token Steward`에서만 수행하며, 전환 완료 전에는 **check만** 실행합니다.
 - 안전한 전환 순서:
   1. 기존 D1 토큰 발급 워크플로의 예약 실행을 GitHub 저장소 변수 `BLUE_KIS_TOKEN_AUTO_PAUSED=true`로 일시 중지합니다. **중지 시각 UTC**를 따로 기록합니다. D1로 수동 토큰 발급도 중지합니다.
@@ -32,7 +52,7 @@
   3. GitHub 저장소 변수 `BLUE_KIS_D1_DISABLED_AT_UTC=2026-...Z`를 **실제 중지 시각**으로 설정합니다. 예시는 임의로 사용하지 않습니다.
   4. 변수 `BLUE_KIS_TURSO_CUTOVER_APPROVED=true`를 설정하면 새 토큰 발급 관리자를 승인하는 것입니다. 기존 D1 발급 예약은 계속 꺼둡니다.
   5. `BLUE Turso KIS Token Steward`를 `mode=check`로 실행하여 상태를 확인하고, 필요 시 `mode=issue`, `confirm_cutover=blue-turso-kis-cutover`로 명시적인 한 번의 발급을 요청합니다.
-  6. 로그 `BLUE_TURSO_KIS_TOKEN_STEWARD`의 `TOKEN_SAVED` 또는 `TOKEN_VALID`를 확인합니다. API 키·토큰·암호문은 어떤 로그에도 표시되면 안 됩니다.
+  6. 로그 `BLUE_TURSO_KIS_TOKEN_STEWARD`의 `TOKEN_SAVED_DUAL`, `TOKEN_VALID` 또는 명확한 백업 복구 상태를 확인합니다. API 키·토큰·암호문은 어떤 로그에도 표시되면 안 됩니다.
   7. KIS 토큰이 준비되고 정규 거래시간이면 `BLUE Turso Direct KIS Quote Pilot`에서 `start_15m`, `confirm_worker=blue-market-collector`로 제한 테스트를 시작합니다. 필요하면 `stop`으로 종료합니다.
   8. `BLUE Turso Mirror Status (READ ONLY)`에서 해당 한국 날짜의 `latest_symbols`와 `history_rows` 증가 여부를 검증합니다. 숫자 0이라면 수집 성공이라고 간주하지 않습니다.
 

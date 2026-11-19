@@ -2,6 +2,14 @@
 
 새 채팅에서 프로젝트를 이어가기 위한 **결정/구현/검증 이력**입니다. 대화 전체를 저장하지 않고 실제 개발에 필요한 내용만 보존합니다. 최신 항목을 위에 추가하고, 결과가 달라지면 추측 대신 검증된 상태로 수정합니다.
 
+## 2026-11-19 (KST) — KIS 토큰 1회 발급·Turso/D1 이중 금고·안전 폴백 코드
+
+- **사용자 확정:** 동일 KIS 토큰을 Turso와 D1에 암호화하여 함께 보관. KIS `tokenP`는 오직 단일 발급기에서 요청하며 구 D1 발급기는 계속 중단. 주가 데이터의 최종 Turso 주 DB/D1 보조 DB 동시 저장·복구 목표는 유지하며, 이번 토큰 PR과 별개 후속 작업.
+- **변경:** `tools/turso/kis-token-steward.mjs` 단일 issuer에 이중 금고 필수 플래그·D1 복제·신규 tokenP 없는 `mode=sync`·Turso 저장 후 D1 실패 복구·Turso 금고 누락 시 D1 검사·유효 토큰 복원 추가. `tools/turso/d1-token-backup.mjs`에서 기존 Cloudflare D1 API/암호화 금고를 재사용해 별도 nonce의 동일 토큰 저장, 타임스탬프 비역행, 실제 복호화 read-back 확인. Collector는 기본 Turso 토큰을 쓰고 명시적 Worker 플래그일 때만 D1 암호화 금고로 유효 토큰 폴백. 부패된 Turso 금고의 무조건 폴백 금지.
+- **워크플로:** `.github/workflows/blue_turso_kis_token_steward.yml`은 `check/sync/issue`를 지원하고 `sync/issue`에는 기존 24시간 감사·사용자 승인과 새 GitHub `BLUE_KIS_DUAL_VAULT_ENABLED=true`가 필수. 토큰 저장 실패 시 같은 발급을 반복하지 않고 `D1_SYNC_PENDING`의 복제만 다시 시도. 새 Node 테스트 경로는 무시크릿 `.github/workflows/blue_turso_direct_ci.yml`에 포함.
+- **로컬 검증:** 관련 Node 단위 테스트 **34/34 통과**(1회 발급, 동일 토큰 이중 보관, 한쪽 DB 장애 후 재발급 방지, 기존 D1 토큰 복원, 잘못된 금고 거부, 기본 비활성), 기존 Python D1 vault **6/6**, 일일 발급 **18/18**, 안전 감사 **9/9** 통과. Collector Wrangler `npm run build:check`의 `--dry-run` 번들 및 D1 바인딩 확인. 실제 KIS 발급/원격 D1·Turso SQL/운영 배포 없음.
+- **운영 미완료:** 사용자 PR 병합과 CI 확인 후에도 기존 `BLUE_KIS_TOKEN_AUTO_PAUSED=true` 중단을 유지한다. 2026-11-20 11:23 KST 이후 읽기 전용 감사·외부 발급 부재·수동 승인 전 `issue` 불가. GitHub 변수와 Worker 플래그는 각각 별도로 승인/활성화해야 한다. Turso 전체 장애에서 tokenP 재발급까지 보장하는 독립 원장, 그리고 주가 Turso→D1 완전 자동 복제·누락 재처리는 **이 PR에 미포함**.
+
 ## 2026-11-19 (KST) — D1 대기 중 Turso 우선 장바구니 연구 증거 읽기 개선
 
 - **운영 선행 확인:** [안전 감사 #44444330961](https://github.com/ehdud6728-bit/BLUE-Signal-Lab/actions/runs/44444330961)에서 `paused=true`, `pause_at_utc=2026-11-19T02:23:04.174Z`, `WAIT_24H_SINCE_D1_PAUSED` 확인. **2026-11-20 11:23:04 KST 이전 Turso 토큰 발급 금지.** 다음 재감사는 기존 수동 `blue_kis_cutover_audit.yml`에서 실행.

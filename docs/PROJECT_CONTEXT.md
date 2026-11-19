@@ -2,6 +2,14 @@
 
 > 업데이트: 2026-11-19 (한국 시간). 이 파일은 개발 인계용 요약이며, 서버의 실시간 상태를 자동으로 반영하지 않습니다.
 
+## 2026-11-19 (KST) — 동일 KIS 접근토큰의 Turso + D1 이중 보관 준비
+
+- **사용자 결정:** KIS 토큰 발급기는 단 한 곳으로 제한하고, **동일한 발급 결과를 Turso 주 금고와 D1 보조 금고에 각각 암호화 저장**한다. 주가 데이터는 별도 합의대로 Turso 주 DB / D1 보조 DB에 동일 검증 관측을 기록하고 누락 재처리·정합성 감사를 구축한다. 토큰 이중화와 주가 이중 쓰기는 서로 별도 구현 단계다.
+- Turso issuer `tools/turso/kis-token-steward.mjs`가 기존 D1 AES-GCM 복호화와 호환되는 토큰을 **한 번만 발급**하고 `tools/turso/d1-token-backup.mjs`로 D1 기존 암호화 금고에 복제·복호화 재검증하도록 코드 준비. Turso 저장 성공 후 D1 장애가 발생해도 `D1_SYNC_PENDING` 상태로 **토큰을 재발급하지 않고 재동기화**한다. Turso 기록이 비어 있으면 발급 전 D1에 이미 유효한 토큰이 있는지 확인하고 복원하여 중복 발급을 막는다.
+- Collector Turso 독립 경로는 **토큰 금고**가 누락/일시 오류/만료됐고 수동 Worker 플래그 `BLUE_KIS_DUAL_VAULT_ENABLED=true`일 때만 D1 보조 금고의 유효 토큰으로 폴백한다. 금고 손상·복호화 실패는 폴백하지 않는다. Turso 전체 장애 시 Turso 후보 조회/시세 쓰기도 중단되므로 D1 백업 토큰만으로 Turso 수집기가 운영된다고 주장하지 않는다.
+- GitHub 변수 `BLUE_KIS_DUAL_VAULT_ENABLED=true`는 **읽기 전용 cutover 감사·최소 24시간 대기·운영자 승인 이후**에만 활성화. `check`는 기존처럼 읽기 전용, `sync`는 신규 tokenP 호출 없이 Turso→D1 복제, `issue`는 보호 조건 하에서만 갱신. 기존 D1 발급기 중단 변수 `BLUE_KIS_TOKEN_AUTO_PAUSED=true` 유지. 이 코드 PR 자체로 **KIS 발급/원격 DB 쓰기/Worker 배포가 일어나지 않는다.**
+- **남는 고가용성 공백:** Turso 전체 장애가 토큰 만료 시각까지 지속되는 경우, 현재 발급 CLI는 Turso를 원장으로 사용하므로 D1 독립 재발급은 아직 불가. 별도 단일 발급 원장/잠금·긴급 재발급 절차가 검증되기 전 자동 재발급을 허용하지 않는다. D1 Free 한도 차단 시 D1 백업 조회·기록도 실패할 수 있다. 자세한 절차: `docs/TURSO_DIRECT_KIS_CUTOVER.md`.
+
 
 ## 2026-11-19 (KST) — D1→Turso KIS 발급 전환 읽기 전용 감사 준비
 

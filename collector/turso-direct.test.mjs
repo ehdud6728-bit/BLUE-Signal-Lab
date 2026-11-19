@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {collectTursoDirect,tursoDirectMode} from './src/turso-direct.mjs';
+import {collectTursoDirect,tursoDirectMode,sharedKisToken} from './src/turso-direct.mjs';
+import {encryptKisToken} from '../tools/turso/kis-token-steward.mjs';
 
 const NOW=new Date('2026-11-19T00:05:15.000Z'); // 09:05 KST
 const env=(extra={})=>({
@@ -67,6 +68,39 @@ test('no Turso token means no KIS provider request and no new token issuance',as
   assert.equal(result.status,'TURSO_TOKEN_MISSING');
   assert.equal(state.batches.length,0);
   assert.equal(state.closed,true);
+});
+test('Turso token outage reads the same encrypted KIS token from D1 only when dual vault is enabled',async()=>{
+  const key='key',secret='secret',token='not-a-live-KIS-token';
+  const ciphertext=encryptKisToken(token,key,secret);
+  let d1Reads=0;
+  const backupDb={prepare(sql){
+    d1Reads++;
+    assert.match(sql,/blue_kis_token_vault_v1/);
+    return {bind(){return {async first(){return {
+      ciphertext,expires_at_utc:'2026-11-20T00:10:00.000Z'};}};}};
+  }};
+  const absent={async execute(){return {rows:[]};}};
+  const sharedEnv=env({DB:backupDb,BLUE_KIS_DUAL_VAULT_ENABLED:'true'});
+  const result=await sharedKisToken(absent,sharedEnv,NOW);
+  assert.equal(result.status,'D1_BACKUP_READY');
+  assert.equal(result.token,token);
+  assert.equal(d1Reads,1);
+  const off=await sharedKisToken(absent,env({DB:backupDb}),NOW);
+  assert.equal(off.status,'TURSO_TOKEN_MISSING');
+  assert.equal(d1Reads,1);
+});
+test('expired D1 backup is never passed to KIS, and bad Turso ciphertext fails closed',async()=>{
+  const backupDb={prepare(){return {bind(){return {async first(){return {
+    ciphertext:'stale',expires_at_utc:'2026-11-18T00:10:00.000Z'};}};}};}};
+  const sharedEnv=env({DB:backupDb,BLUE_KIS_DUAL_VAULT_ENABLED:'true'});
+  const missing={async execute(){return {rows:[]};}};
+  const result=await sharedKisToken(missing,sharedEnv,NOW);
+  assert.equal(result.status,'D1_BACKUP_TOKEN_EXPIRED');
+  assert.equal(result.token,null);
+  const corrupt={async execute(){return {rows:[{ciphertext:'bad',expires_at_utc:'2026-11-20T00:10:00.000Z'}]};}};
+  const invalid=await sharedKisToken(corrupt,sharedEnv,NOW);
+  assert.equal(invalid.status,'TURSO_TOKEN_DECRYPT_FAILED');
+  assert.equal(invalid.token,null);
 });
 test('incomplete independently audited research day blocks collection',async()=>{
   const {db,state}=mockDb({count:1});
