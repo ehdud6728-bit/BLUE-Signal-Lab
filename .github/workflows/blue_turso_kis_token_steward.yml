@@ -14,11 +14,13 @@ on:
         type: string
         required: false
         default: ''
-  # After migration, keep a single token issuer. The old D1 schedule MUST be
-  # paused before BLUE_KIS_TURSO_CUTOVER_APPROVED=true is set.
+  # Use a single issuer after cutover; old D1 scheduling must be paused.
+  # Always check at 06:00 and 06:30 KST, then twice/hour on weekdays.
+  # tokenP is called only when renewal is due, guarded by the persisted ledger.
   schedule:
-    - cron: '10 23 * * 0-4'
-    - cron: '10 3,7 * * 1-5'
+    - cron: '0,30 21 * * *'
+    - cron: '0,30 22,23 * * 0-4'
+    - cron: '0,30 0-10 * * 1-5'
 
 permissions:
   contents: read
