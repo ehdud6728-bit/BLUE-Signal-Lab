@@ -10,7 +10,17 @@ on:
         default: check
         options: [check, sync, issue]
       confirm_cutover:
-        description: 'For issue enter exactly blue-turso-kis-cutover (after 24h pause)'
+        description: 'For issue/sync enter exactly blue-turso-kis-cutover (normal or audited early cutover)'
+        type: string
+        required: false
+        default: ''
+      allow_early_cutover:
+        description: 'Manual-only exception: D1 issuer paused and last issue >24h verified'
+        type: boolean
+        required: true
+        default: false
+      confirm_early_cutover:
+        description: 'If early, enter exactly blue-early-cutover-verified (and attest no outside tokenP)'
         type: string
         required: false
         default: ''
@@ -48,9 +58,12 @@ jobs:
         env:
           MODE: ${{ github.event_name == 'schedule' && 'issue' || inputs.mode }}
           CONFIRM: ${{ inputs.confirm_cutover }}
+          ALLOW_EARLY: ${{ inputs.allow_early_cutover }}
+          CONFIRM_EARLY: ${{ inputs.confirm_early_cutover }}
           BLUE_KIS_TOKEN_AUTO_PAUSED: ${{ vars.BLUE_KIS_TOKEN_AUTO_PAUSED }}
           BLUE_KIS_TURSO_CUTOVER_APPROVED: ${{ vars.BLUE_KIS_TURSO_CUTOVER_APPROVED }}
           BLUE_KIS_D1_DISABLED_AT_UTC: ${{ vars.BLUE_KIS_D1_DISABLED_AT_UTC }}
+          BLUE_KIS_EARLY_CUTOVER_APPROVED: ${{ github.event_name == 'workflow_dispatch' && inputs.allow_early_cutover && vars.BLUE_KIS_EARLY_CUTOVER_APPROVED == 'true' && 'true' || 'false' }}
           BLUE_KIS_DUAL_VAULT_ENABLED: ${{ vars.BLUE_KIS_DUAL_VAULT_ENABLED }}
           KIS_APP_KEY: ${{ secrets.KIS_APP_KEY }}
           KIS_APP_SECRET: ${{ secrets.KIS_APP_SECRET }}
@@ -71,6 +84,11 @@ jobs:
             fi
             if [[ "$BLUE_KIS_DUAL_VAULT_ENABLED" != 'true' ]]; then
               echo 'DUAL_VAULT_DISABLED: enable only after tests and cutover review'; exit 1
+            fi
+            if [[ "$ALLOW_EARLY" == 'true' ]]; then
+              if [[ "${{ github.event_name }}" != 'workflow_dispatch' || "$CONFIRM_EARLY" != 'blue-early-cutover-verified' || "$BLUE_KIS_EARLY_CUTOVER_APPROVED" != 'true' ]]; then
+                echo 'EARLY_CUTOVER_BLOCKED: manual attestation and repo approval required'; exit 1
+              fi
             fi
             if [[ "$MODE" == 'sync' ]]; then
               node tools/turso/kis-token-steward.mjs --sync

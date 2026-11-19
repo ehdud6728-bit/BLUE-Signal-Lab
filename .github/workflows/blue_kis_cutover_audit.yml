@@ -35,4 +35,5 @@ jobs:
           BLUE_KIS_TOKEN_AUTO_PAUSED: ${{ vars.BLUE_KIS_TOKEN_AUTO_PAUSED }}
           BLUE_KIS_D1_DISABLED_AT_UTC: ${{ vars.BLUE_KIS_D1_DISABLED_AT_UTC }}
           BLUE_KIS_TURSO_CUTOVER_APPROVED: ${{ vars.BLUE_KIS_TURSO_CUTOVER_APPROVED }}
+          BLUE_KIS_EARLY_CUTOVER_APPROVED: ${{ vars.BLUE_KIS_EARLY_CUTOVER_APPROVED }}
         run: python scripts/blue_kis_cutover_audit.py

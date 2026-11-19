@@ -2,6 +2,14 @@
 
 새 채팅에서 프로젝트를 이어가기 위한 **결정/구현/검증 이력**입니다. 대화 전체를 저장하지 않고 실제 개발에 필요한 내용만 보존합니다. 최신 항목을 위에 추가하고, 결과가 달라지면 추측 대신 검증된 상태로 수정합니다.
 
+## 2026-11-19 (KST) — 만료된 KIS 토큰의 조기 복구 안전 예외 (PR 준비)
+
+- **사용자 결정:** 11/20 11:23 KST까지 일률적으로 기다려 최신 시세가 중단되는 상황보다는, 제공처 마지막 발급이 24시간 이상 전임을 검증한 뒤 **가능하면 조기 복구**. 읽기 전용 감사 #44444330961 `paused=true`, `pause_at_utc=2026-11-19T02:23:04.174Z`, `last_attempt_status=SAVED`, `last_saved_at_utc=2026-11-17T07:20:08.600Z`, `WAIT_24H_SINCE_D1_PAUSED`. D1 마지막 check #44438538538 `TOKEN_EXPIRED_ELIGIBLE`; **감사 이후 외부 수동 tokenP 부재는 이 증거만으로 입증할 수 없음**.
+- **구현:** 기본 24시간 pause 보호는 유지. 운영자가 `BLUE_KIS_EARLY_CUTOVER_APPROVED=true`로 외부 발급 부재를 명시 확인하고 `workflow_dispatch`에서 조기 허용·정확한 확인 문자열을 선택한 경우에만, Turso 발급기 직전에 D1 마지막 저장·발급 시도·성공 시각 및 완료 상태 `SAVED`를 읽기 전용 재검증. 중단 이후 D1 활동, 최근 발급, 발급 불확실, D1 조회 불가라면 fail-closed. 일반 예약 실행에는 조기 예외를 전달하지 않음.
+- **읽기 전용 감사 확장:** `scripts/blue_kis_cutover_audit.py`에서 일반 `cutover_ready`와 별도로 `early_cutover_ready`와 `EARLY_READY_FOR_MANUAL_REVIEW`를 보고하도록 추가. `.github/workflows/blue_kis_cutover_audit.yml`은 조기 승인 저장소 변수도 **읽기 전용으로 전달**. 두 조건을 혼동하지 않고 토큰 비밀값/암호문 조회 없음.
+- **로컬 검증:** Node 토큰/Collector 관련 **39/39**, Python 읽기 전용 감사 **10/10**, 기존 D1 발급 **18/18**, 금고 **6/6** 통과. GitHub Actions YAML 파싱 성공. Collector 소스나 Worker 설정은 변경하지 않음. **이 작업 중 실제 KIS tokenP, 원격 DB 쓰기/조회, GitHub 운영 변수 변경/Worker 배포는 실행하지 않음.** PR CI 결과 및 원격 감사는 병합 후 별도 확인 필요.
+- **다음:** PR CI 성공 및 사용자 병합 → 외부/수동 KIS 발급 부재를 운영자가 확인 → GitHub 변수 승인 → 수동 **읽기 전용 감사**에서 `EARLY_READY_FOR_MANUAL_REVIEW` 확인 → 별도 **사용자 운영 승인**으로 수동 단일 `issue` → Turso/D1 `TOKEN_SAVED_DUAL`·Collector 장중 시세 확인. 안전 증거가 불충분하면 기존 11/20 11:23 KST 대기 절차 유지.
+
 ## 2026-11-19 (KST) — KIS 토큰 1회 발급·Turso/D1 이중 금고·안전 폴백 코드
 
 - **사용자 확정:** 동일 KIS 토큰을 Turso와 D1에 암호화하여 함께 보관. KIS `tokenP`는 오직 단일 발급기에서 요청하며 구 D1 발급기는 계속 중단. 주가 데이터의 최종 Turso 주 DB/D1 보조 DB 동시 저장·복구 목표는 유지하며, 이번 토큰 PR과 별개 후속 작업.

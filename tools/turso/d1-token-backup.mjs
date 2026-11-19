@@ -35,6 +35,34 @@ export function createD1Backup(env,{fetchFn=fetch,dbId=databaseId()}={}){
   }
   return {
     /** D1 is a standby copy, never an independently-issued token source. */
+    async auditIssuer({key,pauseAt,now}){
+      // Read only D1 timestamps/status, never plaintext, ciphertext or app secret.
+      const stopped=Date.parse(pauseAt);
+      if(!/^20\d{2}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z$/.test(pauseAt)||
+         !Number.isFinite(stopped)||stopped>now.getTime())
+        return {status:'EARLY_D1_AUDIT_INVALID_PAUSE'};
+      const scope=scopeFor(key);
+      const [saved,attempt]=await Promise.all([
+        query(`SELECT saved_at_utc,expires_at_utc FROM blue_kis_token_vault_v1
+          WHERE scope=? LIMIT 2`,[scope]),
+        query(`SELECT last_attempt_at_utc,last_attempt_day_kst,status,last_success_at_utc
+          FROM blue_kis_token_issuance_r1597 WHERE scope=? LIMIT 2`,[scope])
+      ]);
+      if(saved.length!==1||attempt.length!==1||attempt[0].status!=='SAVED'||
+         !attempt[0].last_success_at_utc)return {status:'EARLY_D1_AUDIT_UNVERIFIED'};
+      const stamps=[saved[0].saved_at_utc,attempt[0].last_attempt_at_utc,
+        attempt[0].last_success_at_utc];
+      const dates=stamps.map(v=>typeof v==='string'&&v.length<=40?Date.parse(v):NaN);
+      const expires=Date.parse(String(saved[0].expires_at_utc));
+      if(dates.some(x=>!Number.isFinite(x)||x>stopped||x>now.getTime())||
+         !Number.isFinite(expires)||expires<=dates[0]||
+         dates[0]<dates[1]||dates[2]<dates[1]||
+         Math.abs(dates[2]-dates[0])>5*60_000)
+        return {status:'EARLY_D1_AUDIT_UNVERIFIED'};
+      if(now.getTime()-Math.max(...dates)<86_400_000)
+        return {status:'EARLY_D1_AUDIT_WAIT_24H_LAST_ISSUE'};
+      return {status:'EARLY_D1_ISSUER_VERIFIED'};
+    },
     async inspect({key,secret,now}){
       const rows=await query(`SELECT ciphertext,expires_at_utc,saved_at_utc
         FROM blue_kis_token_vault_v1 WHERE scope=? LIMIT 1`,[scopeFor(key)]);

@@ -87,6 +87,7 @@ def audit(db, appkey, env, now):
         'pause_at_utc': None,
         'earliest_eligible_at_utc': None,
         'cutover_ready': False,
+        'early_cutover_ready': False,
     }
     if not paused:
         reason = 'LEGACY_ISSUER_NOT_PAUSED'
@@ -106,12 +107,21 @@ def audit(db, appkey, env, now):
             eligible = max([stop, *times]) + DAY
             result['earliest_eligible_at_utc'] = as_utc(eligible)
             if now < eligible:
-                reason = 'WAIT_24H_SINCE_D1_PAUSED'
+                # Earlier recovery is never implicit. The repo flag attests
+                # manual exclusion of outside tokenP calls; a new D1 ledger
+                # check is still mandatory before the Node issuer may act.
+                early = str(env.get('BLUE_KIS_EARLY_CUTOVER_APPROVED', '')).lower() == 'true'
+                issued = status == 'SAVED' and bool(saved_at and last_success_at)
+                if early and issued and now >= max(times) + DAY:
+                    reason = 'EARLY_READY_FOR_MANUAL_REVIEW'
+                    result['early_cutover_ready'] = True
+                else:
+                    reason = 'WAIT_24H_SINCE_D1_PAUSED'
             else:
                 reason = 'READY_FOR_MANUAL_REVIEW'
                 result['cutover_ready'] = True
     result['status'] = reason
-    if approved and not result['cutover_ready']:
+    if approved and not (result['cutover_ready'] or result['early_cutover_ready']):
         result['warning'] = 'TURSO_APPROVAL_SET_BEFORE_AUDIT_READY'
     return result
 

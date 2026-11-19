@@ -32,8 +32,11 @@ export function cutoverReady(env,now=new Date()){
   if(!/^20\d{2}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z$/.test(raw))
     return 'LEGACY_ISSUER_PAUSE_TIMESTAMP_MISSING';
   const stopped=Date.parse(raw);
-  if(!Number.isFinite(stopped)||stopped>now.getTime()||now.getTime()-stopped<DAY_MS)
+  if(!Number.isFinite(stopped)||stopped>now.getTime())
     return 'WAIT_24H_SINCE_LEGACY_ISSUER_PAUSED';
+  if(now.getTime()-stopped<DAY_MS)
+    return String(env.BLUE_KIS_EARLY_CUTOVER_APPROVED)==='true'
+      ?'EARLY_D1_AUDIT_REQUIRED':'WAIT_24H_SINCE_LEGACY_ISSUER_PAUSED';
   return 'READY';
 }
 export function encryptKisToken(token,key,secret){
@@ -116,11 +119,22 @@ export async function steward(client,env,now=new Date(),{mode='check',issuer=iss
       !tokenValid?'TOKEN_EXPIRED':renewalDue?'TOKEN_EXPIRES_SOON':'TOKEN_VALID',
     expires_at_utc:existing?String(existing.expires_at_utc):null};
   const gate=cutoverReady(env,now);
-  if(gate!=='READY')return {status:gate};
+  if(gate!=='READY'&&gate!=='EARLY_D1_AUDIT_REQUIRED')return {status:gate};
   const dual=String(env.BLUE_KIS_DUAL_VAULT_ENABLED)==='true';
   // Never issue a new KIS token with half-configured primary/backup storage.
   if(!dual||!backup||typeof backup.mirror!=='function'||typeof backup.inspect!=='function')
     return {status:'D1_BACKUP_NOT_CONFIGURED'};
+  if(gate==='EARLY_D1_AUDIT_REQUIRED'){
+    // Do not replace the 24-hour pause rule with a bare repository flag.
+    // Recheck the actual D1 issuance ledger immediately before tokenP/sync.
+    if(typeof backup.auditIssuer!=='function')return {status:'EARLY_D1_AUDIT_UNAVAILABLE'};
+    let audit;
+    try{audit=await backup.auditIssuer({key,
+      pauseAt:String(env.BLUE_KIS_D1_DISABLED_AT_UTC),now});}
+    catch{return {status:'EARLY_D1_AUDIT_UNAVAILABLE'};}
+    if(audit.status!=='EARLY_D1_ISSUER_VERIFIED')
+      return {status:'EARLY_D1_AUDIT_BLOCKED'};
+  }
   if(mode==='sync')return syncBackup(client,key,secret,scope,backup,now);
   if(!existing){
     // An empty Turso vault is not proof that no valid KIS token was issued.
@@ -212,7 +226,8 @@ async function main(){
     if(['ISSUE_FAILED_RETRY_AFTER_30M','ISSUE_FAILED_FINAL','SAVE_FAILED_NO_RETRY',
       'INVALID_TOKEN_METADATA','TOKEN_SAVED_BACKUP_PENDING','D1_BACKUP_SYNC_FAILED',
       'D1_BACKUP_NO_PRIMARY_TOKEN','D1_BACKUP_PRIMARY_EXPIRED',
-      'D1_BACKUP_NOT_CONFIGURED','D1_BACKUP_INSPECTION_FAILED_NO_ISSUE'].includes(result.status))
+      'D1_BACKUP_NOT_CONFIGURED','D1_BACKUP_INSPECTION_FAILED_NO_ISSUE',
+      'EARLY_D1_AUDIT_UNAVAILABLE','EARLY_D1_AUDIT_BLOCKED'].includes(result.status))
       process.exitCode=1;
   }finally{client.close();}
 }

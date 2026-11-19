@@ -80,6 +80,23 @@ class Safety(unittest.TestCase):
         self.assertEqual(r['status'], 'WAIT_24H_SINCE_D1_PAUSED')
         self.assertEqual(r['earliest_eligible_at_utc'], mod.as_utc(early + timedelta(hours=24)))
 
+    def test_manual_early_cutover_needs_saved_issue_older_than_24h(self):
+        recent_pause = mod.as_utc(NOW - timedelta(hours=1))
+        early_env = {**GOOD, 'BLUE_KIS_D1_DISABLED_AT_UTC': recent_pause,
+                     'BLUE_KIS_EARLY_CUTOVER_APPROVED': 'true'}
+        r = mod.audit(ReadOnlyDB(), 'key', early_env, NOW)
+        self.assertEqual(r['status'], 'EARLY_READY_FOR_MANUAL_REVIEW')
+        self.assertTrue(r['early_cutover_ready'])
+        self.assertFalse(r['cutover_ready'])
+        self.assertEqual(r['earliest_eligible_at_utc'], mod.as_utc(NOW + timedelta(hours=23)))
+        db = ReadOnlyDB()
+        db.ledger['status'] = 'ISSUE_FAILED'
+        self.assertFalse(mod.audit(db, 'key', early_env, NOW)['early_cutover_ready'])
+        db = ReadOnlyDB()
+        db.saved['saved_at_utc'] = mod.as_utc(NOW - timedelta(hours=10))
+        db.saved['expires_at_utc'] = mod.as_utc(NOW + timedelta(hours=14))
+        self.assertFalse(mod.audit(db, 'key', early_env, NOW)['early_cutover_ready'])
+
     def test_any_d1_issuance_attempt_after_pause_invalidates_cutover(self):
         db = ReadOnlyDB()
         db.ledger['last_attempt_at_utc'] = '2026-11-18T01:20:00.000Z'
