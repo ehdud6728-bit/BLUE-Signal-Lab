@@ -8,6 +8,14 @@
 - 백그라운드 D1 수집기 예외와 독립된 `ctx.waitUntil`으로 동작합니다.
 - 수집기는 자동 활성화되지 않습니다. 기본 설정은 OFF, 15/30분 시간제한 파일럿만 별도 Workflow로 허용됩니다.
 
+## D1 발급 중단 감사 — 터소 발급 전 필수
+
+- [BLUE KIS D1-to-Turso Cutover Audit](https://github.com/ehdud6728-bit/BLUE-Signal-Lab/actions/workflows/blue_kis_cutover_audit.yml)는 **읽기 전용**입니다. D1 `blue_kis_token_vault_v1`의 저장/만료 시각과 `blue_kis_token_issuance_r1597`의 최종 발급 시도·성공 시각만 조회하고, 저장소 변수를 확인합니다. 비밀 값이나 암호문은 조회하지 않으며 KIS 토큰을 발급하지 않습니다.
+- GitHub **Settings → Secrets and variables → Actions → Variables**에서 `BLUE_KIS_TOKEN_AUTO_PAUSED=true`를 직접 설정한 *실제 시각*을 기록하고 기존 수동 D1 `mode=issue`도 중단합니다. `BLUE_KIS_D1_DISABLED_AT_UTC`에 그 실제 시각을 UTC 밀리초 형식(예 `2026-11-19T02:15:00.000Z`; 임의 예시는 실제 중단 기록으로 사용 금지)으로 입력합니다. `BLUE_KIS_TURSO_CUTOVER_APPROVED`는 아직 `true`로 바꾸지 않습니다.
+- Audit의 `status=READY_FOR_MANUAL_REVIEW`, `cutover_ready=true`가 나올 때까지 신규 Turso 토큰 발급을 시작하지 않습니다. `WAIT_24H_SINCE_D1_PAUSED`, `LEGACY_ISSUER_NOT_PAUSED`, `D1_ACTIVITY_AFTER_PAUSE` 및 D1 조회 실패는 미완료입니다. **수동·외부 tokenP 발급이 없었는지도 사용자가 확인해야 최종 전환 가능합니다.**
+- 스크립트는 D1 과거 테이블을 단 두 번 SELECT하므로 일일 D1 조회량은 작지만, 무료 일일 읽기 한도가 차단되어 있으면 감사는 실패할 수 있습니다. 실패를 건너뛰어 준비 완료로 간주하지 않습니다.
+- 안전한 Audit 결과 후에만 아래의 기존 Turso 전환 승인·발급 절차를 계속합니다.
+
 ## 토큰 유지·만료 복구 (06:00 KST)
 
 - 기존 D1 및 Turso 토큰 관리 워크플로는 매일 06:00/06:30 KST 점검, 평일 07:00~19:30에는 30분마다 재점검합니다. GitHub Actions 예약 실행은 수 분 이상 지연될 수 있습니다.
