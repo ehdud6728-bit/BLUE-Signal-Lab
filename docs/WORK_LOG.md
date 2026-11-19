@@ -9,7 +9,7 @@
 - **마지막 발급 증빙:** [Actions #44037861051](https://github.com/ehdud6728-bit/BLUE-Signal-Lab/actions/runs/44037861051)의 `TOKEN_SAVED`(2026-11-17 07:20:09 UTC, 16:20 KST), 만료 2026-11-18 07:20:08 UTC. [D1 check #44438538538](https://github.com/ehdud6728-bit/BLUE-Signal-Lab/actions/runs/44438538538)은 `TOKEN_EXPIRED_ELIGIBLE`. [예약 실행 #44345601488](https://github.com/ehdud6728-bit/BLUE-Signal-Lab/actions/runs/44345601488)이 11/19 01:18 KST에 실제 수행되어 적어도 당시 D1 자동 중단은 아니었음. **현재 저장소 변수 상태는 외부 API 접근 제한으로 확인 불가**, 24시간 전환 대기 시작은 미확인.
 - **코드 준비:** 새 `scripts/blue_kis_cutover_audit.py`, `.github/workflows/blue_kis_cutover_audit.yml`: D1 금고의 저장/만료 시각과 발급 상태표의 최근 발급 시도 및 성공 시각만 SELECT, 저장소 중단/승인 변수와 실제 중단 UTC 시각 비교, 24시간 충족 여부를 고정 상태 코드로 출력. 토큰·암호문·앱 시크릿 조회 및 KIS tokenP 호출 없음. DB 읽기 실패·자료/변수 부재 시 안전하게 불합격.
 - **수동 발급 차단:** `BLUE_KIS_TOKEN_AUTO_PAUSED=true`면 D1 예약뿐 아니라 `blue_kis_daily_token_r1597.yml`의 수동 `mode=issue`도 거부하도록 추가. 기존 `mode=check`는 유지. 별도 R1.3 연구 워크플로의 `allow_new_token=true`는 기존부터 차단.
-- **검증/상태:** 로컬 단위 테스트 추가 및 PR CI 실행 예정; PR 병합·원격 감사 실행·실시간 변수 값 조회·D1 발급 중단·Turso 새 발급은 아직 시행하지 않음.
+- **검증/상태:** [PR #35](https://github.com/ehdud6728-bit/BLUE-Signal-Lab/pull/35), [자동 CI #44440422930](https://github.com/ehdud6728-bit/BLUE-Signal-Lab/actions/runs/44440422930)에서 Python D1 token vault/자동갱신/감사 테스트, Node Turso 수집·토큰 테스트, Wrangler dry-run 모두 성공. PR 병합·원격 감사 실행·실시간 변수 값 조회·D1 발급 중단·Turso 새 발급은 아직 시행하지 않음.
 - **다음:** 안전 CI 확인 → 사용자 PR 병합 → GitHub Repo Variables에서 `BLUE_KIS_TOKEN_AUTO_PAUSED=true` 실제 설정/시각 기록 → 감사 Actions `READY_FOR_MANUAL_REVIEW` 확인(중단 후 24시간 경과까지는 `WAIT...`) → 별도 승인으로 Turso issuer enable 및 파일럿 → KIS 시세 저장 관측 확인.
 
 ## 2026-11-19 (KST) — GitHub Actions 예약 지연 시 D1 토큰 점검 누락 보완
