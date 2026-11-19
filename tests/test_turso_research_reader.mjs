@@ -41,10 +41,21 @@ test('an invalid audited chart fails closed without D1 fallback',async()=>{
 });
 
 test('older not-imported Turso chart falls back to archived D1 chart',async()=>{
- await withMock(p=>respond(p.pathname==='/api/research/chart'?{status:'NOT_AVAILABLE'}:chart),async paths=>{
+ await withMock(p=>respond(p.pathname==='/api/research/chart'?{
+  status:'NOT_AVAILABLE',reason:'DAY_NOT_IMPORTED'}:chart),async paths=>{
   assert.deepEqual(await fetchResearchChartTursoFirst(CODE,DAY),chart);
   assert.deepEqual(paths.map(p=>p.pathname),['/api/research/chart','/api/chart']);
  });
+});
+
+test('audited day without stock signal never loads stale D1 chart',async()=>{
+ for(const unverified of [{status:'NOT_AVAILABLE',reason:'NO_SIGNAL_FOR_SYMBOL'},
+   {status:'NOT_AVAILABLE'}]){
+  await withMock(p=>respond(p.pathname==='/api/research/chart'?unverified:chart),async paths=>{
+   assert.equal(await fetchResearchChartTursoFirst(CODE,DAY),null);
+   assert.deepEqual(paths.map(p=>p.pathname),['/api/research/chart']);
+  });
+ }
 });
 
 test('Turso chart outage falls back; access denial does not burn D1 reads',async()=>{

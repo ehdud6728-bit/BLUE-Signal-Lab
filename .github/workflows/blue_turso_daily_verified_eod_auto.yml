@@ -1,10 +1,10 @@
-name: BLUE Turso Daily Verified EOD Auto (NO D1)
+name: BLUE Turso Daily EOD + Research (NO D1)
 
 on:
-  # 09:35 UTC = 18:35 KST. KRX confirmed EOD is checked after the regular session.
-  # GitHub may delay cron dispatch; each run validates the exact trade date.
+  # One daily run at 13:20 UTC = 22:20 KST, after same-day full KRX EOD is available.
+  # Research runs after audited EOD only when explicitly opted in. No duplicate cron.
   schedule:
-    - cron: '35 9 * * 1-5'
+    - cron: '20 13 * * 1-5'
   workflow_dispatch:
     inputs:
       trade_day:
@@ -13,58 +13,40 @@ on:
         required: false
         default: ''
       mode:
-        description: 'dry_run only verifies; apply inserts audited EOD into Turso.'
+        description: 'dry_run verifies both sources; apply stores EOD and pattern snapshots in Turso.'
         type: choice
         required: true
         default: dry_run
         options:
           - dry_run
           - apply
+      confirm_write:
+        description: 'For manual apply, enter blue-turso-eod-research'
+        type: string
+        required: false
+        default: ''
 
 permissions:
   contents: read
 
 concurrency:
-  group: blue-turso-verified-eod-writer
+  group: blue-turso-eod-research-writer
   cancel-in-progress: false
 
 jobs:
   daily_eod:
     # Scheduled runs apply only VERIFIED EOD. Manual runs are safe by default.
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 120
     env:
       INPUT_DAY: ${{ github.event_name == 'workflow_dispatch' && inputs.trade_day || '' }}
       MODE: ${{ github.event_name == 'schedule' && 'apply' || inputs.mode }}
+      INPUT_CONFIRM: ${{ github.event_name == 'workflow_dispatch' && inputs.confirm_write || '' }}
+      AUTO_RESEARCH_ENABLED: ${{ vars.BLUE_TURSO_RESEARCH_AUTO_ENABLED }}
     steps:
-      - name: Verify repository and select exact Korea trading date
-        shell: bash
-        run: |
-          set -euo pipefail
-          test "$GITHUB_REPOSITORY" = 'ehdud6728-bit/BLUE-Signal-Lab'
-          python3 - <<'PY'
-          from datetime import date, datetime
-          from zoneinfo import ZoneInfo
-          import os, re
-          today = datetime.now(ZoneInfo('Asia/Seoul')).date()
-          raw = os.getenv('INPUT_DAY', '').strip()
-          if raw:
-              if not re.fullmatch(r'20\d{2}-\d{2}-\d{2}', raw):
-                  raise SystemExit('INVALID_TRADE_DAY_FORMAT')
-              day = date.fromisoformat(raw)
-          else:
-              day = today
-          if day > today or day.weekday() > 4:
-              raise SystemExit('NOT_A_PAST_OR_PRESENT_KST_WEEKDAY')
-          mode = os.getenv('MODE', '')
-          if mode not in ('apply', 'dry_run'):
-              raise SystemExit('INVALID_MODE')
-          with open(os.environ['GITHUB_ENV'], 'a') as out:
-              out.write(f'TRADE_DAY={day.isoformat()}\n')
-          print(f'BLUE_TURSO_AUTO_EOD_REQUEST day={day.isoformat()} mode={mode}')
-          print('No D1 query, no KIS token issuance, and no intraday price claims.')
-          PY
       - uses: actions/checkout@v4
+      - name: Verify repository, KST date and manual write confirmation
+        run: python3 scripts/turso_unified_day_guard.py
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
@@ -99,11 +81,63 @@ jobs:
           TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
           TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
         run: node tools/turso/eod-range-import.mjs --mode=apply --input-dir=output/turso_daily_eod
-      - name: Retain exact-date proof (even on errors)
+      - name: Test independent research snapshot source exporter
+        if: ${{ env.RUN_RESEARCH == 'true' }}
+        run: python -m unittest discover -s tests -p 'test_turso_signal_snapshot_export.py' -v
+      - name: Scan full market patterns for the SAME verified KST date
+        if: ${{ env.RUN_RESEARCH == 'true' }}
+        env:
+          KRX_AUTH_KEY: ${{ secrets.KRX_AUTH_KEY }}
+          KRX_ID: ${{ secrets.KRX_DATA_ID || secrets.KRX_ID }}
+          KRX_PW: ${{ secrets.KRX_DATA_PW || secrets.KRX_PW }}
+          KRX_DATA_ID: ${{ secrets.KRX_DATA_ID || secrets.KRX_ID }}
+          KRX_DATA_PW: ${{ secrets.KRX_DATA_PW || secrets.KRX_PW }}
+        run: |
+          python scripts/market_scan_r11.py \
+            --date "$TRADE_DAY" --years "$RESEARCH_YEARS" \
+            --daily-provider auto --out output/turso_daily_research/source
+      - name: Reject stale research dates and incomplete KRX coverage
+        if: ${{ env.RUN_RESEARCH == 'true' }}
+        run: |
+          python - <<'PY'
+          import json, os
+          from pathlib import Path
+          audit = json.loads(Path('output/turso_daily_research/source/AUDIT.json').read_text())
+          assert audit['asof'] == os.environ['TRADE_DAY'], 'RESEARCH_DATE_MISMATCH'
+          assert audit['intraday_verified'] is False, 'NOT_VERIFIED_EOD'
+          assert audit['observed_stocks'] >= 1700, 'INCOMPLETE_MARKET_UNIVERSE'
+          print('BLUE_TURSO_RESEARCH_EXACT_DAY_VERIFIED', audit['asof'], audit['matched_stocks'])
+          PY
+      - name: Export R1.1 signals, patterns and dated chart evidence
+        if: ${{ env.RUN_RESEARCH == 'true' }}
+        run: |
+          python scripts/export_turso_signal_snapshot.py \
+            --input-dir output/turso_daily_research/source \
+            --out output/turso_daily_research/snapshot
+      - name: Test audited, immutable Turso research writer
+        if: ${{ env.RUN_RESEARCH == 'true' }}
+        run: node --test tools/turso/signal-snapshot-import.test.mjs
+      - name: Validate research snapshot hashes without database writes
+        if: ${{ env.RUN_RESEARCH == 'true' }}
+        run: |
+          node tools/turso/signal-snapshot-import.mjs \
+            --mode=dry_run --input-dir=output/turso_daily_research/snapshot
+      - name: Save research only after Turso EOD audit and exact close match
+        if: ${{ env.RUN_RESEARCH == 'true' && env.MODE == 'apply' }}
+        env:
+          TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
+          TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
+        run: |
+          node tools/turso/signal-snapshot-import.mjs \
+            --mode=apply --input-dir=output/turso_daily_research/snapshot
+      - name: Retain EOD and research provenance (even on errors)
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: BLUE_TURSO_DAILY_EOD_${{ github.run_id }}
-          path: output/turso_daily_eod/
+          name: BLUE_TURSO_DAILY_EOD_RESEARCH_${{ github.run_id }}
+          path: |
+            output/turso_daily_eod/
+            output/turso_daily_research/source/AUDIT.json
+            output/turso_daily_research/snapshot/manifest.json
           if-no-files-found: ignore
           retention-days: 14

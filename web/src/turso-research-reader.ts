@@ -36,8 +36,10 @@ export async function fetchResearchChartTursoFirst(code:string,day:string):Promi
   if(r.ok){
    const data:unknown=await r.json();
    if(validChart(data,day))return data;
-   // The audited chart is corrupt/mismatched: never disguise it as a D1 chart.
-   if((data as {status?:string}|null)?.status!=='NOT_AVAILABLE')return null;
+   // An audited day with NO_SIGNAL_FOR_SYMBOL is authoritative. Only an
+   // explicitly absent whole day may use D1; old untyped responses fail closed.
+   const missing=data as {status?:string;reason?:string}|null;
+   if(missing?.status!=='NOT_AVAILABLE'||missing.reason!=='DAY_NOT_IMPORTED')return null;
   }
  }catch{/* Older API deployment or temporary Turso outage: legacy archive only. */}
  try{

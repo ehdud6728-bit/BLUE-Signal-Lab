@@ -7,6 +7,9 @@ on:
       - '.github/workflows/blue_turso_daily_research_ci.yml'
       - 'scripts/turso_research_day_guard.py'
       - 'tests/test_turso_daily_research_workflow.py'
+      - '.github/workflows/blue_turso_daily_verified_eod_auto.yml'
+      - 'scripts/turso_unified_day_guard.py'
+      - 'tests/test_turso_unified_pipeline.py'
       - 'scripts/export_turso_signal_snapshot.py'
       - 'tests/test_turso_signal_snapshot_export.py'
       - 'tools/turso/signal-snapshot-import.mjs'
@@ -28,6 +31,7 @@ jobs:
       - name: Verify calendar, approval, default OFF and export provenance
         run: |
           python -m unittest discover -s tests -p 'test_turso_daily_research_workflow.py' -v
+          python -m unittest discover -s tests -p 'test_turso_unified_pipeline.py' -v
           python -m unittest discover -s tests -p 'test_turso_signal_snapshot_export.py' -v
       - uses: actions/setup-node@v4
         with:
