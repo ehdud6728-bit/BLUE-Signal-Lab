@@ -1,0 +1,100 @@
+/**
+ * Turso-only KIS quote collector. No D1 queries, queue, tokenP, or orders.
+ * Time-boxed opt-in only. The legacy D1 Cron collector remains unchanged.
+ */
+import {createClient} from '@libsql/client/web';
+import {marketsFor,kstParts,getKisQuote,parseQuote,vaultScope,decryptVault,ageDays} from './core.mjs';
+import {buildTursoMirrorStatements} from './turso-mirror.mjs';
+
+const MAX_PER_TICK=12;
+const MAX_PILOT_MS=30*60*1000;
+const MAX_SOURCE_AGE_DAYS=7;
+const CODE=/^\d{6}$/;
+const DATE=/^20\d{2}-\d{2}-\d{2}$/;
+const sleep=(ms)=>new Promise(resolve=>setTimeout(resolve,ms));
+
+export function tursoDirectMode(env,now=new Date()){
+  if(String(env?.TURSO_DIRECT_QUOTES_ENABLED||'false').toLowerCase()==='true')return 'FULL';
+  const expiry=String(env?.TURSO_DIRECT_PILOT_UNTIL_UTC||'');
+  if(!/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z$/.test(expiry))return 'OFF';
+  const delta=Date.parse(expiry)-now.getTime();
+  return delta>0&&delta<=MAX_PILOT_MS?'PILOT':'OFF';
+}
+
+export async function tursoDirectCachedToken(client,env,now){
+  if(!env.KIS_APP_KEY||!env.KIS_APP_SECRET)return {status:'KIS_CONFIG_MISSING',token:null};
+  const scope=await vaultScope(env.KIS_APP_KEY);
+  let found;
+  try{
+    found=await client.execute({sql:'SELECT ciphertext,expires_at_utc FROM blue_turso_kis_vault_v1 WHERE scope=? LIMIT 1',args:[scope]});
+  }catch{return {status:'TURSO_TOKEN_VAULT_UNAVAILABLE',token:null};}
+  const row=found.rows?.[0];
+  if(!row)return {status:'TURSO_TOKEN_MISSING',token:null};
+  if(typeof row.ciphertext!=='string'||!Number.isFinite(Date.parse(String(row.expires_at_utc))))
+    return {status:'TURSO_TOKEN_METADATA_INVALID',token:null};
+  if(Date.parse(String(row.expires_at_utc))<=now.getTime()+5*60_000)
+    return {status:'TURSO_TOKEN_EXPIRED',token:null};
+  try{return {status:'READY',token:await decryptVault(row.ciphertext,env.KIS_APP_KEY,env.KIS_APP_SECRET)};}
+  catch{return {status:'TURSO_TOKEN_DECRYPT_FAILED',token:null};}
+}
+
+/** Collects a deterministic rotating page of verified, independently stored
+ * research signal stocks. Each tick processes at most 12 symbols, avoiding a
+ * 189-symbol provider burst while cycling through every saved signal.
+ */
+export async function collectTursoDirect(env,now=new Date(),deps={}){
+  const mode=tursoDirectMode(env,now);
+  if(mode==='OFF')return {status:'DISABLED'};
+  if(String(env.COLLECTOR_ENABLED||'false').toLowerCase()!=='true')return {status:'DISABLED'};
+  const kst=kstParts(now);
+  if(Math.floor(kst.seconds/60)%5!==0)return {status:'NOT_FIVE_MINUTE_TICK'};
+  const phases=(deps.marketsFor||marketsFor)(now,env.CLOSED_DATES||'');
+  if(!phases.length)return {status:'MARKET_CLOSED'};
+  const url=String(env.TURSO_DATABASE_URL||'').trim();
+  const authToken=String(env.TURSO_AUTH_TOKEN||'').trim();
+  if(!/^(libsql|https):\/\//.test(url)||!authToken)return {status:'TURSO_NOT_CONFIGURED'};
+  const client=(deps.clientFactory||createClient)({url,authToken,intMode:'string'});
+  try{
+    const recent=await client.execute({sql:'SELECT a.trade_day,a.row_count FROM blue_research_signal_audit_v1 a JOIN blue_eod_ingest_audit_v1 e ON e.trade_day=a.trade_day AND e.row_count>=1700 WHERE a.trade_day<? AND a.row_count>0 ORDER BY a.trade_day DESC LIMIT 1',args:[kst.date]});
+    if(!recent.rows.length)return {status:'NO_VERIFIED_RESEARCH_DAY'};
+    const day=String(recent.rows[0].trade_day),expected=Number(recent.rows[0].row_count);
+    if(!DATE.test(day)||!Number.isSafeInteger(expected)||expected<1||expected>10000)
+      throw Error('TURSO_DIRECT_BAD_AUDIT');
+    const daysOld=ageDays(kst.date,day);
+    if(daysOld<1||daysOld>MAX_SOURCE_AGE_DAYS)
+      return {status:'STALE_RESEARCH_DAY',asof:day};
+    const completeness=await client.execute({sql:'SELECT COUNT(*) AS n FROM blue_research_signals_v1 s JOIN blue_research_signal_audit_v1 a ON a.trade_day=s.trade_day AND a.source_payload_sha256=s.source_payload_sha256 WHERE s.trade_day=?',args:[day]});
+    if(Number(completeness.rows[0]?.n)!==expected)throw Error('TURSO_DIRECT_INCOMPLETE_AUDIT');
+    const pages=Math.ceil(expected/MAX_PER_TICK);
+    const page=Math.floor(kst.seconds/300)%pages;
+    const rows=await client.execute({sql:'SELECT s.code,s.close_price,s.signal_names FROM blue_research_signals_v1 s JOIN blue_research_signal_audit_v1 a ON a.trade_day=s.trade_day AND a.source_payload_sha256=s.source_payload_sha256 WHERE s.trade_day=? ORDER BY s.code LIMIT ? OFFSET ?',args:[day,MAX_PER_TICK,page*MAX_PER_TICK]});
+    if(!rows.rows.length)return {status:'EMPTY_PAGE',asof:day,page};
+    const found=deps.token?{status:'READY',token:await deps.token(client,env,now)}:
+      await tursoDirectCachedToken(client,env,now);
+    if(!found.token)return {status:found.status==='READY'?'TURSO_TOKEN_MISSING':found.status,asof:day};
+    const [market,phase]=phases.find(v=>v[0]==='J')||phases[0];
+    const accepted=[];let rejected=0,previous=0;
+    for(const r of rows.rows){
+      const code=String(r.code),close=Number(r.close_price);
+      if(!CODE.test(code)||!Number.isSafeInteger(close)||close<=0){rejected++;continue;}
+      if(previous&&!deps.noPacing)await (deps.sleep||sleep)(450);
+      previous++;
+      try{
+        const json=await (deps.quote||getKisQuote)(env,found.token,market,code);
+        const received=deps.receivedAt||new Date();
+        const q=parseQuote({code,name:'',eod_close:close,eod_asof:day,
+          eod_signals:String(r.signal_names||''),origin:'TURSO_AUDITED_SIGNAL'},
+          market,phase,json,received,kst.date);
+        if(q.trade_date_kst!==kst.date||q.source!=='KIS_REST_INQUIRE_PRICE')
+          throw Error('TURSO_DIRECT_QUOTE_DAY_MISMATCH');
+        accepted.push(q);
+      }catch{rejected++;}
+    }
+    if(!accepted.length)return {status:'NO_VALID_QUOTES',asof:day,attempted:rows.rows.length,rejected};
+    // Existing latest/history tables and quote validation reused; this batch
+    // has no D1 dependency, even if its daily quota is exhausted.
+    await client.batch(buildTursoMirrorStatements(accepted),'write');
+    return {status:'SAVED',mode,asof:day,page,pages,
+      attempted:rows.rows.length,saved:accepted.length,rejected};
+  }finally{client.close();}
+}

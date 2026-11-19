@@ -1,0 +1,38 @@
+name: BLUE Turso Direct KIS Safety Tests (NO SECRETS)
+
+on:
+  pull_request:
+    paths:
+      - 'collector/src/turso-direct.mjs'
+      - 'collector/src/handler.mjs'
+      - 'collector/turso-direct.test.mjs'
+      - 'tools/turso/kis-token-steward.mjs'
+      - 'tools/turso/kis-token-steward.test.mjs'
+      - '.github/workflows/blue_turso_direct_ci.yml'
+      - '.github/workflows/blue_turso_kis_token_steward.yml'
+      - '.github/workflows/blue_turso_direct_quotes_pilot.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install collector dependencies
+        working-directory: collector
+        run: npm install --no-audit --no-fund --no-package-lock
+      - name: Install Turso steward dependencies
+        working-directory: tools/turso
+        run: npm install --no-audit --no-fund --ignore-scripts --no-package-lock
+      - name: Test direct collector and isolated token vault
+        run: node --test collector/turso-direct.test.mjs tools/turso/kis-token-steward.test.mjs
+      - name: Bundle collector without deployment
+        working-directory: collector
+        run: npx wrangler deploy --dry-run --outdir ../.blue-turso-direct-test-build

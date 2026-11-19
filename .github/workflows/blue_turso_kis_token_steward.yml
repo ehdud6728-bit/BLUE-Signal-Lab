@@ -1,0 +1,70 @@
+name: BLUE Turso KIS Token Steward (D1-INDEPENDENT, CUTOVER-GATED)
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: 'check is read-only token metadata; issue needs explicit cutover flags and confirmation'
+        type: choice
+        required: true
+        default: check
+        options: [check, issue]
+      confirm_cutover:
+        description: 'For issue enter exactly blue-turso-kis-cutover (after 24h pause)'
+        type: string
+        required: false
+        default: ''
+  # After migration, keep a single token issuer. The old D1 schedule MUST be
+  # paused before BLUE_KIS_TURSO_CUTOVER_APPROVED=true is set.
+  schedule:
+    - cron: '10 23 * * 0-4'
+    - cron: '10 3,7 * * 1-5'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: blue-turso-single-kis-token-issuer
+  cancel-in-progress: false
+
+jobs:
+  steward:
+    if: ${{ github.event_name == 'workflow_dispatch' || (vars.BLUE_KIS_TURSO_CUTOVER_APPROVED == 'true' && vars.BLUE_KIS_TOKEN_AUTO_PAUSED == 'true') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install only Turso client
+        working-directory: tools/turso
+        run: npm install --no-audit --no-fund --ignore-scripts --no-package-lock
+      - name: Verify cutover, encryption and timestamp safety locally
+        run: node --test tools/turso/kis-token-steward.test.mjs
+      - name: Metadata check or one safe token request (never D1)
+        env:
+          MODE: ${{ github.event_name == 'schedule' && 'issue' || inputs.mode }}
+          CONFIRM: ${{ inputs.confirm_cutover }}
+          BLUE_KIS_TOKEN_AUTO_PAUSED: ${{ vars.BLUE_KIS_TOKEN_AUTO_PAUSED }}
+          BLUE_KIS_TURSO_CUTOVER_APPROVED: ${{ vars.BLUE_KIS_TURSO_CUTOVER_APPROVED }}
+          BLUE_KIS_D1_DISABLED_AT_UTC: ${{ vars.BLUE_KIS_D1_DISABLED_AT_UTC }}
+          KIS_APP_KEY: ${{ secrets.KIS_APP_KEY }}
+          KIS_APP_SECRET: ${{ secrets.KIS_APP_SECRET }}
+          TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
+          TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REPOSITORY" = 'ehdud6728-bit/BLUE-Signal-Lab'
+          if [[ "$MODE" == 'issue' ]]; then
+            if [[ "${{ github.event_name }}" != 'schedule' && "$CONFIRM" != 'blue-turso-kis-cutover' ]]; then
+              echo 'ISSUE_BLOCKED: explicit manual confirmation missing'; exit 1
+            fi
+            if [[ "$BLUE_KIS_TOKEN_AUTO_PAUSED" != 'true' || "$BLUE_KIS_TURSO_CUTOVER_APPROVED" != 'true' ]]; then
+              echo 'ISSUE_BLOCKED: pause legacy D1 issuer and approve Turso cutover first'; exit 1
+            fi
+            node tools/turso/kis-token-steward.mjs --issue
+          else
+            node tools/turso/kis-token-steward.mjs --check
+          fi
