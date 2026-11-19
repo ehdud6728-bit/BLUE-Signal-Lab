@@ -41,6 +41,9 @@ on:
       - 'tests/test_blue_kis_token_vault_r131.py'
       - 'tests/test_turso_mirror_rollout.py'
       - '.github/workflows/blue_r142_collector_deploy.yml'
+      - '.github/workflows/blue_collector_runtime_settings_audit.yml'
+      - 'tools/turso/collector-runtime-settings-audit.mjs'
+      - 'tools/turso/collector-runtime-settings-audit.test.mjs'
       - '.github/workflows/blue_turso_quote_parity_audit.yml'
       - '.github/workflows/blue_turso_mirror_emergency.yml'
       - '.github/workflows/blue_turso_direct_ci.yml'
@@ -79,6 +82,8 @@ jobs:
         run: npm install --no-audit --no-fund --ignore-scripts --no-package-lock
       - name: Test shared token vault, D1 fallback and collector safety
         run: node --test collector/turso-direct.test.mjs collector/turso-provisional.test.mjs collector/test/turso-instant.test.mjs collector/test/turso-mirror.test.mjs tools/turso/kis-token-steward.test.mjs tools/turso/d1-token-backup.test.mjs tools/turso/quote-parity-audit.test.mjs tools/turso/primary-readiness-audit.test.mjs
+      - name: Test Cloudflare read-only settings sanitizer
+        run: node --test tools/turso/collector-runtime-settings-audit.test.mjs
       - name: Test browser Turso-only manual refresh without D1 fallback
         run: |
           npm install --prefix worker --no-audit --no-fund --no-package-lock

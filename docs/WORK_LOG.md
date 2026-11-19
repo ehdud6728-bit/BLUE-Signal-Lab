@@ -2,6 +2,15 @@
 
 새 채팅에서 프로젝트를 이어가기 위한 **결정/구현/검증 이력**입니다. 대화 전체를 저장하지 않고 실제 개발에 필요한 내용만 보존합니다. 최신 항목을 위에 추가하고, 결과가 달라지면 추측 대신 검증된 상태로 수정합니다.
 
+## 2026-11-19 (KST) — Cloudflare Collector 운영 플래그 읽기 전용 감사 준비
+
+- **확인된 순서:** 사용자 PR #44 병합(`main` 병합 커밋 `62c8d4e`); Collector 수동 검증 [#44508508392](https://github.com/ehdud6728-bit/BLUE-Signal-Lab/actions/runs/44508508392) **69/69 테스트와 Wrangler dry-run 성공**, 실제 배포는 skipped. [Turso Mirror Status #44509040935](https://github.com/ehdud6728-bit/BLUE-Signal-Lab/actions/runs/44509040935) 당일 KIS 저장 시세 2종목·이력 8건·마지막 수신 2026-11-19 15:56:10 KST. 이 정보만으로 구형 미러/독립 Turso/신규 잠정 수집기 중 어느 경로가 켜졌는지 확정하지 않음.
+- **사용자 승인:** 실제 Collector를 바로 배포하지 않고 Cloudflare **현재 Worker 운영 설정을 읽기 전용으로 감사하는 GitHub Actions**를 준비.
+- **구현:** `.github/workflows/blue_collector_runtime_settings_audit.yml`(수동 전용, main만, 기본 쓰기 작업 없음) + `tools/turso/collector-runtime-settings-audit.mjs`(공식 Cloudflare Worker `/settings` GET 1회, 7개 고정 플래그·3개 파일럿 설정 존재 여부만 화이트리스트 상태로 출력, Secret 값/원문/URL·키 미출력) + 위조 응답 기반 무비밀 테스트. [운영·해석 안내](COLLECTOR_RUNTIME_SETTINGS_AUDIT.md).
+- **안전 한계:** `secret_text` 바인딩은 값/파일럿 만료 여부를 확인할 수 없으므로 `SECRET_PRESENT_VALUE_UNKNOWN`으로 표시. 바인딩 설정 조회도 실제 실행 중인 모든 수집 루프의 건강상태·배포 버전을 단독 증명하지 못함. D1/토큰·주가/Worker 배포·Variables 수정/시크릿 갱신 없음.
+- **로컬 검증:** 신규 Node 바인딩 감사 테스트 **7/7 통과**(GET 한정, secret_text 값 미노출, 중복/오류 실패, 수동 워크플로 무변경 보장), 기존 Turso Readiness 포함 Node **12/12**, Python 기존 운영 배포 보호 **3/3**, Workflow YAML 구문·`git diff --check` 통과. 실제 Cloudflare API GET 및 운영 Worker/DB/KIS 접근은 **병합 후 사용자 수동 실행 전까지 미실행**; GitHub PR CI는 별도 확인.
+- **다음:** PR CI 성공 및 사용자 병합 → 읽기 전용 설정 감사 수동 실행 → FULL 미러 OFF 배포 영향 및 Secrets 파일럿 불확실성 검토 → 별도 명시적 승인 후에만 Collector 배포 → 다음 정상 정규장에서 잠정 일봉 15분 파일럿. 분봉은 정밀분석 시 종목별 요청으로 보류.
+
 ## 2026-11-19 (KST) — Collector 수동 검증 #44507158683 테스트 의존성 누락 수정
 
 - **실패 확인:** [Collector Actions #44507158683](https://github.com/ehdud6728-bit/BLUE-Signal-Lab/actions/runs/44507158683) `Install and run collector tests` 단계에서 `ERR_MODULE_NOT_FOUND: Cannot find package '@libsql/client' imported from tools/turso/kis-token-steward.mjs`. Node 62개 검사 중 61개 성공, 1개 파일은 테스트 로딩 전에 실패. Cloudflare 배포 단계 **skipped**, D1/Turso SQL·KIS 호출·토큰 발급 없음.
