@@ -1,16 +1,20 @@
 /**
- * Opt-in, Turso-only, KIS provisional DAILY observations during KRX trading.
+ * Opt-in, Turso-only, KIS provisional DAILY observations through 22:00 KST.
+ * After the regular session, fill only when independently audited KRX EOD is
+ * not available; require an exact KIS-reported trade date.
  * This deliberately does not create audited KRX EOD or research signal rows.
  * No token issuance, D1 reads/writes, orders, or minute bars.
  */
 import {createClient} from '@libsql/client/web';
-import {ageDays,getKisQuote,kstParts,marketsFor,parseQuote} from './core.mjs';
+import {ageDays,getKisQuote,getKisDailyQuote,kstParts,marketsFor,parseQuote} from './core.mjs';
 import {tursoDirectCachedToken} from './turso-direct.mjs';
 import {buildTursoMirrorStatements} from './turso-mirror.mjs';
 
 const PAGE_SIZE=10;
 const MAX_PILOT_MS=30*60_000;
 const MAX_REFERENCE_AGE_DAYS=7;
+const REGULAR_END=15*3600+20*60;
+const POST_CLOSE_END=22*3600;
 const CODE=/^[0-9A-Z]{6}$/;
 const DAY=/^20\d{2}-\d{2}-\d{2}$/;
 const sleep=ms=>new Promise(resolve=>setTimeout(resolve,ms));
@@ -27,9 +31,13 @@ export function tursoProvisionalMode(env,now=new Date()){
 export function provisionalStatements(quotes){
   const mirror=buildTursoMirrorStatements(quotes);
   for(const q of quotes){
-    if(q.market!=='J'||q.phase!=='KRX_REGULAR'||q.provisional_status!=='IN_PROGRESS'||
-      q.trade_date_kst===q.eod_asof||q.source!=='KIS_REST_INQUIRE_PRICE'||
-      !['KIS_REPORTED_TRADE_DATE','COLLECTOR_KST_REGULAR_SESSION'].includes(q.provisional_date_basis))
+    const regular=q.phase==='KRX_REGULAR'&&q.source==='KIS_REST_INQUIRE_PRICE'&&
+      ['KIS_REPORTED_TRADE_DATE','COLLECTOR_KST_REGULAR_SESSION'].includes(q.provisional_date_basis);
+    const afterClose=q.phase==='KRX_POST_CLOSE'&&q.source==='KIS_REST_INQUIRE_DAILY_PRICE'&&
+      q.provisional_date_basis==='KIS_REPORTED_TRADE_DATE'&&q.is_confirmed_daily===false&&
+      q.reported_trade_date===q.trade_date_kst.replaceAll('-','');
+    if(q.market!=='J'||q.provisional_status!=='IN_PROGRESS'||
+      q.trade_date_kst===q.eod_asof||(!regular&&!afterClose))
       throw Error('INVALID_PROVISIONAL_QUOTE');
     mirror.push({sql:`INSERT INTO blue_kis_provisional_daily_v1
       (trade_day,code,market,name,open,high,low,close,volume,
@@ -44,7 +52,7 @@ export function provisionalStatements(quotes){
       WHERE excluded.observed_at_utc>blue_kis_provisional_daily_v1.observed_at_utc`,
       args:[q.trade_date_kst,q.code,'J',q.name,q.open,q.high,q.low,q.price,
         q.accumulated_volume,q.eod_asof,q.received_at_utc,q.provisional_date_basis,
-        'KIS_REST_INQUIRE_PRICE_PROVISIONAL']});
+        afterClose?'KIS_REST_INQUIRE_DAILY_PRICE_PROVISIONAL':'KIS_REST_INQUIRE_PRICE_PROVISIONAL']});
   }
   return mirror;
 }
@@ -58,16 +66,33 @@ export async function collectTursoProvisional(env,now=new Date(),deps={}){
   if(mode==='OFF'||String(env?.COLLECTOR_ENABLED||'false').toLowerCase()!=='true')
     return {status:'DISABLED'};
   const kst=kstParts(now);
-  // The KIS regular-session quote is not an independently verified final EOD.
-  if(kst.seconds<9*3600||kst.seconds>=15*3600+20*60||
-    !(deps.marketsFor||marketsFor)(now,env.CLOSED_DATES||'')
-      .some(([market,phase])=>market==='J'&&phase==='KRX_REGULAR'))
-    return {status:'OUTSIDE_KRX_REGULAR_SESSION'};
+  const closed=String(env.CLOSED_DATES||'').split(',').map(x=>x.trim()).includes(kst.date);
+  const weekday=!['Sat','Sun'].includes(kst.weekday)&&!closed;
+  const regular=kst.seconds>=9*3600&&kst.seconds<REGULAR_END&&
+    (deps.marketsFor||marketsFor)(now,env.CLOSED_DATES||'')
+      .some(([market,phase])=>market==='J'&&phase==='KRX_REGULAR');
+  const afterClose=weekday&&kst.seconds>=REGULAR_END&&kst.seconds<POST_CLOSE_END;
+  if(!regular&&!afterClose)return {status:'OUTSIDE_COLLECTION_WINDOW'};
   const url=String(env.TURSO_DATABASE_URL||'').trim();
   const authToken=String(env.TURSO_AUTH_TOKEN||'').trim();
   if(!/^(libsql|https):\/\//.test(url)||!authToken)return {status:'TURSO_NOT_CONFIGURED'};
   const client=(deps.clientFactory||createClient)({url,authToken,intMode:'string'});
   try{
+    // An independently audited same-day KRX EOD wins after the market closes.
+    // If absent or incomplete, KIS observations remain provisional through 22:00.
+    if(afterClose){
+      const current=await client.execute({sql:`SELECT row_count FROM blue_eod_ingest_audit_v1
+        WHERE trade_day=? AND row_count>=1700 LIMIT 1`,args:[kst.date]});
+      const audited=current.rows?.[0];
+      if(audited){
+        const expected=Number(audited.row_count);
+        if(!Number.isSafeInteger(expected)||expected>10000)
+          return {status:'INVALID_CURRENT_EOD_AUDIT',trade_day:kst.date};
+        const actual=await client.execute({sql:'SELECT COUNT(*) AS n FROM blue_eod_daily_v1 WHERE trade_day=?',args:[kst.date]});
+        if(Number(actual.rows?.[0]?.n)===expected)
+          return {status:'VERIFIED_EOD_ALREADY_AVAILABLE',trade_day:kst.date};
+      }
+    }
     const latest=await client.execute({sql:`SELECT trade_day,row_count
       FROM blue_eod_ingest_audit_v1
       WHERE trade_day<? AND row_count>=1700
@@ -98,15 +123,19 @@ export async function collectTursoProvisional(env,now=new Date(),deps={}){
       if(previous&&!deps.noPacing)await (deps.sleep||sleep)(450);
       previous++;
       try{
-        const json=await (deps.quote||getKisQuote)(env,found.token,'J',code);
+        const json=afterClose
+          ?await (deps.quoteDaily||getKisDailyQuote)(env,found.token,'J',code,kst.date)
+          :await (deps.quote||getKisQuote)(env,found.token,'J',code);
         const received=deps.receivedAt||new Date();
         const q=parseQuote({code,name:String(r.name||'').slice(0,70),
           eod_close:close,eod_asof:day,eod_signals:'',
           origin:'TURSO_VERIFIED_EOD_PROVISIONAL'},
-        'J','KRX_REGULAR',json,received,kst.date);
+        'J',afterClose?'KRX_POST_CLOSE':'KRX_REGULAR',json,received,kst.date);
         if(q.open<q.low||q.open>q.high)throw Error('INVALID_PROVISIONAL_OPEN');
-        // KIS's inquire-price response may omit a trading-day field. In this
-        // case the date is inferred from the KRX session, never 'verified'.
+        // Regular inquire-price may omit a day, but post-close daily-price must
+        // provide an exact matching KIS business date (never an inference).
+        if(afterClose&&!q.reported_trade_date)throw Error('KIS_DAILY_DATE_MISSING');
+        if(afterClose)q.source='KIS_REST_INQUIRE_DAILY_PRICE';
         q.provisional_status='IN_PROGRESS';
         q.provisional_date_basis=q.reported_trade_date?
           'KIS_REPORTED_TRADE_DATE':'COLLECTOR_KST_REGULAR_SESSION';
@@ -126,6 +155,7 @@ export async function collectTursoProvisional(env,now=new Date(),deps={}){
       PRIMARY KEY(trade_day,code))`);
     await client.batch(provisionalStatements(quotes),'write');
     return {status:'SAVED',mode,asof:day,trade_day:kst.date,
+      phase:afterClose?'KRX_POST_CLOSE':'KRX_REGULAR',
       page,pages,attempted:selected.rows.length,saved:quotes.length,rejected};
   }finally{client.close();}
 }

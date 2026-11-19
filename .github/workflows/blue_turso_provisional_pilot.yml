@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       mode:
-        description: 'Default dry_run; 15/30-minute KIS provisional observations or stop'
+        description: 'Default dry_run; 15/30-minute KIS provisional observations (09:00–22:00 KST, post-close only if KRX EOD missing) or stop'
         type: choice
         required: true
         default: dry_run
