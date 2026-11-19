@@ -2,6 +2,15 @@
 
 > 업데이트: 2026-11-19 (한국 시간). 이 파일은 개발 인계용 요약이며, 서버의 실시간 상태를 자동으로 반영하지 않습니다.
 
+
+## 2026-11-19 (KST) — D1 독립 KIS→Turso 장중 시세 수집 파일럿 준비
+
+- [PR #30](https://github.com/ehdud6728-bit/BLUE-Signal-Lab/pull/30) 병합 확인. Turso 일봉 예약 적재는 18:35 KST 기준이며 실제 당일 수집 성공 여부는 별도 Actions 로그 확인이 필요.
+- 신규 `collector/src/turso-direct.mjs`: D1 의존 없이 Turso 감사 완료 최신 연구 신호 종목을 5분 틱마다 최대 12개씩 순환 선택, 기존 KIS REST 응답 검증 후 Turso 최신시세/이력 테이블에 저장. 기존 레거시 D1 Cron과 독립된 `waitUntil`. 기본 비활성, 시간제한 파일럿으로만 테스트.
+- 신규 `tools/turso/kis-token-steward.mjs`: Turso에 암호화된 KIS 토큰 보관 및 24시간·한국 날짜별 발급 시도 제한. **기존 D1 토큰 발급을 최소 24시간 중단했다는 운영 확인이 있어야 발급** 가능. 서로 독립된 토큰 발급 관리자 동시 실행 금지. GitHub 변수 `BLUE_KIS_TOKEN_AUTO_PAUSED`, `BLUE_KIS_D1_DISABLED_AT_UTC`, `BLUE_KIS_TURSO_CUTOVER_APPROVED` 보호 조건.
+- 사용 안내: `docs/TURSO_DIRECT_KIS_CUTOVER.md`. 테스트는 CI 워크플로 및 별도 파일럿으로 검증 예정; 아직 실제 KIS 운용이나 D1 독립 5분 실시간 가격 확보가 입증된 것은 아님.
+- 189개 종목을 12개/5분으로 순환하면 각 종목의 갱신 간격은 약 80분이며, **전체 종목 5분 실시간 갱신이 아님**. 관심 종목 우선수집은 이후 단계.
+
 ## 목표와 우선순위
 
 - 국내 주식 전체 시장 검색, KIS 기반 시세 수집, 기술 신호, 과거 패턴 검증, 매물대 분석, 장바구니·종목 추적을 안정적으로 제공합니다.
