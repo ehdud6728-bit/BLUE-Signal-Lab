@@ -98,3 +98,14 @@ test('Turso error closes the client but does not include credentials in messages
   })}),/NETWORK_FAULT/);
   assert.equal(closed,true);
 });
+
+test('Turso mirror preserves uppercase alphanumeric KRX codes and rejects malformed ones',()=>{
+  for(const code of ['00088K','A12345']){
+    const statements=buildTursoMirrorStatements([{...sample(),code}]);
+    assert.equal(statements[0].args[2],code);
+    assert.equal(statements[1].args[2],code);
+  }
+  for(const code of ['00088k','00-88K','12345','1234567']){
+    assert.throws(()=>buildTursoMirrorStatements([{...sample(),code}]),/INVALID_QUOTE/);
+  }
+});
