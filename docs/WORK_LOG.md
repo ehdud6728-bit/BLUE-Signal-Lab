@@ -6,6 +6,7 @@
 
 - **사용자 결정:** D1 중심 KIS 시세 미러가 최종 목표(Turso 주 DB, D1 보조)에 어긋난다는 지적. 과거 D1의 중요한 업무 데이터를 삭제하지 않고, D1 후보·큐에 의존하는 구형 미러는 확대하지 않음.
 - **안전 변경:** `collector/wrangler.jsonc`의 `TURSO_MIRROR_ENABLED` 기본값을 `true`→`false`로 되돌림. 기존 파일럿/긴급 정지 로직과 명시적 정식 미러 배포 확인 게이트는 보존. Turso 독립 Cron/즉시 KIS 조회의 플래그는 기본 OFF 유지. **기존 운영 Worker 배포 상태/Secret을 읽거나 변경하지 않음.**
+- **운영 중단 방지 추가:** OFF 설정을 실제 배포할 경우 이전에 실행 중이던 구형 Turso 시세 복제가 끊길 수 있으므로 Collector 수동 deploy 워크플로에 `confirm_mirror_off=blue-turso-mirror-off`라는 별도 승인 게이트를 추가. 기존 FULL 모드 승인과 분리하며 둘 다 기본 빈 값. Turso 독립 장중 시세 검증 완료 전에는 운영 배포 금지.
 - **데이터 목록:** `docs/TURSO_PRIMARY_DEPENDENCY_INVENTORY.md`에 D1 과거 신호·차트, 장바구니 서버 추적, AI/분석 요청·종목 추적/큐, KIS 보조 토큰 원장을 코드 사용처와 함께 기록. Turso에 옮겨진 영역과 아직 완전 이관이 입증되지 않은 영역 구분.
 - **새 수동 감사:** `blue_turso_primary_readiness.yml`의 기본 `plan`은 DB 호출 0, `turso_recent`은 Turso 감사 완료 EOD/연구 8거래일 이내의 기대/실제 개수 및 7일 중 KIS 최신가 최대 3일의 집계만 SELECT. D1 SQL/Cloudflare API 자격 정보/KIS 호출/외부 쓰기는 포함하지 않음. 이것은 **과거 데이터 전량 이관 증명이나 D1 대비 동등성 감사가 아님**.
 - **로컬 검증:** Collector **61/61**, 신규 readiness+기존 Turso 감사 Node **16/16**, Python mirror 보호 **3/3** 및 D1 cutover **10/10**, `node tools/turso/primary-readiness-audit.mjs`의 `PLAN_ONLY`(Turso/D1 SQL 0회), Wrangler Collector `--dry-run` 바인딩 `TURSO_MIRROR_ENABLED="false"`, YAML 구문·`git diff --check` 성공. 원격 Turso/D1/KIS 호출, Secret 변경, 운영 배포는 하지 않음. PR CI는 별도 확인.

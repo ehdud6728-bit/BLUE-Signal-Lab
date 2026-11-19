@@ -10,6 +10,8 @@
 
 **결정:** 새 데이터의 검증·우선 저장소는 Turso로 이동합니다. `collector/wrangler.jsonc`의 전체 D1-기반 Turso 미러링 기본값을 **OFF**로 두고, 과거 코드·데이터는 이관과 검증 완료 전까지 보존합니다. 향후 Turso→D1 보조 쓰기는 D1 한도에 영향을 주지 않는 비차단·멱등·재시도 방식으로 별도 구현합니다. 토큰 발급 금고의 이중 저장 정책은 그대로 유지합니다.
 
+**배포 보호:** `TURSO_MIRROR_ENABLED=false` 코드를 실제 Collector에 배포하면 이전에 돌아가던 D1 중심 Turso 미러까지 멈출 수 있습니다. 따라서 `.github/workflows/blue_r142_collector_deploy.yml`의 `deploy=true`는 이 모드에서 `confirm_mirror_off=blue-turso-mirror-off`도 필수입니다. 실 운영 Worker 변수·백그라운드 Turso 독립 수집 플래그를 먼저 확인하고, 장중 독립 시세 경로 실증 전에는 중단을 승인하지 않습니다.
+
 ## 남아 있는 D1 의존성 — 삭제 금지
 
 | 업무 영역 | D1 표 / 읽기 경로 | Turso 현재 코드 범위 | 남은 작업 |

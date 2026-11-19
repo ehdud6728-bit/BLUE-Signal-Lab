@@ -17,9 +17,14 @@ class MirrorRolloutSafety(unittest.TestCase):
         self.assertNotIn('schedule:', workflow)
         self.assertIn('default: false', workflow)
         self.assertIn('confirm_full_mirror:', workflow)
+        self.assertIn('confirm_mirror_off:', workflow)
         self.assertIn("blue-turso-full-mirror", workflow)
+        self.assertIn("blue-turso-mirror-off", workflow)
         self.assertIn('FULL_MIRROR_DEPLOY_BLOCKED', workflow)
+        self.assertIn('MIRROR_OFF_DEPLOY_BLOCKED', workflow)
         self.assertLess(workflow.index('FULL_MIRROR_DEPLOY_BLOCKED'),
+                        workflow.index('npx wrangler deploy'))
+        self.assertLess(workflow.index('MIRROR_OFF_DEPLOY_BLOCKED'),
                         workflow.index('npx wrangler deploy'))
         # Keep the future explicit full-mirror approval gate, even with OFF default.
         self.assertIn('"TURSO_MIRROR_ENABLED"', workflow)
