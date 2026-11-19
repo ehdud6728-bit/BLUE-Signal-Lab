@@ -1,9 +1,9 @@
-/** Encrypted KIS token steward for Turso, wholly separate from D1.
+/** Single KIS issuer with a Turso primary and optional encrypted D1 standby.
  * NEVER enable with the old D1 token issuer active; first pause it, then wait
- * 24 hours after the recorded pause. The Worker only READS this vault.
+ * 24 hours after the recorded pause. Workers only READ the token vaults.
  */
 import {createClient} from '@libsql/client';
-import {createHash,createCipheriv,hkdfSync,randomBytes} from 'node:crypto';
+import {createHash,createCipheriv,createDecipheriv,hkdfSync,randomBytes} from 'node:crypto';
 
 const KIS_TOKEN_URL='https://openapi.koreainvestment.com:9443/oauth2/tokenP';
 const DAY_MS=86_400_000;
@@ -49,6 +49,22 @@ export function encryptKisToken(token,key,secret){
   const encrypted=Buffer.concat([cipher.update(token,'utf8'),cipher.final()]);
   return Buffer.concat([nonce,encrypted,cipher.getAuthTag()]).toString('base64url');
 }
+export function decryptKisToken(encoded,key,secret){
+  try{
+    if(typeof encoded!=='string'||!key||!secret)throw Error('BAD_TOKEN');
+    const blob=Buffer.from(encoded,'base64url');
+    if(blob.length<29||blob.length>8192)throw Error('BAD_TOKEN');
+    const salt=Buffer.from(hash('BLUE_KIS_R131_VAULT_'+key),'hex');
+    const derived=Buffer.from(hkdfSync('sha256',Buffer.from(secret,'utf8'),salt,
+      Buffer.from('BLUE-Signal-Lab encrypted KIS access-token D1 v1','utf8'),32));
+    const cipher=createDecipheriv('aes-256-gcm',derived,blob.subarray(0,12));
+    cipher.setAAD(Buffer.from(scopeFor(key),'utf8'));
+    cipher.setAuthTag(blob.subarray(blob.length-16));
+    const token=Buffer.concat([cipher.update(blob.subarray(12,blob.length-16)),cipher.final()]).toString('utf8');
+    if(!token||token.length>4096)throw Error('BAD_TOKEN');
+    return token;
+  }catch{throw Error('KIS_TOKEN_DECRYPT_FAILED');}
+}
 export async function issueOnce(key,secret,{fetchFn=fetch}={}){
   const result=await fetchFn(KIS_TOKEN_URL,{
     method:'POST',
@@ -62,8 +78,27 @@ export async function issueOnce(key,secret,{fetchFn=fetch}={}){
     typeof data?.access_token_token_expired!=='string')throw Error('KIS_ISSUE_BAD_RESPONSE');
   return {token:data.access_token,expires:parseKisExpiry(data.access_token_token_expired)};
 }
-export async function steward(client,env,now=new Date(),{mode='check',issuer=issueOnce}={}){
-  if(!['check','issue'].includes(mode))throw Error('INVALID_MODE');
+async function syncBackup(client,key,secret,scope,backup,now){
+  let result;
+  try{
+    result=await client.execute({sql:`SELECT ciphertext,expires_at_utc,saved_at_utc
+      FROM blue_turso_kis_vault_v1 WHERE scope=? LIMIT 1`,args:[scope]});
+    const row=result.rows?.[0];
+    if(!row)return {status:'D1_BACKUP_NO_PRIMARY_TOKEN'};
+    const expires=Date.parse(String(row.expires_at_utc)),saved=Date.parse(String(row.saved_at_utc));
+    if(!Number.isFinite(expires)||!Number.isFinite(saved)||saved>now.getTime()+GRACE_MS||
+       expires<=saved)return {status:'INVALID_TOKEN_METADATA'};
+    if(expires<=now.getTime()+GRACE_MS)return {status:'D1_BACKUP_PRIMARY_EXPIRED'};
+    const token=decryptKisToken(String(row.ciphertext),key,secret);
+    await backup.mirror({token,expiresAt:String(row.expires_at_utc),
+      savedAt:String(row.saved_at_utc),key,secret});
+    await client.execute({sql:`UPDATE blue_turso_kis_issuance_v1 SET status='SAVED_DUAL'
+      WHERE scope=? AND status IN ('SAVED','D1_SYNC_PENDING','SAVED_DUAL')`,args:[scope]});
+    return {status:'D1_BACKUP_VERIFIED',expires_at_utc:String(row.expires_at_utc)};
+  }catch{return {status:'D1_BACKUP_SYNC_FAILED'};}
+}
+export async function steward(client,env,now=new Date(),{mode='check',issuer=issueOnce,backup=null}={}){
+  if(!['check','issue','sync'].includes(mode))throw Error('INVALID_MODE');
   const key=String(env.KIS_APP_KEY||''),secret=String(env.KIS_APP_SECRET||'');
   if(!key||!secret)throw Error('KIS_CONFIG_MISSING');
   await client.execute('CREATE TABLE IF NOT EXISTS blue_turso_kis_vault_v1 (scope TEXT PRIMARY KEY,ciphertext TEXT NOT NULL,expires_at_utc TEXT NOT NULL,saved_at_utc TEXT NOT NULL)');
@@ -82,7 +117,36 @@ export async function steward(client,env,now=new Date(),{mode='check',issuer=iss
     expires_at_utc:existing?String(existing.expires_at_utc):null};
   const gate=cutoverReady(env,now);
   if(gate!=='READY')return {status:gate};
-  if(!renewalDue)return {status:'TOKEN_VALID',expires_at_utc:String(existing.expires_at_utc)};
+  const dual=String(env.BLUE_KIS_DUAL_VAULT_ENABLED)==='true';
+  // Never issue a new KIS token with half-configured primary/backup storage.
+  if(!dual||!backup||typeof backup.mirror!=='function'||typeof backup.inspect!=='function')
+    return {status:'D1_BACKUP_NOT_CONFIGURED'};
+  if(mode==='sync')return syncBackup(client,key,secret,scope,backup,now);
+  if(!existing){
+    // An empty Turso vault is not proof that no valid KIS token was issued.
+    // An active D1 standby must be reused instead of requesting tokenP again.
+    let standby;
+    try{standby=await backup.inspect({key,secret,now});}
+    catch{return {status:'D1_BACKUP_INSPECTION_FAILED_NO_ISSUE'};}
+    if(standby.status==='VALID'){
+      await client.execute({sql:`INSERT INTO blue_turso_kis_vault_v1
+        (scope,ciphertext,expires_at_utc,saved_at_utc) VALUES(?,?,?,?)
+        ON CONFLICT(scope) DO NOTHING`,args:[scope,
+          encryptKisToken(standby.token,key,secret),standby.expiresAt,standby.savedAt]});
+      return {status:'TOKEN_RESTORED_FROM_D1',expires_at_utc:standby.expiresAt};
+    }
+    if(standby.status==='EXPIRED'&&now.getTime()-Date.parse(standby.savedAt)<DAY_MS)
+      return {status:'WAIT_24H_FROM_BACKUP_SAVED',expires_at_utc:standby.expiresAt};
+    if(!['MISSING','EXPIRED'].includes(standby.status))
+      return {status:'D1_BACKUP_INSPECTION_FAILED_NO_ISSUE'};
+  }
+  if(!renewalDue){
+    const prior=await client.execute({sql:`SELECT status FROM blue_turso_kis_issuance_v1
+      WHERE scope=? LIMIT 1`,args:[scope]});
+    if(prior.rows?.[0]?.status==='D1_SYNC_PENDING')
+      return syncBackup(client,key,secret,scope,backup,now);
+    return {status:'TOKEN_VALID',expires_at_utc:String(existing.expires_at_utc)};
+  }
   // The previous saved token may remain usable during the renewal window.
   // No new tokenP call is allowed until 24 hours after that saved token.
   if(existing&&now.getTime()-saved<DAY_MS)return {
@@ -123,21 +187,32 @@ export async function steward(client,env,now=new Date(),{mode='check',issuer=iss
         expires_at_utc=excluded.expires_at_utc,saved_at_utc=excluded.saved_at_utc`,
       args:[scope,encrypted,utc(new Date(issued.expires)),stamp]});
     await client.execute({sql:"UPDATE blue_turso_kis_issuance_v1 SET status='SAVED',last_success_at_utc=? WHERE scope=? AND last_attempt_at_utc=?",args:[stamp,scope,stamp]});
-    return {status:'TOKEN_SAVED',expires_at_utc:utc(new Date(issued.expires))};
+    // A successful tokenP call is never repeated because a standby DB write failed.
+    // The existing primary token is re-used for later backup synchronization.
   }catch{
     await client.execute({sql:"UPDATE blue_turso_kis_issuance_v1 SET status='SAVE_FAILED' WHERE scope=? AND last_attempt_at_utc=?",args:[scope,stamp]});
     return {status:'SAVE_FAILED_NO_RETRY'};
   }
+  const backupResult=await syncBackup(client,key,secret,scope,backup,now);
+  if(backupResult.status==='D1_BACKUP_VERIFIED')return {status:'TOKEN_SAVED_DUAL',expires_at_utc:utc(new Date(issued.expires))};
+  await client.execute({sql:`UPDATE blue_turso_kis_issuance_v1 SET status='D1_SYNC_PENDING'
+    WHERE scope=? AND last_attempt_at_utc=?`,args:[scope,stamp]});
+  return {status:'TOKEN_SAVED_BACKUP_PENDING',expires_at_utc:utc(new Date(issued.expires))};
 }
 async function main(){
-  const env=process.env,mode=process.argv.includes('--issue')?'issue':'check';
+  const env=process.env,mode=process.argv.includes('--sync')?'sync':process.argv.includes('--issue')?'issue':'check';
   const url=String(env.TURSO_DATABASE_URL||'').trim(),authToken=String(env.TURSO_AUTH_TOKEN||'').trim();
   if(!/^(libsql|https):\/\//.test(url)||!authToken)throw Error('TURSO_CONNECTION_MISSING');
   const client=createClient({url,authToken});
   try{
-    const result=await steward(client,env,new Date(),{mode});
+    const backup=mode!=='check'&&env.BLUE_KIS_DUAL_VAULT_ENABLED==='true'
+      ?(await import('./d1-token-backup.mjs')).createD1Backup(env):null;
+    const result=await steward(client,env,new Date(),{mode,backup});
     console.log('BLUE_TURSO_KIS_TOKEN_STEWARD '+JSON.stringify(result));
-    if(['ISSUE_FAILED_RETRY_AFTER_30M','ISSUE_FAILED_FINAL','SAVE_FAILED_NO_RETRY','INVALID_TOKEN_METADATA'].includes(result.status))
+    if(['ISSUE_FAILED_RETRY_AFTER_30M','ISSUE_FAILED_FINAL','SAVE_FAILED_NO_RETRY',
+      'INVALID_TOKEN_METADATA','TOKEN_SAVED_BACKUP_PENDING','D1_BACKUP_SYNC_FAILED',
+      'D1_BACKUP_NO_PRIMARY_TOKEN','D1_BACKUP_PRIMARY_EXPIRED',
+      'D1_BACKUP_NOT_CONFIGURED','D1_BACKUP_INSPECTION_FAILED_NO_ISSUE'].includes(result.status))
       process.exitCode=1;
   }finally{client.close();}
 }

@@ -3,7 +3,7 @@
  * Time-boxed opt-in only. The legacy D1 Cron collector remains unchanged.
  */
 import {createClient} from '@libsql/client/web';
-import {marketsFor,kstParts,getKisQuote,parseQuote,vaultScope,decryptVault,ageDays} from './core.mjs';
+import {marketsFor,kstParts,getKisQuote,parseQuote,vaultScope,decryptVault,ageDays,inspectCachedToken} from './core.mjs';
 import {buildTursoMirrorStatements} from './turso-mirror.mjs';
 
 const MAX_PER_TICK=12;
@@ -39,6 +39,20 @@ export async function tursoDirectCachedToken(client,env,now){
   try{return {status:'READY',token:await decryptVault(row.ciphertext,env.KIS_APP_KEY,env.KIS_APP_SECRET)};}
   catch{return {status:'TURSO_TOKEN_DECRYPT_FAILED',token:null};}
 }
+/** The exact same issued token can be read from the existing encrypted D1
+ * standby vault. D1 is only queried when the primary token is unavailable;
+ * neither Worker is authorized to call tokenP.
+ */
+export async function sharedKisToken(client,env,now){
+  const primary=await tursoDirectCachedToken(client,env,now);
+  if(primary.token||String(env.BLUE_KIS_DUAL_VAULT_ENABLED)!=='true'||
+    !['TURSO_TOKEN_VAULT_UNAVAILABLE','TURSO_TOKEN_MISSING','TURSO_TOKEN_EXPIRED'].includes(primary.status))
+    return primary;
+  if(!env.DB?.prepare)return {status:'D1_TOKEN_BACKUP_NOT_CONFIGURED',token:null};
+  const standby=await inspectCachedToken(env.DB,env.KIS_APP_KEY,env.KIS_APP_SECRET,now);
+  return standby.token?{status:'D1_BACKUP_READY',token:standby.token}:
+    {status:`D1_BACKUP_${standby.status}`,token:null};
+}
 
 /** Collects a deterministic rotating page of verified, independently stored
  * research signal stocks. Each tick processes at most 12 symbols, avoiding a
@@ -72,7 +86,7 @@ export async function collectTursoDirect(env,now=new Date(),deps={}){
     const rows=await client.execute({sql:'SELECT s.code,s.close_price,s.signal_names FROM blue_research_signals_v1 s JOIN blue_research_signal_audit_v1 a ON a.trade_day=s.trade_day AND a.source_payload_sha256=s.source_payload_sha256 WHERE s.trade_day=? ORDER BY s.code LIMIT ? OFFSET ?',args:[day,MAX_PER_TICK,page*MAX_PER_TICK]});
     if(!rows.rows.length)return {status:'EMPTY_PAGE',asof:day,page};
     const found=deps.token?{status:'READY',token:await deps.token(client,env,now)}:
-      await tursoDirectCachedToken(client,env,now);
+      await sharedKisToken(client,env,now);
     if(!found.token)return {status:found.status==='READY'?'TURSO_TOKEN_MISSING':found.status,asof:day};
     const [market,phase]=phases.find(v=>v[0]==='J')||phases[0];
     const accepted=[];let rejected=0,previous=0;
