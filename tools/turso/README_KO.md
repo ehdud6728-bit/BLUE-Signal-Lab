@@ -170,3 +170,23 @@ Actions URL: https://github.com/ehdud6728-bit/BLUE-Signal-Lab/actions/workflows/
 - **예약 실행은 한 개**이며 매 평일 22:20 KST에 해당 거래일의 검증된 EOD를 Turso에 자동 저장하려 시도합니다. 연구 자동 적재는 기존 Repository Variable `BLUE_TURSO_RESEARCH_AUTO_ENABLED=true`를 **명시적으로 설정한 경우에만** EOD 다음 단계로 실행합니다(기본 OFF). 기존 패턴 연구 전용 워크플로는 중복 예약 없이 수동 재시도/과거 적재용입니다.
 - KIS 토큰 발급·갱신, KIS 전체 실시간 시세, D1 쿼리/복제, Worker/PWA 운영 배포, `FULL` 플래그 활성화는 **이 작업의 일부가 아닙니다**. Turso 검색·분석 API는 이미 존재하나, 새 Worker 또는 웹 코드가 반영되어야 하는 경우에는 각각 기존 배포 절차가 별도로 필요합니다.
 - 화면의 `/api/research/search`는 감사된 Turso 연구 날짜를 우선 사용하고 기존 `/api/search` D1은 실패/미이관 날짜에 한정해 보조로 조회합니다. 같은 날짜가 Turso에 존재하지만 특정 종목에 신호가 **없을 때**는 D1의 다른 신호 차트를 끼워 넣지 않습니다.
+
+## 11. 2026-11-20 — 전체시장 기술지표 날짜별 보존 (별도 opt-in)
+
+기존 스캐너는 약 2,600개 종목을 모두 계산하지만 패턴에 걸린 종목의 결과만 남겼습니다. 이 확장에서는 기존 계산을 **다시 API로 요청하지 않고**, 같은 스캔 중의 볼린저밴드/엔벨로프, 이평선(20/30/40/60/112/224), RSI·Stochastic·MACD 및 골든크로스, 거래대금·거래량 비율을 모든 관측 종목의 하루치 스냅샷에 기록합니다. 분석 이력이 250거래일 미만인 종목도 누락하지 않고 `INSUFFICIENT_HISTORY` 상태와 계산 불가능한 지표의 `null`을 저장합니다.
+
+- 기본 동작 **변경 없음**: 기존 전체시장 EOD와 243종목 같은 신호 스냅샷만 유지. 새 테이블 쓰기는 자동으로 켜지지 않습니다.
+- 수동 선택: [BLUE Turso Daily EOD + Research](https://github.com/ehdud6728-bit/BLUE-Signal-Lab/actions/workflows/blue_turso_daily_verified_eod_auto.yml)에서 `include_indicators=true`. `mode=dry_run`이면 파일·해시만 확인하고 DB는 변경하지 않습니다. `mode=apply`와 기존 확인 문구를 함께 명시하면 전체시장 기술지표를 저장합니다.
+- 예약 적용: 기존 `BLUE_TURSO_RESEARCH_AUTO_ENABLED=true` 외에 **새 변수** `BLUE_TURSO_ALL_INDICATORS_AUTO_ENABLED=true`를 설정한 경우에만 평일 22:20 KST EOD·연구 이후 추가 저장합니다. 두 변수 중 하나라도 빠지면 새 지표 저장은 꺼진 상태입니다.
+- 기록 대상: `blue_indicators_daily_v1`(거래일+코드 유일) 및 `blue_indicators_audit_v1`. 독립적으로 감사한 KRX 일봉 **전체 종목코드·각 종가**가 동일해야 쓰기를 시작합니다. 기존 행과 해시가 다르면 덮어쓰지 않고 중단합니다. EOD/패턴/지표는 각각 성공한 작업을 보존하며 재실행 시 누락분만 안전하게 이어갑니다.
+- `2026-11-19` 같은 과거 날짜를 선택하더라도 새 지표 저장을 요청하면 정확한 해당 날짜의 KRX 원본을 재검증하고, 저장된 EOD와 가격이 맞는지 확인합니다. 비거래일이나 다른 날짜를 대신 사용하지 않습니다.
+- **아직 구현하지 않은 것**: 모든 종목의 과거 1~2년 전체 OHLCV 백필, 이 지표 테이블을 검색 UI에서 읽는 API, 기술지표의 원본 투자전략과 완전한 일치 검증. 현재 지표는 연구용 계산값이며, 기존 D1 데이터·KIS·운영 Worker 배포는 수정하지 않습니다.
+
+## 12. 2026-11-20 — 미분석 날짜 검색 시 Turso 분석 요청 연결
+
+기존 PWA는 Turso의 연구 스냅샷이 없는 날짜를 검색하면 안내문만 표시했습니다. 이제 **지정 날짜 한 건을 검색 버튼으로 조회**할 때 감사된 패턴 분석 기록이 없으면, 사용자의 명시적 검색 클릭으로 Turso 분석을 요청합니다.
+
+- API `POST /api/research/request`는 Cloudflare Access 로그인·동일 Origin 검증 후에만 실행하며, 날짜·평일·15:40 KST 당일 일봉 준비 여부를 검사합니다. `GITHUB_TOKEN`이 없으면 실패합니다. API Worker는 D1 `scan_requests`에 쿼리하지 않고 Turso `blue_research_requests_v1`에 날짜별 요청/중복 방지 상태만 저장합니다. 동시 미완료 요청 최대 3개, 동일 날짜 요청의 별도 발행 금지, 150분 후 재요청 가능.
+- GitHub Actions는 새 대량 워크플로를 만들지 않고 기존 **BLUE Turso Daily EOD + Research**의 검증된 KRX 원본 수집 → Turso EOD 감사 → R1.1 패턴 분석 → 연구 신호 저장 경로를 **그 날짜에만** `apply` 실행합니다. API가 사용하는 워크플로 확인 문구는 백엔드에서만 설정하며 KIS 토큰·D1 데이터에는 접근하지 않습니다. 새 전체시장 기술지표 적재는 별도 opt-in이므로 여기서는 사용하지 않습니다.
+- `GET /api/research/request/status?date=...`는 연구 감사 행수·실제 신호 행수를 먼저 대조하고, 미완료 시 해당 날짜의 GitHub Actions 상태를 조회합니다. PWA는 상단에 `분석 중`/`완료`/`실패`와 가능한 실행 링크를 즉시 표시하며 15초 간격으로 확인, 모바일 재시작 뒤 이어서 확인하고 완료 시 같은 날짜를 검색합니다. 기간 검색은 대량 자동 실행하지 않고 이미 저장된 날짜만 사용합니다.
+- 실제 GitHub 워크플로 실행·원격 Turso 데이터 쓰기·Worker/PWA **배포는 이 PR만으로 일어나지 않습니다.** 병합 후 API `verify_only` → `deploy_api`, 이어서 정적 웹 `deploy_web=true`를 별도로 승인해야 이 동작이 사용자 화면에 나타납니다. API Worker의 기존 `GITHUB_TOKEN`이 유효하며 Turso 인증이 요청 상태 테이블 생성/갱신을 허용하는지도 운영 확인이 필요합니다.

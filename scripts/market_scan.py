@@ -109,6 +109,15 @@ def enrich(g):
     d['rsi']=wilder_rsi(d.close)
     d['rsi_signal']=d.rsi.rolling(9,min_periods=9).mean()
     d['rsi_gc']=(d.rsi.shift().le(d.rsi_signal.shift())&d.rsi.gt(d.rsi_signal)).fillna(False)
+    # Reuse the exact R0.8 diagnostic MACD parameters for the ALL-symbol store.
+    fast=d.close.ewm(span=12,adjust=False,min_periods=12).mean()
+    slow=d.close.ewm(span=26,adjust=False,min_periods=26).mean()
+    d['macd_12_26_9']=fast-slow
+    d['macd_signal_9']=d.macd_12_26_9.ewm(span=9,adjust=False,min_periods=9).mean()
+    d['macd_histogram']=d.macd_12_26_9-d.macd_signal_9
+    d['macd_gc']=(d.macd_12_26_9.shift().le(d.macd_signal_9.shift()) &
+                  d.macd_12_26_9.gt(d.macd_signal_9) &
+                  d.macd_signal_9.notna()).fillna(False)
     for n,k,slow in [(14,3,3),(12,5,5),(20,12,12)]:
         sk,sd,gc=stochastic(d,n,k,slow)
         prefix=f'slow_{n}_{k}_{slow}'
@@ -127,7 +136,7 @@ def _num(x):
     except (ValueError,TypeError):pass
     return None
 
-def scan(raw, asof=None):
+def scan(raw, asof=None, indicator_sink=None):
     prices=normalise(raw)
     if prices.empty:raise ValueError('No KOSPI/KOSDAQ valid prices')
     latest=prices.date.max().date()
@@ -143,10 +152,43 @@ def scan(raw, asof=None):
         if group.date.iloc[-1].date()!=target:continue
         d=enrich(group)
         row=d.iloc[-1]
+        indicator_row=None
+        if indicator_sink is not None:
+            numeric=('ma20','ma30','ma40','ma60','ma112','ma224',
+                     'BB20_UPPER','BB20_LOWER','BB30_UPPER','BB30_LOWER',
+                     'BB40_UPPER','BB40_LOWER','BB20_UPPER_ALT','BB20_LOWER_ALT',
+                     'BB30_UPPER_ALT','BB30_LOWER_ALT','BB40_UPPER_ALT','BB40_LOWER_ALT',
+                     'ENV20_MID','ENV40_MID','ENV20_LOWER_20PCT',
+                     'rsi','rsi_signal','macd_12_26_9','macd_signal_9',
+                     'macd_histogram','slow_14_3_3_k','slow_14_3_3_d',
+                     'slow_12_5_5_k','slow_12_5_5_d','slow_20_12_12_k','slow_20_12_12_d',
+                     'amount_ratio20','volume_ratio20',
+                     'prior_high_20','prior_high_60','prior_high_120','prior_high_224',
+                     'headroom_20','headroom_60','headroom_120','headroom_224')
+            prev=d.iloc[-2] if len(d)>=2 else None
+            crosses={key:bool(row.get(key,False)) for key in
+                     ('rsi_gc','macd_gc','slow_14_3_3_gc','slow_12_5_5_gc',
+                      'slow_20_12_12_gc','BB20_UPPER_SIGNAL','BB30_UPPER_SIGNAL',
+                      'BB40_UPPER_SIGNAL','BB20_LOWER_SIGNAL','BB30_LOWER_SIGNAL',
+                      'BB40_LOWER_SIGNAL','ENV20_SIGNAL','ENV40_SIGNAL',
+                      'ENV20_LOWER_TOUCH_SIGNAL','BB30_LOWER_RECLAIM_SIGNAL')}
+            for n in (112,224):
+                line=f'ma{n}'
+                crosses[f'ma{n}_cross']=bool(prev is not None and
+                    pd.notna(prev[line]) and pd.notna(row[line]) and
+                    prev.close<=prev[line] and row.close>row[line])
+            indicator_row={'trade_day':str(target),'code':str(code),'market':str(row.market),
+                           'close_price':int(row.close),'history_bars':len(d),
+                           'indicators':{key:_num(row.get(key)) for key in numeric},
+                           'crosses':crosses,
+                           'eligibility':'INSUFFICIENT_HISTORY','signal_names':[]}
+            indicator_sink.append(indicator_row)
         if len(d)<250 or not np.isfinite(row.get('ma224',np.nan)):
             insufficient+=1;continue
         if _num(row.gap_abs_pct) is not None and row.gap_abs_pct>=40:
+            if indicator_row is not None:indicator_row['eligibility']='SUSPICIOUS_GAP'
             suspicious+=1;continue # split/gap review: not enough evidence for a valid signal
+        if indicator_row is not None:indicator_row['eligibility']='ELIGIBLE'
         flags=[]
         for n in PERIODS:
             if bool(row[f'BB{n}_UPPER_SIGNAL']):flags.append(f'BB{n}')
@@ -159,6 +201,7 @@ def scan(raw, asof=None):
             if bool(row[f'ENV{n}_SIGNAL']):flags.append(f'ENV{n}')
         if bool(row['ENV20_LOWER_TOUCH_SIGNAL']):
             flags.append('ENV20_LOWER_TOUCH')
+        if indicator_row is not None:indicator_row['signal_names']=sorted(flags)
         if not flags:continue
         fields={k:_num(row.get(k)) for k in ['rsi','rsi_signal','slow_14_3_3_k','slow_14_3_3_d','slow_12_5_5_k','slow_12_5_5_d','slow_20_12_12_k','slow_20_12_12_d','amount_ratio20','volume_ratio20','ma20','ma40','ma60','ma112','ma224','prior_high_20','prior_high_60','prior_high_120','prior_high_224','headroom_20','headroom_60','headroom_120','headroom_224']}
         fields.update({'rsi_gc':bool(row.rsi_gc), 'slow_14_3_3_gc':bool(row.slow_14_3_3_gc),'slow_12_5_5_gc':bool(row.slow_12_5_5_gc),'slow_20_12_12_gc':bool(row.slow_20_12_12_gc),'market':str(row.market),'source':'FinanceData/marcap', 'profile_status':'NOT_COMPUTED', 'parity_status':'UNVERIFIED'})

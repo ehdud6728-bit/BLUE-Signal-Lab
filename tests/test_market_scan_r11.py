@@ -239,6 +239,15 @@ class SameDayTests(unittest.TestCase):
         self.assertEqual(len(out), 2000)
         self.assertIn('marcap', source)
 
+    def test_indicator_snapshot_requires_verified_krx_even_for_historical_day(self):
+        old = self.marcap_fixture(True)
+        out, days, source = upgraded_history(
+            old, date(2026, 11, 10), False, 'pykrx', '',
+            stock_module=FakeStock(), force_exact_day=True)
+        self.assertEqual(days, ['2026-11-10'])
+        self.assertIn('KRX', source)
+        self.assertEqual(len(out[out.Date.dt.date.eq(date(2026, 11, 10))]), 1202)
+
 
 if __name__ == '__main__':
     unittest.main()

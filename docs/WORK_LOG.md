@@ -2,6 +2,15 @@
 
 새 채팅에서 프로젝트를 이어가기 위한 **결정/구현/검증 이력**입니다. 대화 전체를 저장하지 않고 실제 개발에 필요한 내용만 보존합니다. 최신 항목을 위에 추가하고, 결과가 달라지면 추측 대신 검증된 상태로 수정합니다.
 
+## 2026-11-20 (KST) — Turso 전체 종목 기술지표 opt-in 및 과거 날짜 검색 자동 분석 연결
+
+- **사용자 문제/결정:** 패턴에 해당한 약 243종목만 저장하는 기존 연구 스냅샷과 별개로, 전체 종목의 매일 일봉·계산 지표를 누적하는 방향에 동의. 이후 다른 날짜를 검색해도 새로운 분석이 시작되지 않고 상태 표시도 보이지 않는 문제를 보고했으며, Turso 중심 날짜별 분석 실행·진행 표시 개발을 승인.
+- **확인된 운영 근거:** 2026-11-19 [통합 EOD·연구 #44624755873](https://github.com/ehdud6728-bit/BLUE-Signal-Lab/actions/runs/44624755873)에서 KRX 양 시장 2,661개 전체 일봉 및 243개 패턴 연구 스냅샷 저장 성공(이전 사용자 공유 실행 결과). [API 배포 #44629969906](https://github.com/ehdud6728-bit/BLUE-Signal-Lab/actions/runs/44629969906)·[PWA 배포 #44630135989](https://github.com/ehdud6728-bit/BLUE-Signal-Lab/actions/runs/44630135989)는 기존 버전 배포 확인으로, 새 날짜 실행 기능은 포함하지 않음. 실시간 운영 데이터와 Actions 최신 변수는 재확인이 필요.
+- **지표 코드:** `market_scan.py`의 기존 모든 종목 지표 계산 시점에서 패턴 비일치/이력 부족 종목까지 일별 숫자·GC·상태 기록. `export_turso_indicator_snapshot.py`의 전체 KRX 행수/원천/해시 검증, `indicator-snapshot-import.mjs`의 기존 감사 EOD와 모든 코드·종가 일치 확인·멱등 저장/완전 재조회, `blue_indicators_daily_v1`과 원장 분리. `include_indicators` 수동 opt-in 또는 별개 예약 변수의 이중 opt-in만 허용. 기본 EOD·연구 동작/운영 D1 변경 없음.
+- **미분석 날짜 기능:** 기존 `web/src/main.tsx`는 Turso의 `NOT_IMPORTED`에 대해 `requestScan`을 호출하지 않아 서버에서 아무 분석도 시작하지 않았으며, 기존 `GET /api/scan`은 D1 기반 작업. 새 Access·동일 Origin 보안 `POST /api/research/request`, `GET /api/research/request/status`는 Turso 감사 상태·요청 원장·GitHub Actions 날짜별 결과를 사용해 한 날짜의 기존 통합 EOD+패턴 `apply`를 요청합니다. 같은 날짜 중복, 동시 3건 초과, 장중 미확정 일봉을 차단. PWA 상단 진행 표시, 15초 확인/재방문 복원, 완료 후 해당 날짜 자동 검색. 범위 조회는 기존 저장 날짜만 읽고 신규 대량 수집하지 않음.
+- **로컬 검증:** 전체 지표 export Python 4개, Turso import Node 5개, 기존 지표·매칭 Python 8개, R1.1 정확한 날짜 KRX 보호 Python 21개, 통합 EOD guard Python 6개 통과. 새 요청 상태 Node 7개·실제 API 라우팅/브라우저 연결 회귀 Node 3개 통과, 웹 TypeScript/Vite 빌드 및 API Wrangler dry-run 통과. 별도 전체 회귀·PR CI는 게시 후 확인. **운영 GitHub 분석 실행, Turso/D1 데이터 쓰기, Collector/API/웹 배포, KIS 호출 없음.**
+- **PR/인계:** 작업 후보 브랜치 `feat/turso-fullmarket-indicators-and-search-20261120`. 병합 후 안전 CI 확인 → 기존 API 수동 배포 `verify_only` 후 `deploy_api`(별도 승인) → 기존 웹 정적 배포(별도 승인) → 미등록 과거 평일 하루를 검색해 진행·완료/실패·Turso 패턴 저장 확인. 자동 기술지표 적재 변수는 비용/적재량 확인 후 따로 승인할 때까지 OFF 유지. 장기 과거 일봉 백필/지표 UI 조회는 별도 후속 작업.
+
 ## 2026-11-19 (KST) — KIS 잠정 일봉 22:00까지 KRX 확정 EOD 미수신 보충
 
 - **문제 증빙:** [잠정 일봉 파일럿 #44517489569](https://github.com/ehdud6728-bit/BLUE-Signal-Lab/actions/runs/44517489569)은 20:44 KST에 `start_15m` Secret 설정까지 성공했지만, 기존 `turso-provisional.mjs`의 **09:00~15:20 시간 제한**으로 수집 경로에 도달하지 못함. 사용자 요구는 'KRX 확정 일봉이 없다면 21~22시까지 KIS에서 일봉을 보충 조회'. 해당 파일럿의 설정 성공은 시세 저장 성공이 아님.
