@@ -1,0 +1,77 @@
+name: BLUE Turso Provisional Day Pilot (MANUAL, NO D1)
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: 'Default dry_run; 15/30-minute KIS provisional observations or stop'
+        type: choice
+        required: true
+        default: dry_run
+        options: [dry_run, start_15m, start_30m, stop]
+      confirm_worker:
+        description: 'For start/stop type exactly blue-market-collector'
+        type: string
+        required: false
+        default: ''
+
+permissions:
+  contents: read
+
+concurrency:
+  group: blue-turso-provisional-pilot
+  cancel-in-progress: false
+
+jobs:
+  pilot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Confirm safe scope
+        env:
+          MODE: ${{ inputs.mode }}
+        run: |
+          test "$GITHUB_REPOSITORY" = 'ehdud6728-bit/BLUE-Signal-Lab'
+          echo "BLUE_TURSO_PROVISIONAL_PILOT mode=$MODE"
+          echo 'No D1 SQL, no KIS tokenP, no orders, no confirmed EOD writes.'
+      - uses: actions/checkout@v4
+        if: inputs.mode != 'dry_run'
+      - uses: actions/setup-node@v4
+        if: inputs.mode != 'dry_run'
+        with:
+          node-version: '22'
+      - name: Install Wrangler
+        if: inputs.mode != 'dry_run'
+        working-directory: collector
+        run: npm install --no-audit --no-fund --no-package-lock
+      - name: Set time-boxed provisional collector secret
+        if: inputs.mode != 'dry_run'
+        working-directory: collector
+        env:
+          MODE: ${{ inputs.mode }}
+          CONFIRM: ${{ inputs.confirm_worker }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_WORKER_DEPLOY_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$CONFIRM" == 'blue-market-collector' ]] || { echo 'INVALID_CONFIRMATION'; exit 1; }
+          [[ -n "${CLOUDFLARE_API_TOKEN:-}" && -n "${CLOUDFLARE_ACCOUNT_ID:-}" ]] || { echo 'MISSING_DEPLOY_SECRETS'; exit 1; }
+          if grep -Eq '"TURSO_PROVISIONAL_QUOTES_ENABLED"[[:space:]]*:[[:space:]]*"true"' wrangler.jsonc; then
+            echo 'REFUSE_PILOT_WHEN_FULL_MODE_CONFIGURED'; exit 1
+          fi
+          grep -q 'TURSO_PROVISIONAL_PILOT_UNTIL_UTC' src/turso-provisional.mjs
+          case "$MODE" in
+            start_15m) DURATION=15 ;;
+            start_30m) DURATION=30 ;;
+            stop) DURATION=0 ;;
+            *) echo 'INVALID_PILOT_MODE'; exit 1 ;;
+          esac
+          if (( DURATION == 0 )); then
+            EXPIRY='2000-01-01T00:00:00.000Z'
+          else
+            EXPIRY="$(MINUTES="$DURATION" node -e 'process.stdout.write(new Date(Date.now()+Number(process.env.MINUTES)*60000).toISOString())')"
+          fi
+          printf '%s' "$EXPIRY" | npx wrangler secret put TURSO_PROVISIONAL_PILOT_UNTIL_UTC --name blue-market-collector
+          echo "BLUE_TURSO_PROVISIONAL_PILOT_SET mode=$MODE expires_utc=$EXPIRY"
+          echo 'The Worker must already have the reviewed code deployed; token issuance is not performed.'

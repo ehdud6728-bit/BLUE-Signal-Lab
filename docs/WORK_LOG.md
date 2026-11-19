@@ -2,6 +2,13 @@
 
 새 채팅에서 프로젝트를 이어가기 위한 **결정/구현/검증 이력**입니다. 대화 전체를 저장하지 않고 실제 개발에 필요한 내용만 보존합니다. 최신 항목을 위에 추가하고, 결과가 달라지면 추측 대신 검증된 상태로 수정합니다.
 
+## 2026-11-19 (KST) — KIS 잠정 일봉 코드 준비 / 정밀분석 분봉 보류
+
+- **사용자 결정:** 확정 KRX 일봉이 준비되기 전에도 KIS의 미완성 당일 OHLCV를 받아서 사용한다. 반면 5/10/30분봉은 **정밀분석에서 종목을 지정한 시점에 수집**하는 미래 기능으로 미루며 이번 변경에서 구현/수집하지 않는다.
+- **개발:** `collector/src/turso-provisional.mjs`에 Turso의 마지막 감사 완료 전일 KRX EOD 목록 기반 장중(09:00~15:20 KST) **최대 10종목/분** 순환 조회와 유효한 **기존** Turso 암호화 KIS 토큰 조회 추가. 기존 Turso 시세 최신·이력과 독립된 `blue_kis_provisional_daily_v1`에 잠정 관측 저장, `is_confirmed_daily=false`·KIS 원천/거래일 추정 여부 기록. KRX EOD/감사/연구 신호는 그대로 유지. 기존 Turso 연구 신호 수집과 동시 실행하지 않도록 Collector 분기. 안전한 기본 비활성·15/30분 자동 만료 파일럿/긴급 정지 및 무시크릿 CI 회귀 추가. 실제 운영 변수/Secrets/DB/KIS는 변경하지 않음.
+- **검증:** Collector Node **69/69** 통과, Wrangler `deploy --dry-run`에서 `TURSO_MIRROR_ENABLED=false` 확인, 파일럿 Workflow YAML 구문 및 `git diff --check` 통과. GitHub Actions/PR CI는 게시 후 별도 확인. **운영 배포 및 원격 수집 미실행**.
+- **다음:** PR 병합·CI → 기존 Collector 배포 위험(`TURSO_MIRROR_ENABLED=false`) 확인 → 별도 배포 승인 → 주식 정규장에서 시간제한 파일럿 승인/상태 감사 → 잠정 일봉 실제 표출/시장 커버리지 검증. 이후 잠정 기반 기술 패턴 검색과 정밀분석 온디맨드 5/10/30분봉을 분리 개발한다.
+
 ## 2026-11-19 (KST) — 감사 #44500952883 성공 / Turso 연구 신호 일별 누적 워크플로 PR 준비
 
 - **실제 운영 증거:** [Turso Primary Readiness #44500952883](https://github.com/ehdud6728-bit/BLUE-Signal-Lab/actions/runs/44500952883) `turso_recent` 실행 성공. `RECENT_TURSO_COUNTS_MATCH`, 최근 EOD 감사 8거래일 모두 원장 수와 실제 행 수 일치(11/18 2660/2660, 11/17 2661/2661 등), 연구 신호는 11/18 **189/189건 한 날짜**, 최근 KIS 시세는 11/19 **2종목**. Turso SELECT 3회, D1 SQL 0회. **D1 전체와의 동일성·과거 이관/실시간 전체 시세 증명이 아님.**
