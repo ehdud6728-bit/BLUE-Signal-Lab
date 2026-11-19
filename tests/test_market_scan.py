@@ -26,6 +26,27 @@ class MarketScanTest(unittest.TestCase):
    self.assertIn(k,res)
   self.assertIn('BB30_LOWER_RECLAIM_SIGNAL',res)
   self.assertFalse(bool((res['BB30_LOWER_RECLAIM_SIGNAL'] & res['BB30_LOWER_SIGNAL']).any()))
+ def test_full_market_indicator_sink_keeps_nonmatching_symbols(self):
+  data=self.fixture()
+  another=data.copy()
+  another['Code']='000660'
+  another['Close']=200.
+  another['Open']=199.
+  another['High']=204.
+  another['Low']=195.
+  sink=[]
+  combined=pd.concat([data,another],ignore_index=True)
+  matches,audit=scan(combined,
+                     str(data.Date.iloc[-1].date()),indicator_sink=sink)
+  baseline,baseline_audit=scan(combined,str(data.Date.iloc[-1].date()))
+  self.assertEqual(matches,baseline)
+  self.assertEqual(audit,baseline_audit)
+  self.assertEqual(audit['observed_stocks'],2)
+  self.assertEqual(len(sink),2)
+  self.assertEqual({x['code'] for x in sink},{'005930','000660'})
+  self.assertTrue(any(x['signal_names']==[] for x in sink))
+  self.assertTrue(all('rsi' in x['indicators'] and 'BB20_UPPER' in x['indicators']
+                      for x in sink))
  def test_rising_lower_line_reclaim_distinct_from_falling_signal(self):
   # Recreates HMM's 2026-11-12 lower-line geometry, with no future bars.
   d=pd.DataFrame({'open':[20000,20050],'close':[20100,20700]})

@@ -14,7 +14,8 @@ from zoneinfo import ZoneInfo
 CONFIRM = 'blue-turso-eod-research'
 
 
-def select_pipeline_day(raw_day, mode, event, confirmation, auto_research='', *, today=None):
+def select_pipeline_day(raw_day, mode, event, confirmation, auto_research='',
+                        include_indicators='false', auto_indicators='', *, today=None):
     if event not in ('schedule', 'workflow_dispatch') or mode not in ('dry_run', 'apply'):
         raise ValueError('INVALID_UNIFIED_EVENT_OR_MODE')
     if event == 'schedule' and (mode != 'apply' or raw_day or confirmation):
@@ -33,10 +34,14 @@ def select_pipeline_day(raw_day, mode, event, confirmation, auto_research='', *,
         target = current
     if target > current or target.weekday() >= 5:
         raise ValueError('NOT_A_PAST_OR_PRESENT_KST_WEEKDAY')
+    research = event == 'workflow_dispatch' or auto_research == 'true'
+    indicators = research and (include_indicators == 'true' if event == 'workflow_dispatch'
+                               else auto_indicators == 'true')
     return {
         'TRADE_DAY': target.isoformat(),
         'RESEARCH_YEARS': f'{target.year - 1},{target.year}',
-        'RUN_RESEARCH': 'true' if event == 'workflow_dispatch' or auto_research == 'true' else 'false',
+        'RUN_RESEARCH': 'true' if research else 'false',
+        'RUN_INDICATORS': 'true' if indicators else 'false',
     }
 
 
@@ -49,11 +54,14 @@ def main():
         os.environ.get('INPUT_DAY', '').strip(), mode,
         os.environ.get('GITHUB_EVENT_NAME', '').strip(),
         os.environ.get('INPUT_CONFIRM', ''),
-        os.environ.get('AUTO_RESEARCH_ENABLED', '').strip())
+        os.environ.get('AUTO_RESEARCH_ENABLED', '').strip(),
+        os.environ.get('INPUT_INDICATORS', '').strip(),
+        os.environ.get('AUTO_INDICATORS_ENABLED', '').strip())
     with Path(os.environ['GITHUB_ENV']).open('a', encoding='utf-8') as out:
         for key, value in day.items():
             out.write(f'{key}={value}\n')
-    print(f"BLUE_TURSO_UNIFIED_REQUEST day={day['TRADE_DAY']} mode={mode} research={day['RUN_RESEARCH']}")
+    print(f"BLUE_TURSO_UNIFIED_REQUEST day={day['TRADE_DAY']} mode={mode} "
+          f"research={day['RUN_RESEARCH']} indicators={day['RUN_INDICATORS']}")
     print('No D1 reads/writes, no KIS token issuance, no intraday EOD substitution.')
 
 

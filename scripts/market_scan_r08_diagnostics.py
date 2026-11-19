@@ -109,8 +109,8 @@ def ma_event_diagnostics(rich: pd.DataFrame) -> dict:
             'ma112_cross':bool(cross(112)),'ma224_cross':bool(cross(224))}
 
 
-def scan_r08(raw: pd.DataFrame, asof: str) -> tuple[list[dict],dict]:
-    rows,audit=scan_r06(raw,asof)  # Critical: existing matching logic unchanged.
+def scan_r08(raw: pd.DataFrame, asof: str, indicator_sink=None) -> tuple[list[dict],dict]:
+    rows,audit=scan_r06(raw,asof,indicator_sink=indicator_sink)  # Matching logic unchanged.
     clean=normalise(raw)
     target=pd.Timestamp(audit['asof'])
     clean=clean.loc[clean.date.le(target)].copy() # No future-data lookahead.

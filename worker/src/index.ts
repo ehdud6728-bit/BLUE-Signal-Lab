@@ -11,6 +11,7 @@ import {lookupSymbolLive,requestSymbolLive,validLiveCode} from './symbol-live';
 import {runEodCloudflareCron} from './eod-cron';
 import {InvalidEodQuery,tursoEodDates,tursoEodSearch,tursoEodCompare} from './turso-eod';
 import {InvalidResearchQuery,tursoResearchDates,tursoResearchSearch,tursoResearchChart} from './turso-research';
+import {InvalidTursoResearchRequest,requestTursoResearch,tursoResearchRequestStatus} from './turso-research-request';
 interface Env {
   DB: D1Database;
   TURSO_DATABASE_URL?:string;
@@ -135,6 +136,32 @@ export default {
           return respond(chart,chart.status==='READY'?200:404);
         }catch(e){if(e instanceof InvalidResearchQuery)return respond({error:e.message},400);
           return respond({error:'TURSO_RESEARCH_CHART_UNAVAILABLE'},503);}
+      }
+      // A user's explicit search of an unimported date may start the same
+      // audited KRX EOD + research workflow. Queue state lives in Turso only;
+      // the legacy D1 scan queue is deliberately not touched.
+      if(p==='/api/research/request'&&request.method==='POST'){
+        if(request.headers.get('Origin')!==origin)return respond({error:'ORIGIN_DENIED'},403);
+        if(!access)return respond({error:'ACCESS_REQUIRED'},401);
+        let body:{date?:unknown};
+        try{body=await request.json() as typeof body;}catch{return respond({error:'INVALID_JSON'},400);}
+        const day=typeof body?.date==='string'?body.date:'';
+        try{
+          const result=await requestTursoResearch(env,day);
+          return respond(result,result.status==='PENDING'?202:200);
+        }catch(e){
+          if(e instanceof InvalidTursoResearchRequest)return respond({error:e.message},400);
+          const reason=e instanceof Error?e.message:'';
+          const safe=new Set(['GITHUB_DISPATCH_NOT_CONFIGURED','GITHUB_DISPATCH_FAILED',
+            'TURSO_RESEARCH_QUEUE_FULL']);
+          return respond({error:safe.has(reason)?reason:'TURSO_RESEARCH_REQUEST_UNAVAILABLE'},503);
+        }
+      }
+      if(p==='/api/research/request/status'&&request.method==='GET'){
+        if(!access)return respond({error:'ACCESS_REQUIRED'},401);
+        try{return respond(await tursoResearchRequestStatus(env,u.searchParams.get('date')||''));}
+        catch(e){if(e instanceof InvalidTursoResearchRequest)return respond({error:e.message},400);
+          return respond({error:'TURSO_RESEARCH_STATUS_UNAVAILABLE'},503);}
       }
       // Fully independent of D1. A successful, audited EOD read has no implied
       // technical signals; the PWA switches to the existing D1 UI on failure.

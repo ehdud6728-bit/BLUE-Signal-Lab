@@ -1,4 +1,5 @@
 name: BLUE Turso Daily EOD + Research (NO D1)
+run-name: BLUE Turso ${{ inputs.trade_day || 'auto' }} · ${{ inputs.mode || 'apply' }}
 
 on:
   # One daily run at 13:20 UTC = 22:20 KST, after same-day full KRX EOD is available.
@@ -25,6 +26,11 @@ on:
         type: string
         required: false
         default: ''
+      include_indicators:
+        description: 'Optional ALL 2,600+ symbols technical-indicator snapshot; OFF by default.'
+        type: boolean
+        required: true
+        default: false
 
 permissions:
   contents: read
@@ -43,6 +49,8 @@ jobs:
       MODE: ${{ github.event_name == 'schedule' && 'apply' || inputs.mode }}
       INPUT_CONFIRM: ${{ github.event_name == 'workflow_dispatch' && inputs.confirm_write || '' }}
       AUTO_RESEARCH_ENABLED: ${{ vars.BLUE_TURSO_RESEARCH_AUTO_ENABLED }}
+      INPUT_INDICATORS: ${{ github.event_name == 'workflow_dispatch' && inputs.include_indicators || false }}
+      AUTO_INDICATORS_ENABLED: ${{ vars.BLUE_TURSO_ALL_INDICATORS_AUTO_ENABLED }}
     steps:
       - uses: actions/checkout@v4
       - name: Verify repository, KST date and manual write confirmation
@@ -93,9 +101,14 @@ jobs:
           KRX_DATA_ID: ${{ secrets.KRX_DATA_ID || secrets.KRX_ID }}
           KRX_DATA_PW: ${{ secrets.KRX_DATA_PW || secrets.KRX_PW }}
         run: |
+          INDICATOR_ARGS=()
+          if [[ "$RUN_INDICATORS" == 'true' ]]; then
+            INDICATOR_ARGS+=(--turso-indicators-out output/turso_daily_research/indicators)
+          fi
           python scripts/market_scan_r11.py \
             --date "$TRADE_DAY" --years "$RESEARCH_YEARS" \
-            --daily-provider auto --out output/turso_daily_research/source
+            --daily-provider auto --out output/turso_daily_research/source \
+            "${INDICATOR_ARGS[@]}"
       - name: Reject stale research dates and incomplete KRX coverage
         if: ${{ env.RUN_RESEARCH == 'true' }}
         run: |
@@ -130,6 +143,22 @@ jobs:
         run: |
           node tools/turso/signal-snapshot-import.mjs \
             --mode=apply --input-dir=output/turso_daily_research/snapshot
+      - name: Test full-market Turso indicator safety without credentials
+        if: ${{ env.RUN_INDICATORS == 'true' }}
+        run: node --test tools/turso/indicator-snapshot-import.test.mjs
+      - name: Validate all symbol technical indicator hashes without DB access
+        if: ${{ env.RUN_INDICATORS == 'true' }}
+        run: |
+          node tools/turso/indicator-snapshot-import.mjs \
+            --mode=dry_run --input-dir=output/turso_daily_research/indicators
+      - name: Apply full-market indicators only with explicit independent opt-in
+        if: ${{ env.RUN_INDICATORS == 'true' && env.MODE == 'apply' }}
+        env:
+          TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
+          TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
+        run: |
+          node tools/turso/indicator-snapshot-import.mjs \
+            --mode=apply --input-dir=output/turso_daily_research/indicators
       - name: Retain EOD and research provenance (even on errors)
         if: always()
         uses: actions/upload-artifact@v4
@@ -139,5 +168,6 @@ jobs:
             output/turso_daily_eod/
             output/turso_daily_research/source/AUDIT.json
             output/turso_daily_research/snapshot/manifest.json
+            output/turso_daily_research/indicators/manifest.json
           if-no-files-found: ignore
           retention-days: 14

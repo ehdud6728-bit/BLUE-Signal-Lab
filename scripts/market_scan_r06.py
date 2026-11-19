@@ -30,8 +30,8 @@ def nearest_upper_supply(prices:pd.DataFrame, target:pd.Timestamp):
     return round((min(overhead)/close-1)*100,5)
 
 
-def scan_r06(raw,asof):
-    rows,audit=scan(raw,asof)
+def scan_r06(raw,asof,indicator_sink=None):
+    rows,audit=scan(raw,asof,indicator_sink=indicator_sink)
     clean=normalise(raw)
     target=pd.Timestamp(audit['asof'])
     # Name is descriptive metadata, not an input to signal calculation.

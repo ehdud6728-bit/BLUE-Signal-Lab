@@ -28,6 +28,7 @@ import requests
 from market_scan import load_marcap, normalise, enrich, export
 from market_scan_r08 import SourcePending, krx_day, COLS
 from market_scan_r08_diagnostics import scan_r08
+from export_turso_indicator_snapshot import export_indicator_snapshot
 from chart_research_r10 import (generate as generate_chart_research, chart_rows,
                                 backtest)
 from zone_reaction_r15111 import analyze_zone_reactions
@@ -201,7 +202,7 @@ def selected_provider(provider: str, key: str, has_account: bool) -> str:
 
 def upgraded_history(raw: pd.DataFrame, target: date, today: bool, provider: str,
                      key: str, stock_module=None, session=requests, max_days: int = 45,
-                     allow_verified_fallback: bool = False):
+                     allow_verified_fallback: bool = False, force_exact_day: bool = False):
     """Replace incomplete/required target with proved daily rows; preserve history.
 
     On today, force KRX proof even if marcap already has >=1700 rows. On older
@@ -212,7 +213,7 @@ def upgraded_history(raw: pd.DataFrame, target: date, today: bool, provider: str
         raise SourcePending("MARCAP_NO_VALID_RECORDS")
     latest = prices.date.max().date()
     current_rows = prices.loc[prices.date.dt.date.eq(target)]
-    if not today and target <= latest and len(current_rows) >= 1700:
+    if not today and not force_exact_day and target <= latest and len(current_rows) >= 1700:
         return raw, [], "FinanceData/marcap daily"
     if target > latest:
         gap = (target - latest).days
@@ -480,6 +481,8 @@ def main():
     p.add_argument("--out", default="output")
     p.add_argument("--local-data-dir")
     p.add_argument("--daily-provider", choices=["auto", "openapi", "pykrx"], default="auto")
+    p.add_argument("--turso-indicators-out", default="",
+                   help="Optional full-market indicator snapshot files; never writes databases")
     p.add_argument("--diagnose-code", default="", help="optional six-character ticker; research-only as-of signal audit")
     args = p.parse_args()
     raw, hashes = load_marcap([int(x) for x in args.years.split(",")], args.local_data_dir)
@@ -490,18 +493,20 @@ def main():
     has_account = bool((os.getenv("KRX_DATA_ID") or os.getenv("KRX_ID")) and
                        (os.getenv("KRX_DATA_PW") or os.getenv("KRX_PW")))
     prices = normalise(raw)
-    requires_fetch = today or target > prices.date.max().date() or len(prices.loc[prices.date.dt.date.eq(target)]) < 1700
+    requires_fetch = bool(args.turso_indicators_out) or today or target > prices.date.max().date() or len(prices.loc[prices.date.dt.date.eq(target)]) < 1700
     if requires_fetch:
         provider = selected_provider(args.daily_provider, key, has_account)
         upgraded, days, target_source = upgraded_history(
             raw, target, today, provider, key,
-            allow_verified_fallback=args.daily_provider == "auto")
+            allow_verified_fallback=args.daily_provider == "auto",
+            force_exact_day=bool(args.turso_indicators_out))
     else:
         upgraded, days, target_source = raw, [], "FinanceData/marcap daily"
     # Keep the independently date-verified raw candles intact. Adjust only
     # the analysis working copy, with a traceable company-IR event registry.
     analysis_raw, corporate_actions_audit = adjust_verified_actions(upgraded, target)
-    rows, audit = scan_r08(analysis_raw, target.isoformat())
+    all_indicators = [] if args.turso_indicators_out else None
+    rows, audit = scan_r08(analysis_raw, target.isoformat(), indicator_sink=all_indicators)
     for row in rows:
         row["source"] = target_source
         row["data_frequency"] = "EOD_DAILY"
@@ -523,6 +528,10 @@ def main():
         audit["supplemental_sha256"] = hashlib.sha256(
             supplement[COLS].to_csv(index=False).encode("utf-8")).hexdigest()
     export(rows, audit, args.out, hashes)
+    if all_indicators is not None:
+        # export() attaches the complete immutable year-source hashes to audit.
+        manifest = export_indicator_snapshot(all_indicators, audit, args.turso_indicators_out)
+        print('BLUE_TURSO_ALL_MARKET_INDICATORS_READY', manifest['day'], manifest['row_count'])
     # Keep the searchable stock-name catalog current on every successful
     # full-market EOD run, not only when one ticker is diagnosed. An incomplete
     # name catalog must never invalidate otherwise verified EOD candles.

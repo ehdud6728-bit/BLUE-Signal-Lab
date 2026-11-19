@@ -69,6 +69,7 @@ const eodRequestReadyKST=()=>new Intl.DateTimeFormat('en-GB',{
   timeZone:'Asia/Seoul',hour:'2-digit',minute:'2-digit',hourCycle:'h23'
 }).format(new Date()) >= '15:40';
 const SCAN_WATCH_KEY='blue_r1581_pending_scan_date_v1';
+const TURSO_WATCH_KEY='blue_turso_pending_research_date_v1';
 const rememberedScanDate=():string=>{
   try{
     const day=localStorage.getItem(SCAN_WATCH_KEY)||'';
@@ -77,6 +78,20 @@ const rememberedScanDate=():string=>{
     return Number.isFinite(d.getTime())&&d.toISOString().slice(0,10)===day?day:'';
   }catch{return '';}
 };
+const rememberedTursoDate=():string=>{
+  try{const day=localStorage.getItem(TURSO_WATCH_KEY)||'';
+    return /^20\d{2}-\d{2}-\d{2}$/.test(day)&&
+      new Date(day+'T00:00:00Z').toISOString().slice(0,10)===day?day:'';
+  }catch{return '';}
+};
+const researchRequestError=(message:string)=>({
+  VERIFIED_KRX_EOD_NOT_READY:'아직 해당 날짜의 확정 일봉이 완성되지 않았습니다. 15:40 이후 다시 요청해 주세요.',
+  INVALID_TURSO_RESEARCH_DAY:'거래가 이루어진 과거 평일 날짜를 선택해 주세요.',
+  TURSO_RESEARCH_QUEUE_FULL:'이미 분석 3건이 진행 중입니다. 완료 후 다시 요청해 주세요.',
+  GITHUB_DISPATCH_NOT_CONFIGURED:'GitHub Actions 실행 연결이 설정되지 않았습니다.',
+  GITHUB_DISPATCH_FAILED:'GitHub Actions 실행 요청에 실패했습니다.',
+  ACCESS_REQUIRED:'로그인이 필요합니다. Cloudflare Access를 확인해 주세요.',
+}[message]||'분석 시작에 실패했습니다. 서버 연결 상태를 확인해 주세요.');
 const showSignal=(t:string)=>({
   BB20_LOWER:'B20 하단 돌파',
   BB30_LOWER:'B30 하단 돌파(하락선)',
@@ -175,6 +190,10 @@ function App(){
   const [completedDate,setCompletedDate]=useState('');
   const [scanInfo,setScanInfo]=useState('');
   const [actionsUrl,setActionsUrl]=useState('');
+  const [tursoWatchDate,setTursoWatchDate]=useState(rememberedTursoDate);
+  const [tursoCompletedDate,setTursoCompletedDate]=useState('');
+  const [tursoScanInfo,setTursoScanInfo]=useState('');
+  const [tursoActionsUrl,setTursoActionsUrl]=useState('');
   const [filterOpen,setFilterOpen]=useState(true);
   const [installPrompt,setInstallPrompt]=useState<InstallPrompt|null>(null);
   const [installGuide,setInstallGuide]=useState(false);
@@ -332,6 +351,36 @@ function App(){
     try{if(watchDate)localStorage.setItem(SCAN_WATCH_KEY,watchDate);
       else localStorage.removeItem(SCAN_WATCH_KEY);}catch{/* storage denied; this tab still polls */}
   },[watchDate]);
+  useEffect(()=>{
+    try{if(tursoWatchDate)localStorage.setItem(TURSO_WATCH_KEY,tursoWatchDate);
+      else localStorage.removeItem(TURSO_WATCH_KEY);}catch{/* storage denied; this tab still polls */}
+  },[tursoWatchDate]);
+
+  async function requestTursoScan(day:string){
+    setRequestBusy(true);
+    setTursoScanInfo(`${day}의 Turso 패턴 분석 시작을 요청하고 있습니다.`);
+    try{
+      const response=await fetch(API+'/api/research/request',{
+        method:'POST',headers:{'Content-Type':'text/plain;charset=UTF-8'},
+        credentials:'include',body:JSON.stringify({date:day}),
+      });
+      const result=await response.json() as {status?:string;error?:string;deduplicated?:boolean};
+      if(!response.ok)throw Error(result.error||'TURSO_RESEARCH_REQUEST_UNAVAILABLE');
+      if(result.status==='READY'){
+        setTursoWatchDate('');setTursoCompletedDate(day);
+        setTursoScanInfo(`${day} 패턴 분석이 이미 준비되어 있습니다.`);
+        if(mode==='single'&&date===day)void search(1,false,gcFields,gcLogic,day);
+      }else{
+        setTursoCompletedDate('');setTursoWatchDate(day);
+        setTursoActionsUrl('');
+        setTursoScanInfo(result.deduplicated?
+          `${day} 분석이 이미 진행 중입니다. 완료 상태를 이어서 확인합니다.`:
+          `${day} KRX 일봉 검증과 전체시장 패턴 분석을 시작했습니다. 완료되면 자동으로 검색합니다.`);
+      }
+    }catch(e){
+      setTursoScanInfo(researchRequestError(e instanceof Error?e.message:''));
+    }finally{setRequestBusy(false);}
+  }
 
   // Only single-day missing results trigger the existing server-managed scan workflow.
   async function requestScan(day:string){
@@ -412,11 +461,15 @@ function App(){
       setPage(p);setSelected(null);setDataStatus(d.data_status||'');
       setAppliedNameQuery(queryName);setAppliedSort(querySort);
       setAppliedAmountEok(queryAmountEok);
-      if(scroll){setFilterOpen(false);requestAnimationFrame(()=>resultRef.current?.scrollIntoView({behavior:'smooth',block:'start'}));}
+      if(scroll&&d.data_status!=='NOT_IMPORTED'){
+        setFilterOpen(false);
+        requestAnimationFrame(()=>resultRef.current?.scrollIntoView({behavior:'smooth',block:'start'}));
+      }
       if(d.data_status==='NOT_IMPORTED'){
         if(queryMode==='single'){
           if(patternBackend==='turso'){
-            setStatus(`${queryDate}의 Turso 패턴 연구 스냅샷이 아직 등록되지 않았습니다. 검증된 원본을 저장해야 조회할 수 있습니다.`);
+            setStatus(`${queryDate}의 Turso 패턴 분석이 아직 없습니다. 해당 날짜의 일봉 검증·분석을 요청합니다.`);
+            await requestTursoScan(queryDate);
           }else if(queryDate>todayKST()){
             setStatus('미래 날짜의 주가 데이터는 아직 존재하지 않습니다.');
           }else if(queryDate===todayKST()&&!eodRequestReadyKST()){
@@ -470,6 +523,48 @@ function App(){
       document.removeEventListener('visibilitychange',onVisible);
       window.removeEventListener('focus',onFocus);};
   },[watchDate,mode,date,gcFields,gcLogic,patternSearchActive]);
+
+  // The Turso queue and poll never access /api/scan or the old D1 request table.
+  // Polling survives a mobile PWA reload and reports GitHub failure distinctly.
+  useEffect(()=>{
+    if(!tursoWatchDate||storageMode!=='turso'||searchSource!=='patterns'||patternBackend!=='turso')return;
+    let cancelled=false,inFlight=false;
+    const poll=async()=>{
+      if(inFlight)return;
+      inFlight=true;
+      try{
+        const response=await fetch(API+'/api/research/request/status?date='+encodeURIComponent(tursoWatchDate),
+          {credentials:'include',cache:'no-store'});
+        const result=await response.json() as {status?:string;error?:string;reason?:string;actions_url?:string};
+        if(!response.ok)throw Error(result.error||`분석 상태 오류 ${response.status}`);
+        if(cancelled)return;
+        if(result.actions_url)setTursoActionsUrl(result.actions_url);
+        if(result.status==='READY'){
+          setTursoWatchDate('');setTursoCompletedDate(tursoWatchDate);
+          setTursoScanInfo(`${tursoWatchDate} 패턴 분석 완료 · 저장된 결과를 불러옵니다.`);
+          if(!latest||tursoWatchDate>latest)setLatest(tursoWatchDate);
+          if(mode==='single'&&date===tursoWatchDate)void search(1,false,gcFields,gcLogic,tursoWatchDate);
+        }else if(result.status==='FAILED'){
+          setTursoWatchDate('');
+          setTursoScanInfo(`${tursoWatchDate} 분석 실패: ${result.reason||'실행 기록을 확인해 주세요.'}`);
+        }else if(result.status==='PENDING'){
+          setTursoScanInfo(`${tursoWatchDate} 전체시장 분석 진행 중 · 다른 화면에서도 계속됩니다.`);
+        }else if(result.status==='NOT_IMPORTED'){
+          setTursoWatchDate('');
+          setTursoScanInfo(`${tursoWatchDate} 분석 요청이 없습니다. 검색 버튼으로 다시 요청할 수 있습니다.`);
+        }
+      }catch(e){if(!cancelled)setTursoScanInfo('Turso 분석 상태 확인 실패 · '+String(e));}
+      finally{inFlight=false;}
+    };
+    const visible=()=>{if(document.visibilityState==='visible')void poll();};
+    void poll();
+    const timer=window.setInterval(visible,15000);
+    document.addEventListener('visibilitychange',visible);
+    window.addEventListener('focus',visible);
+    return()=>{cancelled=true;window.clearInterval(timer);
+      document.removeEventListener('visibilitychange',visible);
+      window.removeEventListener('focus',visible);};
+  },[tursoWatchDate,storageMode,searchSource,patternBackend,mode,date,gcFields,gcLogic,latest]);
 
   const extra=(r:Signal,k:string):unknown=>r.extras?.[k];
   const num=(r:Signal,k:string):number|null=>{const v=extra(r,k);if(v==null||v==='')return null;const n=Number(v);return Number.isFinite(n)?n:null;};
@@ -678,6 +773,21 @@ function App(){
         void search(1,false,gcFields,gcLogic,day);
       }}>완료 결과 보기</button>}
     </div>}
+    {storageMode==='turso'&&searchSource==='patterns'&&
+      (tursoWatchDate||tursoCompletedDate||tursoScanInfo)&&
+      <div className="r1581-scan-monitor" role="status" aria-live="polite">
+        <RefreshCw size={16} className={tursoWatchDate?'r1581-pending':''}/>
+        <div className="r1581-scan-text">
+          <strong>{tursoWatchDate?`${tursoWatchDate} Turso 패턴 분석 중`:
+            tursoCompletedDate?`${tursoCompletedDate} Turso 분석 완료`:'Turso 분석 안내'}</strong>
+          <span>{tursoScanInfo||'분석 진행 상태를 확인합니다.'}</span>
+          {tursoActionsUrl&&<a href={tursoActionsUrl} rel="noopener noreferrer" target="_blank">GitHub 실행 기록</a>}
+        </div>
+        {tursoCompletedDate&&<button type="button" onClick={()=>{
+          const day=tursoCompletedDate;setActiveView('research');setTursoCompletedDate('');
+          void search(1,false,gcFields,gcLogic,day);
+        }}>완료 결과 보기</button>}
+      </div>}
     {/* R153_BOTTOM_NAV_ONLY: navigation is in the bottom dock on every viewport. */}
     {installGuide&&<div className="install-guide" role="status"><button className="guide-close" onClick={()=>setInstallGuide(false)} aria-label="안내 닫기"><X size={17}/></button>
       <strong>휴대폰에 설치하는 방법</strong><p>안드로이드 Chrome: 오른쪽 위 ⋮ → <b>앱 설치</b> 또는 <b>홈 화면에 추가</b></p>
@@ -729,7 +839,11 @@ function App(){
               value={customAmount} onChange={e=>setCustomAmount(e.target.value)}/>}
             <small>거래대금은 검색일 확정 일봉의 실제 원화 금액입니다. 금액이 저장되지 않은 과거 기록은 기준 검색에서 제외됩니다.</small>
           </div>
-          <button className="primary search-submit" disabled={busy||requestBusy||(storageMode==='turso'&&patternStatus!=='ready')} onClick={()=>{void search(1);}}><Search size={18}/>{busy?'검색 중…':'종목 검색하기'}</button>
+          <button className="primary search-submit" disabled={busy||requestBusy||(storageMode==='turso'&&patternStatus!=='ready')} onClick={()=>{void search(1);}}><Search size={18}/>{busy?'검색 중…':'종목 검색·미분석일 분석 시작'}</button>
+          {storageMode==='turso'&&patternStatus!=='ready'&&
+            <p className="small" role="status">{patternStatus==='checking'?
+              'Turso 패턴 분석 연결을 확인하고 있습니다. 잠시 후 검색할 수 있습니다.':
+              '패턴 분석 연결이 필요합니다. 위의 ‘분석 데이터 안내’에서 다시 확인해 주세요.'}</p>}
           <p className="small">저장된 결과를 조회합니다. 거래대금 기준은 당일 확정 일봉이며, 저장되지 않은 이전 금액은 추정하지 않습니다. 장중 현재가 아님.</p>
         </div>
         <div className="search-compact r15108-quickbar" role="group" aria-label="빠른 검색 날짜와 거래대금 변경">

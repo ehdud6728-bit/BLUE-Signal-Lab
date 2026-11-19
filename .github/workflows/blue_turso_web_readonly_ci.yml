@@ -10,9 +10,12 @@ on:
       - 'web/src/price-compare.ts'
       - 'worker/src/turso-eod.ts'
       - 'worker/src/turso-research.ts'
+      - 'worker/src/turso-research-request.ts'
       - 'tests/test_turso_research_api.mjs'
       - 'tests/test_turso_basket_prices.mjs'
       - 'tests/test_turso_research_reader.mjs'
+      - 'tests/test_turso_research_request.mjs'
+      - 'tests/test_turso_research_request_route.mjs'
       - 'tests/test_turso_basket_browser.mjs'
       - 'web/src/main.tsx'
       - '.github/workflows/blue_turso_web_readonly_ci.yml'
@@ -34,7 +37,7 @@ jobs:
         working-directory: worker
         run: npm install --no-package-lock --no-audit --no-fund
       - name: Verify Turso-first browser API read contracts (no credentials)
-        run: node --test tests/test_turso_research_reader.mjs tests/test_turso_research_api.mjs tests/test_turso_basket_browser.mjs tests/test_turso_basket_prices.mjs
+        run: node --test tests/test_turso_research_reader.mjs tests/test_turso_research_api.mjs tests/test_turso_research_request.mjs tests/test_turso_research_request_route.mjs tests/test_turso_basket_browser.mjs tests/test_turso_basket_prices.mjs
       - name: Install browser build dependencies
         working-directory: web
         run: npm install --no-package-lock --no-audit --no-fund

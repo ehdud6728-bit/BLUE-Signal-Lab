@@ -1,6 +1,13 @@
 # BLUE Signal Lab — 현재 프로젝트 상황
 
-> 업데이트: 2026-11-19 (한국 시간). 이 파일은 개발 인계용 요약이며, 서버의 실시간 상태를 자동으로 반영하지 않습니다.
+> 업데이트: 2026-11-20 (한국 시간). 이 파일은 개발 인계용 요약이며, 서버의 실시간 상태를 자동으로 반영하지 않습니다.
+
+## 2026-11-20 (KST) — 전체 종목 지표 보존과 미분석 날짜의 Turso 검색 실행 (코드 준비)
+
+- **저장 구분:** 감사된 KRX `blue_eod_daily_v1`는 전 거래 종목의 OHLCV와 금액을 기록합니다. 기존 `blue_research_signals_v1`는 패턴에 일치한 종목만 보존합니다. 추가 `blue_indicators_daily_v1`는 전체 종목의 일별 이평·BB/ENV·RSI·MACD·Stochastic·거래대금 비율과 미계산 상태를 보존하도록 코드 준비. 현재 기본 OFF, `BLUE_TURSO_RESEARCH_AUTO_ENABLED=true`와 별개 `BLUE_TURSO_ALL_INDICATORS_AUTO_ENABLED=true`를 모두 켜거나 수동 `include_indicators=true`를 선택해야 쓰기를 시도합니다. 원천 일봉의 전체 종목·종가와 정확히 일치하지 않으면 지표를 저장하지 않습니다. **과거 1~2년 일봉 전체 백필과 지표 조회 API/UI는 아직 미구현**입니다.
+- **사용자 검색 문제:** Turso 패턴 연구 날짜가 등록되지 않은 날짜를 골라도 기존 PWA는 `NOT_IMPORTED` 문구만 표시하고 분석을 시작하지 않아 무반응처럼 보였습니다. 새 `/api/research/request`는 로그인·동일 Origin 검증을 통과한 지정 날짜 검색 클릭만 기존 `blue_turso_daily_verified_eod_auto.yml`의 수동 `apply`로 전달하고, KRX 원본 검증 → Turso EOD 감사 → R1.1 연구 저장을 한 날짜에 수행합니다. API는 D1 큐를 건드리지 않고 Turso 날짜별 pending 상태를 기록하며, 최대 3개의 미완료 요청·동일 날짜 중복 방지·150분 제한을 둡니다.
+- **앱 반응:** 미분석일 검색 시작 시 상단에 요청·진행·실패·완료를 표시하고 15초 상태 조회 및 새로고침 후 재개. 완료 판정은 연구 감사 원장과 실제 행수 검증, 원인 확인은 날짜별 GitHub Actions 결과. 기간 검색은 자동 대량 수집하지 않습니다. 실제 GitHub 실행과 Turso 쓰기는 **병합 후 API·웹 운영 배포 및 사용자 검색 클릭이 있어야** 일어납니다. API Worker의 기존 GitHub 토큰과 Turso 쓰기 권한 확인 필요.
+- **운영 영향:** PR 병합과 API/웹 배포, Github Actions 데이터 `apply`, 예약 변수 활성화는 별개. KIS tokenP, D1 시세/신호 기록, Cloudflare Collector, FULL 플래그와 기존 원본 레코드는 변경하지 않습니다.
 
 ## 2026-11-19 (KST) — KIS 잠정 일봉 우선, 분봉은 정밀분석 시점에 요청
 

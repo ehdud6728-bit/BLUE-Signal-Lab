@@ -16,7 +16,8 @@ class TursoUnifiedPipelineTests(unittest.TestCase):
         result = select_pipeline_day('2026-11-19', 'dry_run', 'workflow_dispatch', '',
                                      today=date(2026, 11, 19))
         self.assertEqual(result, {'TRADE_DAY': '2026-11-19',
-                                  'RESEARCH_YEARS': '2025,2026', 'RUN_RESEARCH': 'true'})
+                                  'RESEARCH_YEARS': '2025,2026', 'RUN_RESEARCH': 'true',
+                                  'RUN_INDICATORS': 'false'})
 
     def test_manual_apply_requires_exact_confirmation(self):
         for text in ('', 'yes', 'blue-turso-research-only', f'{CONFIRM} '):
@@ -33,6 +34,7 @@ class TursoUnifiedPipelineTests(unittest.TestCase):
                                       today=date(2026, 11, 19))
         self.assertEqual(disabled['RUN_RESEARCH'], 'false')
         self.assertEqual(enabled['RUN_RESEARCH'], 'true')
+        self.assertEqual(enabled['RUN_INDICATORS'], 'false')
         self.assertEqual(enabled['TRADE_DAY'], '2026-11-19')
         for args in [('2026-11-18', 'apply', 'schedule', ''),
                      ('', 'dry_run', 'schedule', ''),
@@ -48,6 +50,17 @@ class TursoUnifiedPipelineTests(unittest.TestCase):
         self.assertEqual(select_pipeline_day('2027-01-04', 'dry_run', 'workflow_dispatch',
                          '', today=date(2027, 1, 5))['RESEARCH_YEARS'], '2026,2027')
 
+    def test_all_market_indicators_are_separately_opt_in(self):
+        manual = select_pipeline_day('2026-11-19', 'apply', 'workflow_dispatch',
+                                     CONFIRM, include_indicators='true', today=date(2026, 11, 19))
+        self.assertEqual(manual['RUN_INDICATORS'], 'true')
+        off = select_pipeline_day('', 'apply', 'schedule', '', auto_indicators='true',
+                                  today=date(2026, 11, 19))
+        self.assertEqual(off['RUN_INDICATORS'], 'false')
+        on = select_pipeline_day('', 'apply', 'schedule', '', auto_research='true',
+                                 auto_indicators='true', today=date(2026, 11, 19))
+        self.assertEqual(on['RUN_INDICATORS'], 'true')
+
     def test_one_schedule_has_ordered_eod_and_research_and_no_d1_or_kis(self):
         eod = EOD.read_text(encoding='utf-8')
         research = RESEARCH.read_text(encoding='utf-8')
@@ -57,6 +70,10 @@ class TursoUnifiedPipelineTests(unittest.TestCase):
         self.assertIn('group: blue-turso-eod-research-writer', research)
         self.assertIn('python3 scripts/turso_unified_day_guard.py', eod)
         self.assertIn('vars.BLUE_TURSO_RESEARCH_AUTO_ENABLED', eod)
+        self.assertIn('vars.BLUE_TURSO_ALL_INDICATORS_AUTO_ENABLED', eod)
+        self.assertIn('default: false', eod)
+        self.assertIn("if: ${{ env.RUN_INDICATORS == 'true' && env.MODE == 'apply' }}", eod)
+        self.assertIn('--turso-indicators-out', eod)
         self.assertIn('if: ${{ env.RUN_RESEARCH == \'true\' && env.MODE == \'apply\' }}', eod)
         self.assertIn('if: ${{ env.MODE == \'apply\' }}', eod)
         self.assertIn('--start "$TRADE_DAY" --end "$TRADE_DAY"', eod)
