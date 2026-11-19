@@ -105,7 +105,16 @@ test('chart refuses incomplete days and missing symbols rather than using later 
   const missing=setup();
   const out=await tursoResearchChart(env,new URLSearchParams({date:day,code:'999999'}),missing.factory);
   assert.equal(out.status,'NOT_AVAILABLE');
+  assert.equal(out.reason,'NO_SIGNAL_FOR_SYMBOL');
   assert.equal(missing.closed,1);
+});
+
+test('only an entirely unimported Turso research day allows D1 chart fallback',async()=>{
+ const db=setup();
+ const out=await tursoResearchChart(env,new URLSearchParams({date:'2026-11-17',code:'005930'}),db.factory);
+ assert.equal(out.status,'NOT_AVAILABLE');
+ assert.equal(out.reason,'DAY_NOT_IMPORTED');
+ assert.equal(db.closed,1);
 });
 
 test('invalid queries, malformed source date, and injection never touch database',async()=>{

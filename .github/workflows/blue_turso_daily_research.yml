@@ -1,11 +1,8 @@
 name: BLUE Turso Daily Research Snapshot (NO D1, OPT-IN)
 
 on:
-  # 11:15 UTC = 20:15 KST, well after the 18:35 Turso EOD ingestion.
-  # Scheduled writes are disabled until the operator sets the repository
-  # variable BLUE_TURSO_RESEARCH_AUTO_ENABLED to the exact string 'true'.
-  schedule:
-    - cron: '15 11 * * 1-5'
+  # Standalone manual recovery/backfill only. The EOD workflow owns the ONE
+  # daily cron; the research opt-in variable is checked there after EOD audit.
   workflow_dispatch:
     inputs:
       trade_day:
@@ -29,18 +26,17 @@ permissions:
   contents: read
 
 concurrency:
-  group: blue-turso-research-writer
+  group: blue-turso-eod-research-writer
   cancel-in-progress: false
 
 jobs:
   research:
-    if: ${{ github.event_name == 'workflow_dispatch' || vars.BLUE_TURSO_RESEARCH_AUTO_ENABLED == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 60
     env:
       INPUT_DAY: ${{ github.event_name == 'workflow_dispatch' && inputs.trade_day || '' }}
-      INPUT_MODE: ${{ github.event_name == 'schedule' && 'apply' || inputs.mode }}
-      INPUT_CONFIRM: ${{ github.event_name == 'workflow_dispatch' && inputs.confirm_write || '' }}
+      INPUT_MODE: ${{ inputs.mode }}
+      INPUT_CONFIRM: ${{ inputs.confirm_write }}
     steps:
       - uses: actions/checkout@v4
       - name: Validate exact repository, KST date and explicit write approval

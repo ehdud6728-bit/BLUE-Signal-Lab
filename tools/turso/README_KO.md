@@ -158,3 +158,15 @@ Actions URL: https://github.com/ehdud6728-bit/BLUE-Signal-Lab/actions/workflows/
 기본값은 `dry_run`; 자동 스케줄, Cloudflare D1 SQL, 기존 Worker 배포, KIS 주문은 없습니다. **일봉 테이블은 기존 분 단위 실시간 시세/종목명 디렉터리 테이블과 별개**입니다. `apply`가 성공해도 기존 PWA는 아직 D1을 사용합니다.
 
 만약 11월 18일 자료만 미준비라면 `end_day=2026-11-17`로 **확실히 검증되는 구간부터 별도 실행**하고, 18일 자료가 준비된 후 `start_day=2026-11-18`, `end_day=2026-11-18`로 이어서 진행할 수 있습니다. 실제 미준비 여부는 Actions 로그로 확인해야 하며 미리 단정하지 않습니다.
+
+## 10. 2026-11-19 — KRX 일봉 + 패턴 분석 하루 한 번에 적재
+
+실행 화면: [BLUE Turso Daily EOD + Research (NO D1)](https://github.com/ehdud6728-bit/BLUE-Signal-Lab/actions/workflows/blue_turso_daily_verified_eod_auto.yml)
+
+- 기존 [2026-11-19 검증 실행 #44528847386](https://github.com/ehdud6728-bit/BLUE-Signal-Lab/actions/runs/44528847386)은 KRX 2,661종목(코스피 912·코스닥 1,749)의 **dry_run 성공**입니다. `written=0`이므로 이것만으로 오늘자 Turso 적재 완료를 주장하지 않습니다.
+- 코드 병합 후 수동 실행 시 `trade_day=2026-11-19`, `mode=apply`, `confirm_write=blue-turso-eod-research`를 입력하면 **한 번의 실행**에서 (1) 날짜 고정 KRX 양 시장 전체 일봉 검증, (2) Turso 일봉 저장·행별 재조회·감사, (3) 같은 거래일 R1.1 전체시장 신호/패턴 스캔, (4) 차트·사례 스냅샷 검증, (5) 감사된 EOD와 종가가 일치하는 종목의 Turso 연구 스냅샷 저장까지 진행합니다. `dry_run`은 두 소스·파일만 검증하고 DB에 쓰지 않습니다.
+- 수동 `apply`는 확인 문구가 없으면 시작조차 되지 않습니다. 가격·코드·거래일·원천 해시·감사 행이 어긋나면 연구 저장을 막습니다. 과거 연구 기록을 덮어쓰지 않으며 다른 날짜를 대신 사용하지 않습니다.
+- 연구 소스 검증/저장이 EOD 적재 **이후** 실패하더라도 성공한 일봉 기록은 유지됩니다. 같은 날짜로 다시 실행하면 일봉 저장부는 감사값이 동일할 때 중복 기록 없이 통과하고, 남은 연구 저장을 이어서 시도합니다(두 테이블을 하나의 원자적 트랜잭션으로 묶는 것은 아닙니다).
+- **예약 실행은 한 개**이며 매 평일 22:20 KST에 해당 거래일의 검증된 EOD를 Turso에 자동 저장하려 시도합니다. 연구 자동 적재는 기존 Repository Variable `BLUE_TURSO_RESEARCH_AUTO_ENABLED=true`를 **명시적으로 설정한 경우에만** EOD 다음 단계로 실행합니다(기본 OFF). 기존 패턴 연구 전용 워크플로는 중복 예약 없이 수동 재시도/과거 적재용입니다.
+- KIS 토큰 발급·갱신, KIS 전체 실시간 시세, D1 쿼리/복제, Worker/PWA 운영 배포, `FULL` 플래그 활성화는 **이 작업의 일부가 아닙니다**. Turso 검색·분석 API는 이미 존재하나, 새 Worker 또는 웹 코드가 반영되어야 하는 경우에는 각각 기존 배포 절차가 별도로 필요합니다.
+- 화면의 `/api/research/search`는 감사된 Turso 연구 날짜를 우선 사용하고 기존 `/api/search` D1은 실패/미이관 날짜에 한정해 보조로 조회합니다. 같은 날짜가 Turso에 존재하지만 특정 종목에 신호가 **없을 때**는 D1의 다른 신호 차트를 끼워 넣지 않습니다.

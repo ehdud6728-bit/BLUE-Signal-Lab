@@ -45,9 +45,11 @@ class TursoDailyResearchWorkflowTests(unittest.TestCase):
 
     def test_workflow_is_no_d1_opt_in_and_precisely_guarded(self):
         workflow = WORKFLOW.read_text(encoding='utf-8')
-        self.assertIn("vars.BLUE_TURSO_RESEARCH_AUTO_ENABLED == 'true'", workflow)
+        daily = (ROOT/'.github/workflows/blue_turso_daily_verified_eod_auto.yml').read_text()
+        self.assertNotIn('  schedule:', workflow)
+        self.assertIn('vars.BLUE_TURSO_RESEARCH_AUTO_ENABLED', daily)
         self.assertIn('default: dry_run', workflow)
-        self.assertIn('github.event_name == \'schedule\' && \'apply\'', workflow)
+        self.assertIn('INPUT_MODE: ${{ inputs.mode }}', workflow)
         self.assertIn('blue-turso-research-only', workflow)
         self.assertIn('python3 scripts/turso_research_day_guard.py', workflow)
         self.assertIn('--date "$TRADE_DAY"', workflow)

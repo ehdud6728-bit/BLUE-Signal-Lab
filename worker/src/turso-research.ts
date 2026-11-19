@@ -196,7 +196,7 @@ export async function tursoResearchChart(env:ResearchEnv,p:URLSearchParams,facto
       FROM blue_research_signal_audit_v1 a LEFT JOIN blue_research_signals_v1 s
         ON s.trade_day=a.trade_day AND s.source_payload_sha256=a.source_payload_sha256
       WHERE a.trade_day=? GROUP BY a.trade_day,a.row_count`,args:[day]});
-    if(!audit.rows.length)return {status:'NOT_AVAILABLE',
+    if(!audit.rows.length)return {status:'NOT_AVAILABLE',reason:'DAY_NOT_IMPORTED',
       message:'Turso에 해당 거래일의 검증된 연구 기록이 없습니다.'};
     if(Number(audit.rows[0].row_count)!==Number(audit.rows[0].actual))
       throw Error('TURSO_RESEARCH_INCOMPLETE_AUDITED_DAY');
@@ -204,7 +204,7 @@ export async function tursoResearchChart(env:ResearchEnv,p:URLSearchParams,facto
       FROM blue_research_signals_v1 s JOIN blue_research_signal_audit_v1 a
         ON a.trade_day=s.trade_day AND a.source_payload_sha256=s.source_payload_sha256
       WHERE s.trade_day=? AND s.code=? LIMIT 1`,args:[day,code]});
-    if(!result.rows.length)return {status:'NOT_AVAILABLE',
+    if(!result.rows.length)return {status:'NOT_AVAILABLE',reason:'NO_SIGNAL_FOR_SYMBOL',
       message:'해당 날짜에 연구 신호가 등록된 종목이 아닙니다. 다른 날짜의 차트를 대체하지 않습니다.'};
     const record=JSON.parse(String(result.rows[0].record_json)) as {
       trade_day:string;code:string;close_price:number;chart?:{
