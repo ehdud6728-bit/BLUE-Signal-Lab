@@ -13,6 +13,11 @@ on:
         type: string
         required: false
         default: ''
+      confirm_mirror_off:
+        description: 'If full mirror is OFF, type blue-turso-mirror-off to acknowledge possible Turso quote collection interruption.'
+        type: string
+        required: false
+        default: ''
 
 permissions:
   contents: read
@@ -38,16 +43,21 @@ jobs:
           npm install --no-package-lock --no-audit --no-fund
           npm test
           npm run build:check
-      - name: Guard explicit production full-mirror approval
+      - name: Guard exact full-mirror or mirror-OFF deployment approval
         if: inputs.deploy
         env:
           CONFIRM_FULL_MIRROR: ${{ inputs.confirm_full_mirror }}
+          CONFIRM_MIRROR_OFF: ${{ inputs.confirm_mirror_off }}
         shell: bash
         run: |
           set -euo pipefail
           if grep -Eq '"TURSO_MIRROR_ENABLED"[[:space:]]*:[[:space:]]*"true"' collector/wrangler.jsonc; then
             if [[ "$CONFIRM_FULL_MIRROR" != 'blue-turso-full-mirror' ]]; then
               echo 'FULL_MIRROR_DEPLOY_BLOCKED: explicit production approval required'; exit 1
+            fi
+          else
+            if [[ "$CONFIRM_MIRROR_OFF" != 'blue-turso-mirror-off' ]]; then
+              echo 'MIRROR_OFF_DEPLOY_BLOCKED: verify Turso direct collection and approve interruption risk'; exit 1
             fi
           fi
       - name: Deploy collector, isolated from existing API Worker
