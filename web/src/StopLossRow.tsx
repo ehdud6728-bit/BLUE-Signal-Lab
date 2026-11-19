@@ -1,9 +1,9 @@
 import {useEffect,useMemo,useState} from 'react';
 import {ChevronDown} from 'lucide-react';
 import {calculateStopCandidates,preferredStopMethod,type StopBar,type StopMethod} from './stop-loss';
+import {fetchResearchChartTursoFirst} from './turso-research-reader';
 import './r15107-stop-loss.css';
 
-const API=(import.meta.env.VITE_API_BASE||'https://blue-signal-lab-api-v2.ehdud6728.workers.dev').replace(/\/+$/,'');
 const inFlight=new Map<string,Promise<StopBar[]|null>>();
 const pending:Array<()=>void>=[];
 let running=0;
@@ -18,11 +18,8 @@ function loadBars(code:string,day:string,refreshKey:number):Promise<StopBar[]|nu
  const current=inFlight.get(key);if(current)return current;
  if(inFlight.size>300)inFlight.clear();
  const promise=schedule(async()=>{
-  const u=new URL(API+'/api/chart');u.searchParams.set('code',code);u.searchParams.set('date',day);
-  const r=await fetch(u.toString(),{credentials:'include',cache:'no-store'});
-  if(!r.ok)return null;
-  const data=await r.json() as {status?:string;chart?:{bars?:StopBar[]}};
-  return data.status==='READY'&&Array.isArray(data.chart?.bars)?data.chart.bars:null;
+  const data=await fetchResearchChartTursoFirst(code,day);
+  return data?data.chart.bars as StopBar[]:null;
  }).catch(()=>null);
  inFlight.set(key,promise);return promise;
 }

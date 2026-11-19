@@ -15,6 +15,7 @@ import StopLossRow from './StopLossRow';
 import type {StopMethod} from './stop-loss';
 import BasketSupplyRecordRow from './BasketSupplyRecordRow';
 import {readSupplyAtDiscovery,supplyFromSearchExtras,validSupplyRecord,type BasketSupplyRecord} from './basket-supply-record';
+import {fetchResearchEvidenceTursoFirst} from './turso-research-reader';
 
 // R153_PERFORMANCE_MONITOR: KIS results are server-verified; never fabricate missing candles.
 type Performance={code:string;day:string;status:string;baseline?:number;
@@ -94,7 +95,7 @@ function validItem(x:any):x is BasketItem{
    (x.supplyMemo===undefined||(typeof x.supplyMemo==='string'&&x.supplyMemo.length<=400));
 }
 // R1591: freeze only provenance-backed research evidence from an actual search/D1 row.
-function patternEvidence(data:SearchRow|AiPick):Pick<BasketItem,'patternUp10d'|'patternN10d'|'patternLabel10d'|'patternDays10d'>|Record<string,never>{
+function patternEvidence(data:Pick<SearchRow,'day'|'extras'>|AiPick):Pick<BasketItem,'patternUp10d'|'patternN10d'|'patternLabel10d'|'patternDays10d'>|Record<string,never>{
  const x='extras' in data?data.extras:undefined;
  const n=Number(x?.r159_pattern_n_10d),p=Number(x?.r159_pattern_up_10d);
  if(!Number.isInteger(n)||n<1||n>100000||!Number.isFinite(p)||p<0||p>100)return {};
@@ -228,12 +229,9 @@ export default function SmartBasket({quickAddRequest,onItemsChange,active=true,r
   if(!pending.length)return;
   const worker=async()=>{while(!disposed){
    const it=pending[cursor++];if(!it)return;const key=perfId(it);evidenceAttempted.current.add(key);
-   try{const u=new URL(API+'/api/search');u.searchParams.set('mode','single');
-    u.searchParams.set('date',it.day);u.searchParams.set('code',it.code);u.searchParams.set('limit','1');
-    u.searchParams.set('min_pattern_n',String(patternSampleMin));
-    const r=await fetch(u.toString(),{credentials:'include',cache:'no-store'});if(!r.ok)continue;
-    const d=await r.json() as {items?:SearchRow[]};
-    const found=d.items?.find(x=>x.code===it.code&&x.day===it.day);if(!found||disposed)continue;
+   try{
+    const found=await fetchResearchEvidenceTursoFirst(it.code,it.day,patternSampleMin);
+    if(!found||disposed)continue;
     const snapshot=patternEvidence(found);if(!('patternN10d' in snapshot))continue;
     setItems(old=>old.map(x=>perfId(x)===key?{...x,...snapshot}:x));
    }catch{/* Historical evidence is optional. Never invent it on network errors. */}
