@@ -5,6 +5,7 @@ import {collectSymbolLivePriority} from './symbol-live.mjs';
 import {createSharedQuoteFetcher} from './quote-cache.mjs';
 import {mirrorQuotesToTurso,tursoMirrorEnabled} from './turso-mirror.mjs';
 import {collectTursoDirect,tursoDirectMode} from './turso-direct.mjs';
+import {collectTursoProvisional,tursoProvisionalMode} from './turso-provisional.mjs';
 
 // The public HTTP surface stays health-only. An on-demand KIS quote is exposed
 // through a named, non-HTTP WorkerEntrypoint in index.mjs, not here.
@@ -13,7 +14,14 @@ export default {
     // A separate waitUntil chain: D1 quota failures in the legacy collector
     // cannot block the independently authenticated Turso-only KIS path.
     const directNow=new Date();
-    if(tursoDirectMode(env,directNow)!=='OFF'){
+    // The full-market provisional pass has priority over the older research
+    // candidates collector: never run two independent KIS polling loops.
+    if(tursoProvisionalMode(env,directNow)!=='OFF'){
+      ctx.waitUntil(collectTursoProvisional(env,directNow)
+        .then(result=>console.log('BLUE_TURSO_PROVISIONAL status='+result.status+
+          ' saved='+(result.saved||0)+' rejected='+(result.rejected||0)))
+        .catch(()=>console.warn('BLUE_TURSO_PROVISIONAL_FAILED')));
+    }else if(tursoDirectMode(env,directNow)!=='OFF'){
       ctx.waitUntil(collectTursoDirect(env,directNow)
         .then(result=>console.log('BLUE_TURSO_DIRECT status='+result.status+
           ' saved='+(result.saved||0)+' rejected='+(result.rejected||0)))
