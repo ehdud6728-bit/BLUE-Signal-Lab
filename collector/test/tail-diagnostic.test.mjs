@@ -38,6 +38,22 @@ test('recognizes Turso mirrored batches and known error messages only',()=>{
   assert.deepEqual(records.map(record=>record.kind),['mirror','warning','provider']);
 });
 
+test('includes only known Turso provisional status fields and never echoes arbitrary data',()=>{
+  const records=safeTailRecords(event(
+    'BLUE_TURSO_PROVISIONAL status=SAVED phase=KRX_POST_CLOSE saved=9 rejected=1',
+    'BLUE_TURSO_PROVISIONAL status=VERIFIED_EOD_ALREADY_AVAILABLE phase=NONE saved=0 rejected=0',
+    'BLUE_TURSO_PROVISIONAL status=TURSO_TOKEN_EXPIRED phase=NONE saved=0 rejected=0',
+    'BLUE_TURSO_PROVISIONAL_FAILED',
+    'BLUE_TURSO_PROVISIONAL status=SAVED phase=KRX_POST_CLOSE saved=9 rejected=1 token=secret',
+    'BLUE_TURSO_PROVISIONAL status=UNTRUSTED phase=NONE saved=0 rejected=0'
+  ));
+  assert.deepEqual(records.map(record=>record.kind),
+    ['provisional','provisional','provisional','warning']);
+  assert.equal(records[0].message,
+    'at_utc=2026-11-18T10:30:00.000Z BLUE_TURSO_PROVISIONAL status=SAVED phase=KRX_POST_CLOSE saved=9 rejected=1');
+  assert.equal(records.some(record=>record.message.includes('secret')),false);
+});
+
 test('ignores malformed JSON and input without a logs array',()=>{
   assert.deepEqual(safeTailRecords('wrangler startup text'),[]);
   assert.deepEqual(safeTailRecords('{"logs":null}'),[]);

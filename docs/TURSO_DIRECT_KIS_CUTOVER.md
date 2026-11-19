@@ -1,5 +1,14 @@
 # BLUE Signal Lab — Turso 단독 KIS 장중 시세 수집 준비 (PR #31)
 
+## 잠정 일봉 감사 (읽기 전용, 별도 활성화 불필요)
+
+- GitHub Actions **`BLUE Turso Provisional Day Audit (READ ONLY)`**를 수동 실행하고 `day_kst`에 `2026-11-19`처럼 실제 KST 거래일을 입력한다. 빈 값은 오늘, 최대 7일 전까지만 허용한다. 테스트는 무시크릿으로 실행되며 실제 감사는 Turso에 날짜 제한 SELECT만 실행한다. D1·KIS·토큰 발급·Worker 설정·종목 원시값에 접근하거나 변경하지 않는다.
+- `daily_rows`는 장 마감 후 KIS 일봉 출처로 표시된 잠정 일봉 건수, `regular_rows`는 장중 잠정 관측 건수다. `bad_ohlc`, `bad_volume`, `bad_reference`, `bad_observed_day`, `outside_session`, `duplicate_keys`와 `bad_source_or_basis`가 0이어야 한다. `zero_volume`은 정지·거래 부재 가능성 때문에 별도로 표시한다.
+- `latest_evidence_valid`는 잠정 저장 시각과 일치하는 **최신 시세 JSON**에서 KIS 보고 거래일·출처·잠정 상태를 대조한 건수다. 이후 저장된 새 시세로 최신 행이 덮어씌워졌으면 `latest_evidence_unavailable`에 잡히며, 과거 원본 KIS 응답을 다시 확인할 수 없다는 뜻이지 곧바로 거짓 데이터라는 증거가 아니다. 이 감사는 공급자 원본을 독립 재조회하지 않는다.
+- `eod_state=VERIFIED_EOD_ALREADY_AVAILABLE`은 조회 시점의 Turso KRX 확정 감사 건수와 EOD 행 수가 일치한다는 의미다. 그 시각 실제 Collector가 수집을 생략했다는 런타임 증거는 아니므로 `BLUE Collector Runtime Tail Diagnostic`도 함께 확인한다.
+- Tail 진단은 `BLUE_TURSO_PROVISIONAL`의 사전에 허용한 `status/phase/saved/rejected` 값과 `BLUE_TURSO_PROVISIONAL_FAILED` 경고만 표시한다. 파일럿 만료 상태에서 `provisional_events=0`인 것은 정상일 수 있으므로 실패로 단정하지 않는다. 진단기는 실시간 로그만 수집하며 지난 시각의 로그를 복원하지 않는다.
+- 감사 결과와 토큰 관리자 `mode=check`, 충분한 후속 파일럿 검증을 확인하기 전에는 `TURSO_PROVISIONAL_QUOTES_ENABLED=true` 또는 D1 전체 미러링을 활성화하지 않는다.
+
 ## 구현 범위
 - **확정 전 KIS 잠정 일봉(2026-11-19, 별도 운영 활성화 필요):** `collector/src/turso-provisional.mjs`가 감사 완료 Turso 전일 KRX 종목 목록을 읽고 **매분 최대 10종목**만 순환 조회한다. 정규장 09:00~15:20 KST는 기존 KIS 현재가 API를 사용하고, **15:20~22:00 KST에는 같은 날짜 KRX 확정 일봉 감사와 저장 행수가 일치하면 KIS 호출을 생략**한다. 확정 일봉이 아직 없거나 불완전할 때만 KIS 공식 일자별 시세 API(`inquire-daily-price`, `FHKST01010400`)를 조회한다. 이때 **KIS가 보고한 영업일이 오늘과 정확히 같아야** OHLCV를 잠정 관측으로 저장하며, 전일 데이터나 날짜 없는 응답은 버린다. 거래 시간대 밖/주말/등록된 휴장일에는 수집하지 않는다. KIS 토큰은 Turso 기존 유효 암호화 금고에서만 읽고 `tokenP`/D1 SQL을 호출하지 않는다. 기존 Turso 최신/이력과 별도 `blue_kis_provisional_daily_v1`에 `IN_PROGRESS`로 저장하되 `blue_eod_daily_v1`·완료 감사·연구 신호를 절대 수정하지 않는다. 정규장 현재가 응답에 거래일 필드가 없을 때만 KST 날짜 **추정**으로 표기한다. 전 종목 5분 실시간 갱신 및 누락 없는 커버리지는 보장하지 않는다.
 - **수동 운영 전 필수:** 새 소스는 PR 병합뿐 아니라 Collector Worker 재배포가 필요하다. 배포만 해도 잠정 수집은 기본 OFF다. GitHub Actions `BLUE Turso Provisional Day Pilot`의 `dry_run`은 DB/KIS/Worker에 접속하지 않는다. 배포 후 `start_15m`/`start_30m`와 `confirm_worker=blue-market-collector`를 명시하면 자동 만료 Secret을 등록하며, `stop`으로 즉시 중단할 수 있다. 파일럿 Secret 등록 성공은 **실제 KIS 저장 성공을 뜻하지 않는다**. 22:00 이후 시작한 파일럿은 수집 없이 종료되며 다음 날 재실행해야 한다. `TURSO_PROVISIONAL_PAUSED=true`는 FULL/파일럿 모두 중지한다. `TURSO_PROVISIONAL_QUOTES_ENABLED=true`로 FULL을 켜는 작업은 **별도 운영 승인**이 필요하며 기본 워크플로에는 포함되지 않는다. 09:00~22:00 안에서 KRX 확정 EOD 여부·KIS 정확한 거래일·Turso 신규 저장 건수를 검증하기 전 성공 처리 금지.

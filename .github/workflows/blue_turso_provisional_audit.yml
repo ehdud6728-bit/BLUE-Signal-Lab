@@ -1,0 +1,39 @@
+name: BLUE Turso Provisional Day Audit (READ ONLY)
+
+on:
+  workflow_dispatch:
+    inputs:
+      day_kst:
+        description: 'KST trade day YYYY-MM-DD (empty = today; within last 7 days)'
+        type: string
+        required: false
+        default: ''
+
+permissions:
+  contents: read
+
+concurrency:
+  group: blue-turso-provisional-day-readonly
+  cancel-in-progress: false
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install Turso client and verify read-only audit tests
+        working-directory: tools/turso
+        run: |
+          npm install --no-audit --no-fund --ignore-scripts --no-package-lock
+          node --test provisional-audit.test.mjs
+      - name: Read one KST day from Turso without any mutations
+        working-directory: tools/turso
+        env:
+          AUDIT_DAY: ${{ inputs.day_kst }}
+          TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
+          TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
+        run: node provisional-audit.mjs --day="$AUDIT_DAY"
