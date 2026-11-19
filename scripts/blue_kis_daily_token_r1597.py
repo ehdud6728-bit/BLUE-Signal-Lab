@@ -174,6 +174,9 @@ def main():
     parser.add_argument('--scheduled', action='store_true', help='Mark GitHub scheduled run; cron determines intended time, never skip a delayed run')
     args = parser.parse_args()
     now = datetime.now(UTC)
+    if args.mode == 'issue' and os.environ.get('BLUE_KIS_TOKEN_AUTO_PAUSED', '').lower() == 'true':
+        print('R1597_D1_ISSUE_BLOCKED_PAUSED')
+        raise SystemExit(2)
     appkey = os.environ.get('KIS_APP_KEY','').strip()
     appsecret = os.environ.get('KIS_APP_SECRET','').strip()
     if not appkey or not appsecret:

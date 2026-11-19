@@ -8,6 +8,9 @@ on:
       - 'collector/test/turso-mirror.test.mjs'
       - 'collector/src/handler.mjs'
       - 'collector/turso-direct.test.mjs'
+      - 'scripts/blue_kis_cutover_audit.py'
+      - 'tests/test_blue_kis_cutover_audit.py'
+      - '.github/workflows/blue_kis_cutover_audit.yml'
       - 'scripts/blue_kis_daily_token_r1597.py'
       - 'tests/test_blue_kis_daily_token_r1597.py'
       - '.github/workflows/blue_kis_daily_token_r1597.yml'
@@ -39,6 +42,7 @@ jobs:
         run: |
           python -m unittest discover -s tests -p 'test_blue_kis_token_vault_r131.py' -v
           python -m unittest discover -s tests -p 'test_blue_kis_daily_token_r1597.py' -v
+          python -m unittest discover -s tests -p 'test_blue_kis_cutover_audit.py' -v
       - name: Install collector dependencies
         working-directory: collector
         run: npm install --no-audit --no-fund --no-package-lock

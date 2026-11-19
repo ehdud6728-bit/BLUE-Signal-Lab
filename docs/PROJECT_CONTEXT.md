@@ -3,6 +3,12 @@
 > 업데이트: 2026-11-19 (한국 시간). 이 파일은 개발 인계용 요약이며, 서버의 실시간 상태를 자동으로 반영하지 않습니다.
 
 
+## 2026-11-19 (KST) — D1→Turso KIS 발급 전환 읽기 전용 감사 준비
+
+- 마지막 Actions `TOKEN_SAVED` [#44037861051](https://github.com/ehdud6728-bit/BLUE-Signal-Lab/actions/runs/44037861051): 2026-11-17 16:20 KST, 만료 11/18 16:20 KST. 최신 D1 `check` [#44438538538](https://github.com/ehdud6728-bit/BLUE-Signal-Lab/actions/runs/44438538538)에서 만료 확인. 이것만으로 자동 발급기가 **중단됐다**고 판단하지 않음.
+- 새 수동 `BLUE KIS D1-to-Turso Cutover Audit (READ ONLY)`: 현재 GitHub `BLUE_KIS_TOKEN_AUTO_PAUSED`, `BLUE_KIS_D1_DISABLED_AT_UTC`, `BLUE_KIS_TURSO_CUTOVER_APPROVED` 및 D1 발급 원장/금고의 **시간·고정 상태만** 조회. 토큰 발급/복호화/시세 수집/DB 쓰기는 없으며, D1 조회 불가·이력 부재·시각 오류·중단 시각 이후 활동·24시간 미경과 시 준비 완료로 표시하지 않음. `READY_FOR_MANUAL_REVIEW`도 외부 수동 발급까지 증명하지 못하므로 최종 승인 전 사용자가 운영 상태를 확인해야 함.
+- 기존 D1 자동 중단 변수는 예약 워크플로에만 걸려 있었으므로, **수동 `mode=issue`에도 동일 중단 플래그를 적용**하도록 보강. Turso 발급 보호는 이전처럼 기존 D1 발급 중단 **후 24시간**이 확인되기 전 `issue` 금지. GitHub Secrets 장기 앱 키는 그대로 유지.
+
 ## 2026-11-19 (KST) — KIS 토큰 06:00 점검·복구 정책 추가 (PR 준비)
 
 - 매일 **06:00/06:30 KST**에 KIS 토큰 상태를 검사하고, 평일 07:00~19:30에는 30분마다 후속 점검. GitHub 예약 실행은 실제 시작 시간이 지연될 수 있으며, 06:00에 *무조건 새 토큰을 발급*하는 것이 아니라 1시간 이내 만료 예정·만료·미발급 상태에서 24시간 저장 쿨다운 및 원자적 예약 조건을 지켜 발급.

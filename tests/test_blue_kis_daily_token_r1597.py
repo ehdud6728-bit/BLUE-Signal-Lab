@@ -70,6 +70,17 @@ class Tests(unittest.TestCase):
         self.assertIn('R1597_RESULT',out.getvalue())
         check.assert_called_once()
 
+    def test_paused_issuer_blocks_manual_issue_before_db_access(self):
+        with patch.dict('os.environ', {
+            'BLUE_KIS_TOKEN_AUTO_PAUSED': 'true',
+            'KIS_APP_KEY': 'key', 'KIS_APP_SECRET': 'secret'
+        }), patch.object(sys, 'argv', ['script', '--mode', 'issue']), \
+             patch.object(mod.vault_mod, 'D1Vault') as db:
+            with self.assertRaises(SystemExit) as error:
+                mod.main()
+        self.assertEqual(error.exception.code, 2)
+        db.assert_not_called()
+
     def test_readonly_no_mutation_no_issue(self):
         db=SQLiteDB(metadata(NOW-timedelta(hours=25),NOW-timedelta(minutes=1)))
         issuer=Mock()

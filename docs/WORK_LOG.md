@@ -3,6 +3,15 @@
 새 채팅에서 프로젝트를 이어가기 위한 **결정/구현/검증 이력**입니다. 대화 전체를 저장하지 않고 실제 개발에 필요한 내용만 보존합니다. 최신 항목을 위에 추가하고, 결과가 달라지면 추측 대신 검증된 상태로 수정합니다.
 
 
+## 2026-11-19 (KST) — Turso 전환용 D1 발급 중단·최종 발급 시각 읽기 전용 감사
+
+- **사용자 결정:** D1 의존 시세 수집에서 Turso 독립 경로로 안전하게 전환 준비. 실제 D1 issuer 중단 여부·최후 토큰 발급 기록·24시간 대기 충족을 검증하기 전 Turso 토큰을 발급하지 않음.
+- **마지막 발급 증빙:** [Actions #44037861051](https://github.com/ehdud6728-bit/BLUE-Signal-Lab/actions/runs/44037861051)의 `TOKEN_SAVED`(2026-11-17 07:20:09 UTC, 16:20 KST), 만료 2026-11-18 07:20:08 UTC. [D1 check #44438538538](https://github.com/ehdud6728-bit/BLUE-Signal-Lab/actions/runs/44438538538)은 `TOKEN_EXPIRED_ELIGIBLE`. [예약 실행 #44345601488](https://github.com/ehdud6728-bit/BLUE-Signal-Lab/actions/runs/44345601488)이 11/19 01:18 KST에 실제 수행되어 적어도 당시 D1 자동 중단은 아니었음. **현재 저장소 변수 상태는 외부 API 접근 제한으로 확인 불가**, 24시간 전환 대기 시작은 미확인.
+- **코드 준비:** 새 `scripts/blue_kis_cutover_audit.py`, `.github/workflows/blue_kis_cutover_audit.yml`: D1 금고의 저장/만료 시각과 발급 상태표의 최근 발급 시도 및 성공 시각만 SELECT, 저장소 중단/승인 변수와 실제 중단 UTC 시각 비교, 24시간 충족 여부를 고정 상태 코드로 출력. 토큰·암호문·앱 시크릿 조회 및 KIS tokenP 호출 없음. DB 읽기 실패·자료/변수 부재 시 안전하게 불합격.
+- **수동 발급 차단:** `BLUE_KIS_TOKEN_AUTO_PAUSED=true`면 D1 예약뿐 아니라 `blue_kis_daily_token_r1597.yml`의 수동 `mode=issue`도 거부하도록 추가. 기존 `mode=check`는 유지. 별도 R1.3 연구 워크플로의 `allow_new_token=true`는 기존부터 차단.
+- **검증/상태:** [PR #35](https://github.com/ehdud6728-bit/BLUE-Signal-Lab/pull/35), [자동 CI #44440422930](https://github.com/ehdud6728-bit/BLUE-Signal-Lab/actions/runs/44440422930)에서 Python D1 token vault/자동갱신/감사 테스트, Node Turso 수집·토큰 테스트, Wrangler dry-run 모두 성공. PR 병합·원격 감사 실행·실시간 변수 값 조회·D1 발급 중단·Turso 새 발급은 아직 시행하지 않음.
+- **다음:** 안전 CI 확인 → 사용자 PR 병합 → GitHub Repo Variables에서 `BLUE_KIS_TOKEN_AUTO_PAUSED=true` 실제 설정/시각 기록 → 감사 Actions `READY_FOR_MANUAL_REVIEW` 확인(중단 후 24시간 경과까지는 `WAIT...`) → 별도 승인으로 Turso issuer enable 및 파일럿 → KIS 시세 저장 관측 확인.
+
 ## 2026-11-19 (KST) — GitHub Actions 예약 지연 시 D1 토큰 점검 누락 보완
 
 - **병합 확인:** [PR #33](https://github.com/ehdud6728-bit/BLUE-Signal-Lab/pull/33)은 11월 19일 KST 10:30 병합. [CI #44437369022](https://github.com/ehdud6728-bit/BLUE-Signal-Lab/actions/runs/44437369022)에서 Python D1 테스트, Node Turso 테스트, Wrangler dry-run까지 모두 통과. 실제 tokenP/시세 수집/운영 DB 변경은 수행하지 않음.
