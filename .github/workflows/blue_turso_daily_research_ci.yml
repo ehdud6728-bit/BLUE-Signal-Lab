@@ -1,0 +1,39 @@
+name: BLUE Turso Research Auto Safety CI (NO SECRETS)
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/blue_turso_daily_research.yml'
+      - '.github/workflows/blue_turso_daily_research_ci.yml'
+      - 'scripts/turso_research_day_guard.py'
+      - 'tests/test_turso_daily_research_workflow.py'
+      - 'scripts/export_turso_signal_snapshot.py'
+      - 'tests/test_turso_signal_snapshot_export.py'
+      - 'tools/turso/signal-snapshot-import.mjs'
+      - 'tools/turso/signal-snapshot-import.test.mjs'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  safety:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Verify calendar, approval, default OFF and export provenance
+        run: |
+          python -m unittest discover -s tests -p 'test_turso_daily_research_workflow.py' -v
+          python -m unittest discover -s tests -p 'test_turso_signal_snapshot_export.py' -v
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install only the isolated Turso client (without scripts)
+        working-directory: tools/turso
+        run: npm install --no-audit --no-fund --ignore-scripts --no-package-lock
+      - name: Test audited EOD prerequisite, exact close and immutable read-back
+        run: node --test tools/turso/signal-snapshot-import.test.mjs

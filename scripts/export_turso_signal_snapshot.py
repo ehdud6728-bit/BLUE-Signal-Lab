@@ -108,12 +108,22 @@ def export_snapshot(source, destination):
 
     payload = ''.join(json.dumps(r, ensure_ascii=False, separators=(',', ':'), sort_keys=True,
                                  allow_nan=False) + '\n' for r in normalized).encode('utf-8')
+    # The scanner records the time of its verification. Rechecking the same
+    # immutable market inputs later must not change the logical source digest:
+    # a timestamp-only difference would otherwise make safe retries conflict.
+    # Keep the original AUDIT.json artifact for full provenance, and retain all
+    # market/date/provider/coverage/hash fields in this stable digest.
+    stable_audit = {key: value for key, value in audit.items()
+                    if key != 'source_verified_at_kst'}
+    stable_audit_bytes = json.dumps(stable_audit, ensure_ascii=False, sort_keys=True,
+                                    separators=(',', ':'), allow_nan=False).encode('utf-8')
     manifest = {
         'format': 'BLUE_TURSO_SIGNAL_SNAPSHOT_V1', 'day': day,
         'run_id': 'blue_market_' + day.replace('-', ''),
         'observed_stocks': audit['observed_stocks'], 'signal_events': events,
         'matched_stocks': len(normalized), 'source': audit['target_day_source'],
-        'source_audit_sha256': digest(audit_bytes), 'signals_csv_sha256': digest(csv_bytes),
+        'source_audit_sha256': digest(stable_audit_bytes),
+        'signals_csv_sha256': digest(csv_bytes),
         'chart_snapshots_sha256': digest(chart_bytes), 'payload_sha256': digest(payload),
     }
     destination.mkdir(parents=True, exist_ok=True)

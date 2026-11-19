@@ -1,0 +1,111 @@
+name: BLUE Turso Daily Research Snapshot (NO D1, OPT-IN)
+
+on:
+  # 11:15 UTC = 20:15 KST, well after the 18:35 Turso EOD ingestion.
+  # Scheduled writes are disabled until the operator sets the repository
+  # variable BLUE_TURSO_RESEARCH_AUTO_ENABLED to the exact string 'true'.
+  schedule:
+    - cron: '15 11 * * 1-5'
+  workflow_dispatch:
+    inputs:
+      trade_day:
+        description: 'Exact KST weekday YYYY-MM-DD; blank means KST today. No latest-day substitution.'
+        type: string
+        required: false
+        default: ''
+      mode:
+        description: 'dry_run never opens Turso; apply checks audited EOD before writing research to Turso.'
+        type: choice
+        required: true
+        default: dry_run
+        options: [dry_run, apply]
+      confirm_write:
+        description: 'For manual apply only, type blue-turso-research-only'
+        type: string
+        required: false
+        default: ''
+
+permissions:
+  contents: read
+
+concurrency:
+  group: blue-turso-research-writer
+  cancel-in-progress: false
+
+jobs:
+  research:
+    if: ${{ github.event_name == 'workflow_dispatch' || vars.BLUE_TURSO_RESEARCH_AUTO_ENABLED == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      INPUT_DAY: ${{ github.event_name == 'workflow_dispatch' && inputs.trade_day || '' }}
+      INPUT_MODE: ${{ github.event_name == 'schedule' && 'apply' || inputs.mode }}
+      INPUT_CONFIRM: ${{ github.event_name == 'workflow_dispatch' && inputs.confirm_write || '' }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate exact repository, KST date and explicit write approval
+        run: python3 scripts/turso_research_day_guard.py
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install independently verified R1.1 scanner dependencies
+        run: python -m pip install pandas numpy pyarrow requests 'cryptography>=43,<48' 'pykrx==1.2.9'
+      - name: Test research snapshot export without DB access
+        run: python -m unittest discover -s tests -p 'test_turso_signal_snapshot_export.py' -v
+      - name: Scan the EXACT verified KST date (no D1 access)
+        env:
+          KRX_AUTH_KEY: ${{ secrets.KRX_AUTH_KEY }}
+          KRX_ID: ${{ secrets.KRX_DATA_ID || secrets.KRX_ID }}
+          KRX_PW: ${{ secrets.KRX_DATA_PW || secrets.KRX_PW }}
+          KRX_DATA_ID: ${{ secrets.KRX_DATA_ID || secrets.KRX_ID }}
+          KRX_DATA_PW: ${{ secrets.KRX_DATA_PW || secrets.KRX_PW }}
+        run: |
+          python scripts/market_scan_r11.py \
+            --date "$TRADE_DAY" --years "$RESEARCH_YEARS" \
+            --daily-provider auto --out output/turso_daily_research/source
+      - name: Refuse stale or substituted market dates
+        run: |
+          python - <<'PY'
+          import json, os
+          from pathlib import Path
+          audit = json.loads(Path('output/turso_daily_research/source/AUDIT.json').read_text())
+          assert audit['asof'] == os.environ['TRADE_DAY'], 'RESEARCH_DATE_MISMATCH'
+          assert audit['intraday_verified'] is False, 'NOT_VERIFIED_EOD'
+          assert audit['observed_stocks'] >= 1700, 'INCOMPLETE_MARKET_UNIVERSE'
+          print('BLUE_TURSO_RESEARCH_EXACT_DAY_VERIFIED', audit['asof'], audit['matched_stocks'])
+          PY
+      - name: Export same signal, pattern and chart evidence as legacy scanner
+        run: |
+          python scripts/export_turso_signal_snapshot.py \
+            --input-dir output/turso_daily_research/source \
+            --out output/turso_daily_research/snapshot
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install isolated Turso client without package scripts
+        working-directory: tools/turso
+        run: npm install --no-audit --no-fund --ignore-scripts --no-package-lock
+      - name: Test the immutable, audited snapshot writer
+        run: node --test tools/turso/signal-snapshot-import.test.mjs
+      - name: Validate manifest and all chart evidence without DB access
+        run: |
+          node tools/turso/signal-snapshot-import.mjs \
+            --mode=dry_run --input-dir=output/turso_daily_research/snapshot
+      - name: Apply only after independently audited Turso EOD and close-price match
+        if: ${{ env.RESEARCH_MODE == 'apply' }}
+        env:
+          TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
+          TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
+        run: |
+          node tools/turso/signal-snapshot-import.mjs \
+            --mode=apply --input-dir=output/turso_daily_research/snapshot
+      - name: Retain exact-date audit and manifest for troubleshooting
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: BLUE_TURSO_RESEARCH_${{ github.run_id }}
+          path: |
+            output/turso_daily_research/source/AUDIT.json
+            output/turso_daily_research/snapshot/manifest.json
+          if-no-files-found: ignore
+          retention-days: 14

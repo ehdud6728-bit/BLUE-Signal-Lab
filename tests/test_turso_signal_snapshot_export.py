@@ -56,6 +56,23 @@ class ExportDualDbSignalSnapshotTests(unittest.TestCase):
         self.assertEqual(rows[1]['stats']['setups'], [])
         self.assertEqual(manifest, export_snapshot(self.src, self.dst))
 
+    def test_reverification_timestamp_does_not_invalidate_same_source(self):
+        self.audit['source_verified_at_kst'] = '2026-11-18T19:00:00+09:00'
+        self._save_audit()
+        first = export_snapshot(self.src, self.dst)
+        self.audit['source_verified_at_kst'] = '2026-11-19T10:00:00+09:00'
+        self._save_audit()
+        second = export_snapshot(self.src, self.dst)
+        self.assertEqual(first['source_audit_sha256'], second['source_audit_sha256'])
+        self.assertEqual(first['payload_sha256'], second['payload_sha256'])
+
+    def test_change_in_stable_market_audit_is_not_ignored(self):
+        first = export_snapshot(self.src, self.dst)
+        self.audit['source_sha256_by_year'] = {'2026': 'b'*64}
+        self._save_audit()
+        second = export_snapshot(self.src, self.dst)
+        self.assertNotEqual(first['source_audit_sha256'], second['source_audit_sha256'])
+
     def test_rejects_audit_mismatch(self):
         self.audit['matched_stocks'] = 3
         self._save_audit()
