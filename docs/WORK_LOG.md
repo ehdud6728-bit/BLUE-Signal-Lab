@@ -2,6 +2,14 @@
 
 새 채팅에서 프로젝트를 이어가기 위한 **결정/구현/검증 이력**입니다. 대화 전체를 저장하지 않고 실제 개발에 필요한 내용만 보존합니다. 최신 항목을 위에 추가하고, 결과가 달라지면 추측 대신 검증된 상태로 수정합니다.
 
+## 2026-11-19 (KST) — Collector 수동 검증 #44507158683 테스트 의존성 누락 수정
+
+- **실패 확인:** [Collector Actions #44507158683](https://github.com/ehdud6728-bit/BLUE-Signal-Lab/actions/runs/44507158683) `Install and run collector tests` 단계에서 `ERR_MODULE_NOT_FOUND: Cannot find package '@libsql/client' imported from tools/turso/kis-token-steward.mjs`. Node 62개 검사 중 61개 성공, 1개 파일은 테스트 로딩 전에 실패. Cloudflare 배포 단계 **skipped**, D1/Turso SQL·KIS 호출·토큰 발급 없음.
+- **원인:** `collector/turso-direct.test.mjs`는 `tools/turso/kis-token-steward.mjs`의 테스트용 토큰 암호화 함수를 가져오지만, 수동 배포 워크플로는 `collector`만 `npm install`함. 앞선 PR CI #44506133087는 `collector`와 `tools/turso`를 모두 설치해 통과함. KIS 인증 실패나 잠정 일봉 수집 로직 결함으로 판단하지 않음.
+- **수정:** `.github/workflows/blue_r142_collector_deploy.yml`에서 무비밀 테스트 전에 `tools/turso` 의존성 설치 추가(`--ignore-scripts`). `tests/test_turso_mirror_rollout.py`에 순서/설치 회귀 방지 검사 추가. 기존 `deploy=false`, `confirm_mirror_off`, `confirm_full_mirror` 배포 승인 게이트와 Worker 설정/발급기/DB 동작은 변경하지 않음.
+- **로컬 검증:** Collector Node **69/69** PASS, Python 수동 배포 보호 **3/3** PASS, 배포 Workflow YAML 구문·`git diff --check` PASS, Collector Wrangler **`deploy --dry-run` 성공**(`TURSO_MIRROR_ENABLED=false` 보존). GitHub PR CI는 별도 확인. 실제 운영 Worker 배포·Secret 변경·KIS 호출·원격 DB 접근은 미실행.
+- **다음:** 수정 PR 병합 및 GitHub CI 확인 → [Collector 수동 검증](https://github.com/ehdud6728-bit/BLUE-Signal-Lab/actions/workflows/blue_r142_collector_deploy.yml)의 `deploy=false`로 재실행 → 기존 Turso 미러 운영 상태 확인 후 **별도 승인** 전에는 `deploy=true` 금지. 그 후 정규장에서 KIS 잠정 일봉 제한 파일럿을 검증. 분봉은 정밀분석 시 온디맨드 조회로 보류.
+
 ## 2026-11-19 (KST) — KIS 잠정 일봉 코드 준비 / 정밀분석 분봉 보류
 
 - **사용자 결정:** 확정 KRX 일봉이 준비되기 전에도 KIS의 미완성 당일 OHLCV를 받아서 사용한다. 반면 5/10/30분봉은 **정밀분석에서 종목을 지정한 시점에 수집**하는 미래 기능으로 미루며 이번 변경에서 구현/수집하지 않는다.
