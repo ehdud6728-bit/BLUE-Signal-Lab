@@ -78,6 +78,9 @@ class TursoUnifiedPipelineTests(unittest.TestCase):
         self.assertIn('if: ${{ env.MODE == \'apply\' }}', eod)
         self.assertIn('--start "$TRADE_DAY" --end "$TRADE_DAY"', eod)
         self.assertIn('--date "$TRADE_DAY" --years "$RESEARCH_YEARS"', eod)
+        self.assertIn('--reuse-target-eod-dir output/turso_daily_eod', eod)
+        self.assertIn('--scan-workers 2 --scan-chunk-size 500', eod)
+        self.assertIn("test_turso_parallel_pattern_scan.py", eod)
         self.assertIn("audit['asof'] == os.environ['TRADE_DAY']", eod)
         self.assertLess(eod.index('node tools/turso/eod-range-import.mjs --mode=apply'),
                         eod.index('python scripts/market_scan_r11.py'))

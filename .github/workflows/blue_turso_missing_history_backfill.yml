@@ -109,7 +109,8 @@ jobs:
               return 0
             fi
             python scripts/market_scan_r11.py --date "$DAY" --years "$YEARS" \
-              --verified-eod-dir "$DIR/eod" --daily-provider auto --out "$DIR/source" || return 1
+              --verified-eod-dir "$DIR/eod" --scan-workers 2 --scan-chunk-size 500 \
+              --daily-provider auto --out "$DIR/source" || return 1
             python scripts/export_turso_signal_snapshot.py \
               --input-dir "$DIR/source" --out "$DIR/signals" || return 1
             node tools/turso/signal-snapshot-import.mjs --mode=dry_run \

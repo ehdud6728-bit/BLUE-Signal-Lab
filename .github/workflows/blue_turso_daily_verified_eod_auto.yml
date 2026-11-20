@@ -92,6 +92,9 @@ jobs:
       - name: Test independent research snapshot source exporter
         if: ${{ env.RUN_RESEARCH == 'true' }}
         run: python -m unittest discover -s tests -p 'test_turso_signal_snapshot_export.py' -v
+      - name: Prove 500-symbol parallel scan equals original serial output
+        if: ${{ env.RUN_RESEARCH == 'true' }}
+        run: python -m unittest discover -s tests -p 'test_turso_parallel_pattern_scan.py' -v
       - name: Scan full market patterns for the SAME verified KST date
         if: ${{ env.RUN_RESEARCH == 'true' }}
         env:
@@ -107,6 +110,8 @@ jobs:
           fi
           python scripts/market_scan_r11.py \
             --date "$TRADE_DAY" --years "$RESEARCH_YEARS" \
+            --reuse-target-eod-dir output/turso_daily_eod \
+            --scan-workers 2 --scan-chunk-size 500 \
             --daily-provider auto --out output/turso_daily_research/source \
             "${INDICATOR_ARGS[@]}"
       - name: Reject stale research dates and incomplete KRX coverage
