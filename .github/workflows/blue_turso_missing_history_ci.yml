@@ -1,0 +1,36 @@
+name: BLUE Turso Missing History Safety CI (NO SECRETS)
+
+on:
+  pull_request:
+    paths:
+      - 'scripts/turso_missing_history_guard.py'
+      - 'scripts/turso_history_sessions.py'
+      - 'tools/turso/missing-history-plan.mjs'
+      - 'tools/turso/missing-history-plan.test.mjs'
+      - 'tests/test_turso_missing_history_backfill.py'
+      - '.github/workflows/blue_turso_missing_history_backfill.yml'
+      - '.github/workflows/blue_turso_missing_history_ci.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install isolated test dependencies
+        run: |
+          npm --prefix tools/turso install --no-audit --no-fund --ignore-scripts --no-package-lock
+      - name: Check guards and KRX calendar without network or database
+        run: python -m unittest discover -s tests -p 'test_turso_missing_history_backfill.py' -v
+      - name: Check immutable missing-day planner without secrets
+        run: node --test tools/turso/missing-history-plan.test.mjs

@@ -26,7 +26,7 @@ function mock(){
       return {rows:stmt.all(...args),rowsAffected:0};
     },close(){closed++;}
   });
-  let run=null;let dispatchOK=true;
+  let run=null;let dispatchOK=true;let jobSteps=[];
   const fetcher=async(url,options={})=>{
     if(options.method==='POST'){
       dispatches++;
@@ -37,12 +37,17 @@ function mock(){
       assert.equal(payload.ref,'main');
       return new Response(null,{status:dispatchOK?204:502});
     }
+    if(/\/actions\/runs\/\d+\/jobs\?per_page=10$/.test(url)){
+      assert.equal(url.endsWith('/12345/jobs?per_page=10'),true);
+      return new Response(JSON.stringify({jobs:[{name:'daily_eod',steps:jobSteps}]}),{status:200});
+    }
     assert.match(url,/blue_turso_daily_verified_eod_auto.yml\/runs/);
     return new Response(JSON.stringify({workflow_runs:run?[run]:[]}),{status:200});
   };
   return {db,calls,factory,fetcher,
     get closed(){return closed;},get dispatches(){return dispatches;},
-    get run(){return run;},set run(value){run=value;},set dispatchOK(value){dispatchOK=value;}};
+    get run(){return run;},set run(value){run=value;},set dispatchOK(value){dispatchOK=value;},
+    set jobSteps(value){jobSteps=value;}};
 }
 
 test('rejects weekends, invalid dates and same-day before KRX close',()=>{
@@ -108,6 +113,35 @@ test('GitHub failure shows a verified date-specific run link; stale requests exp
   assert.equal(result.actions_url,db.run.html_url);
   const later=new Date(now.getTime()+151*60000);
   assert.equal((await tursoResearchRequestStatus(env,day,{...opts,now:later})).status,'FAILED');
+  db.db.close();
+});
+
+test('progress phases come only from successful audited GitHub steps, never elapsed guesses',async()=>{
+  const db=mock(),opts={now,factory:db.factory,fetcher:db.fetcher};
+  await requestTursoResearch(env,day,opts);
+  db.run={id:12345,display_title:`BLUE Turso ${day} · apply`,
+    created_at:now.toISOString(),status:'in_progress',conclusion:null,
+    updated_at:now.toISOString(),html_url:'https://github.com/ehdud6728-bit/BLUE-Signal-Lab/actions/runs/12345'};
+  const read=()=>tursoResearchRequestStatus(env,day,opts);
+  assert.equal((await read()).stage,'RUNNING');
+  db.jobSteps=[{name:'Fetch one exact KRX trading day and validate market coverage',
+    conclusion:'success'}];
+  assert.equal((await read()).stage,'EOD');
+  db.jobSteps=[
+    {name:'Fetch one exact KRX trading day and validate market coverage',conclusion:'success'},
+    {name:'Write verified KRX EOD into Turso only and audit read-back',conclusion:'success'}];
+  assert.equal((await read()).stage,'RESEARCH');
+  db.jobSteps=[
+    {name:'Write verified KRX EOD into Turso only and audit read-back',conclusion:'success'},
+    {name:'Scan full market patterns for the SAME verified KST date',conclusion:'success'}];
+  assert.equal((await read()).stage,'SAVING');
+  db.jobSteps=[
+    {name:'Scan full market patterns for the SAME verified KST date',conclusion:'success'},
+    {name:'Save research only after Turso EOD audit and exact close match',conclusion:'success'}];
+  const finished=await read();
+  assert.equal(finished.stage,'VERIFYING');
+  assert.equal(finished.requested_at_utc,now.toISOString());
+  assert.equal(finished.actions_url,db.run.html_url);
   db.db.close();
 });
 

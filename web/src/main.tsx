@@ -4,6 +4,9 @@ import SmartBasket, {type BasketQuickAddRequest} from './SmartBasket';
 import PriceCompareMini from './PriceCompareMini';
 import SymbolAnalysisPanel from './SymbolAnalysisPanel';
 import TursoEodRecovery, {type TursoDay} from './TursoEodRecovery';
+import TursoResearchProgress from './TursoResearchProgress';
+import TursoAiReadiness from './TursoAiReadiness';
+import {type TursoProgressStage} from './turso-research-progress';
 import {requestSearchPriority} from './search-priority';
 import {comparisonKey,fetchCompared,fetchComparedTursoFirst,fetchComparedTursoOnly,
   refreshKisQuoteToTurso,type PriceCompare} from './price-compare';
@@ -191,9 +194,13 @@ function App(){
   const [scanInfo,setScanInfo]=useState('');
   const [actionsUrl,setActionsUrl]=useState('');
   const [tursoWatchDate,setTursoWatchDate]=useState(rememberedTursoDate);
+  const [tursoRequestDate,setTursoRequestDate]=useState(rememberedTursoDate);
   const [tursoCompletedDate,setTursoCompletedDate]=useState('');
   const [tursoScanInfo,setTursoScanInfo]=useState('');
   const [tursoActionsUrl,setTursoActionsUrl]=useState('');
+  const [tursoStage,setTursoStage]=useState<TursoProgressStage>('REQUESTED');
+  const [tursoStartedAt,setTursoStartedAt]=useState(0);
+  const [tursoFinishedAt,setTursoFinishedAt]=useState(0);
   const [filterOpen,setFilterOpen]=useState(true);
   const [installPrompt,setInstallPrompt]=useState<InstallPrompt|null>(null);
   const [installGuide,setInstallGuide]=useState(false);
@@ -358,6 +365,9 @@ function App(){
 
   async function requestTursoScan(day:string){
     setRequestBusy(true);
+    setTursoRequestDate(day);
+    setTursoStage('REQUESTED');setTursoStartedAt(Date.now());setTursoFinishedAt(0);
+    setTursoActionsUrl('');
     setTursoScanInfo(`${day}의 Turso 패턴 분석 시작을 요청하고 있습니다.`);
     try{
       const response=await fetch(API+'/api/research/request',{
@@ -368,16 +378,19 @@ function App(){
       if(!response.ok)throw Error(result.error||'TURSO_RESEARCH_REQUEST_UNAVAILABLE');
       if(result.status==='READY'){
         setTursoWatchDate('');setTursoCompletedDate(day);
+        setTursoStage('READY');setTursoFinishedAt(Date.now());
         setTursoScanInfo(`${day} 패턴 분석이 이미 준비되어 있습니다.`);
         if(mode==='single'&&date===day)void search(1,false,gcFields,gcLogic,day);
       }else{
         setTursoCompletedDate('');setTursoWatchDate(day);
-        setTursoActionsUrl('');
+        setTursoStage('QUEUED');
         setTursoScanInfo(result.deduplicated?
           `${day} 분석이 이미 진행 중입니다. 완료 상태를 이어서 확인합니다.`:
           `${day} KRX 일봉 검증과 전체시장 패턴 분석을 시작했습니다. 완료되면 자동으로 검색합니다.`);
       }
     }catch(e){
+      setTursoWatchDate('');setTursoCompletedDate('');setTursoStage('FAILED');
+      setTursoFinishedAt(Date.now());
       setTursoScanInfo(researchRequestError(e instanceof Error?e.message:''));
     }finally{setRequestBusy(false);}
   }
@@ -468,7 +481,9 @@ function App(){
       if(d.data_status==='NOT_IMPORTED'){
         if(queryMode==='single'){
           if(patternBackend==='turso'){
-            setStatus(`${queryDate}의 Turso 패턴 분석이 아직 없습니다. 해당 날짜의 일봉 검증·분석을 요청합니다.`);
+            // An inline progress card carries the request outcome and errors.
+            // Do not leave a generic "requesting" notice after a failed POST.
+            setStatus('');
             await requestTursoScan(queryDate);
           }else if(queryDate>todayKST()){
             setStatus('미래 날짜의 주가 데이터는 아직 존재하지 않습니다.');
@@ -535,25 +550,36 @@ function App(){
       try{
         const response=await fetch(API+'/api/research/request/status?date='+encodeURIComponent(tursoWatchDate),
           {credentials:'include',cache:'no-store'});
-        const result=await response.json() as {status?:string;error?:string;reason?:string;actions_url?:string};
+        const result=await response.json() as {status?:string;error?:string;reason?:string;
+          actions_url?:string;stage?:TursoProgressStage;requested_at_utc?:string};
         if(!response.ok)throw Error(result.error||`분석 상태 오류 ${response.status}`);
         if(cancelled)return;
         if(result.actions_url)setTursoActionsUrl(result.actions_url);
+        if(result.requested_at_utc){
+          const started=Date.parse(result.requested_at_utc);
+          if(Number.isFinite(started))setTursoStartedAt(started);
+        }
         if(result.status==='READY'){
           setTursoWatchDate('');setTursoCompletedDate(tursoWatchDate);
+          setTursoStage('READY');setTursoFinishedAt(Date.now());
           setTursoScanInfo(`${tursoWatchDate} 패턴 분석 완료 · 저장된 결과를 불러옵니다.`);
           if(!latest||tursoWatchDate>latest)setLatest(tursoWatchDate);
           if(mode==='single'&&date===tursoWatchDate)void search(1,false,gcFields,gcLogic,tursoWatchDate);
         }else if(result.status==='FAILED'){
           setTursoWatchDate('');
+          setTursoStage('FAILED');setTursoFinishedAt(Date.now());
           setTursoScanInfo(`${tursoWatchDate} 분석 실패: ${result.reason||'실행 기록을 확인해 주세요.'}`);
         }else if(result.status==='PENDING'){
+          setTursoStage(['REQUESTED','QUEUED','RUNNING','EOD','RESEARCH','SAVING','VERIFYING'].includes(result.stage||'')?
+            result.stage!:'RUNNING');
           setTursoScanInfo(`${tursoWatchDate} 전체시장 분석 진행 중 · 다른 화면에서도 계속됩니다.`);
         }else if(result.status==='NOT_IMPORTED'){
           setTursoWatchDate('');
+          setTursoStage('FAILED');setTursoFinishedAt(Date.now());
           setTursoScanInfo(`${tursoWatchDate} 분석 요청이 없습니다. 검색 버튼으로 다시 요청할 수 있습니다.`);
         }
-      }catch(e){if(!cancelled)setTursoScanInfo('Turso 분석 상태 확인 실패 · '+String(e));}
+      }catch(e){if(!cancelled)setTursoScanInfo('상태를 일시적으로 확인하지 못했습니다. 15초 후 다시 시도합니다. · '+
+        researchRequestError(e instanceof Error?e.message:''));}
       finally{inFlight=false;}
     };
     const visible=()=>{if(document.visibilityState==='visible')void poll();};
@@ -752,7 +778,8 @@ function App(){
       </div>
     </header>
     <div className="r1594-view-toolbar" role="group" aria-label="현재 화면 데이터 새로고침">
-      <span>{({research:'종목 검색',analysis:'종목 정밀분석',tracking:'종목 추적',ai:'AI 시황',basket:'장바구니'} as const)[activeView]}</span>
+      <span>{activeView==='ai'&&storageMode==='turso'?'AI 패턴':
+        ({research:'종목 검색',analysis:'종목 정밀분석',tracking:'종목 추적',ai:'AI 시황',basket:'장바구니'} as const)[activeView]}</span>
       <button type="button" disabled={activeView==='research'&&(busy||requestBusy)}
         onClick={refreshCurrentView}><RefreshCw size={16}/> 새로고침</button>
     </div>
@@ -773,21 +800,6 @@ function App(){
         void search(1,false,gcFields,gcLogic,day);
       }}>완료 결과 보기</button>}
     </div>}
-    {storageMode==='turso'&&searchSource==='patterns'&&
-      (tursoWatchDate||tursoCompletedDate||tursoScanInfo)&&
-      <div className="r1581-scan-monitor" role="status" aria-live="polite">
-        <RefreshCw size={16} className={tursoWatchDate?'r1581-pending':''}/>
-        <div className="r1581-scan-text">
-          <strong>{tursoWatchDate?`${tursoWatchDate} Turso 패턴 분석 중`:
-            tursoCompletedDate?`${tursoCompletedDate} Turso 분석 완료`:'Turso 분석 안내'}</strong>
-          <span>{tursoScanInfo||'분석 진행 상태를 확인합니다.'}</span>
-          {tursoActionsUrl&&<a href={tursoActionsUrl} rel="noopener noreferrer" target="_blank">GitHub 실행 기록</a>}
-        </div>
-        {tursoCompletedDate&&<button type="button" onClick={()=>{
-          const day=tursoCompletedDate;setActiveView('research');setTursoCompletedDate('');
-          void search(1,false,gcFields,gcLogic,day);
-        }}>완료 결과 보기</button>}
-      </div>}
     {/* R153_BOTTOM_NAV_ONLY: navigation is in the bottom dock on every viewport. */}
     {installGuide&&<div className="install-guide" role="status"><button className="guide-close" onClick={()=>setInstallGuide(false)} aria-label="안내 닫기"><X size={17}/></button>
       <strong>휴대폰에 설치하는 방법</strong><p>안드로이드 Chrome: 오른쪽 위 ⋮ → <b>앱 설치</b> 또는 <b>홈 화면에 추가</b></p>
@@ -887,8 +899,11 @@ function App(){
           {(storageMode==='d1'||(storageMode==='turso'&&activeView==='tracking'))&&<LiveMarket active={activeView==='tracking'} refreshKey={r1594TrackingRefresh}/>}
         </div>
         <div className={'r152-ai-content '+(activeView==='ai'?'':'r151-hidden')}>
-          {mode==='single'&&latest&&date>latest&&<p className="r159-data-note">{date}에는 저장된 확정 일봉이 없어, AI 시황은 최근 저장일 {latest} 기준으로 조회합니다.</p>}
-          {(storageMode==='d1'||(storageMode==='turso'&&activeView==='ai'))&&<section ref={aiRef} id="ai-panel" className="r152-ai-section">
+          {storageMode==='d1'&&mode==='single'&&latest&&date>latest&&<p className="r159-data-note">{date}에는 저장된 확정 일봉이 없어, AI 시황은 최근 저장일 {latest} 기준으로 조회합니다.</p>}
+          {storageMode==='turso'&&activeView==='ai'&&<section ref={aiRef} id="ai-panel" className="r152-ai-section">
+            <TursoAiReadiness key={r1594AiRefresh} api={API} active={true}/>
+          </section>}
+          {storageMode==='d1'&&<section ref={aiRef} id="ai-panel" className="r152-ai-section">
             <AiWidget key={'market-'+aiReportDay+'-'+r1594AiRefresh} kind="market"
               date={aiReportDay}
               observed={mode==='single'?days.find(d=>d.day===aiReportDay)?.observed_stocks:null}
@@ -914,6 +929,15 @@ function App(){
           </div>}
         </div></div>}
         {scanInfo&&<div className="notice" role="status"><RefreshCw size={17}/><div>{scanInfo}{actionsUrl&&<div><a href={actionsUrl} target="_blank" rel="noreferrer">GitHub 실행 결과 확인</a></div>}</div></div>}
+        {storageMode==='turso'&&searchSource==='patterns'&&
+          (tursoWatchDate||tursoCompletedDate||tursoScanInfo)&&
+          <TursoResearchProgress day={tursoWatchDate||tursoCompletedDate||tursoRequestDate}
+            stage={tursoStage} info={tursoScanInfo} actionsUrl={tursoActionsUrl}
+            startedAt={tursoStartedAt} finishedAt={tursoFinishedAt}
+            onViewResults={()=>{
+              const day=tursoCompletedDate;setActiveView('research');
+              void search(1,false,gcFields,gcLogic,day);
+            }}/>}
         <section className="panel result" ref={resultRef} id="results-panel">
           <div className="result-heading"><h2><BarChart3 size={18}/> 검색된 종목 <small>{dataStatus==='NOT_IMPORTED'?'일봉 미수집':total===null?'검색 전':total+'건'}</small></h2><span className="eod-pill"><Clock3 size={13}/> EOD</span></div>
           <p className="r1599-active-filters">검색 결과 기준 · 거래대금 {(appliedAmountEok??amountEok)>0?(appliedAmountEok??amountEok).toLocaleString('ko-KR')+'억원 이상':'전체'} · 토마토 강조 {highlightMin===null?'꺼짐':highlightMin+'% 이상 · 표본 '+patternSampleMin+'건 이상'}{onlyPattern&&highlightMin!==null?' · 해당 종목만 보기':''}{appliedAmountEok!==null&&appliedAmountEok!==amountEok?' · 거래대금 변경 미적용(검색 버튼을 누르세요)':''}</p>
@@ -1099,7 +1123,7 @@ function App(){
       <button className={activeView==='research'?'dock-primary':''} onClick={()=>nav('search')}><BarChart3 size={20}/><span>검색</span></button>
       <button className={activeView==='analysis'?'dock-primary':''} onClick={()=>nav('analysis')}><ScanSearch size={20}/><span>정밀분석</span></button>
       <button className={activeView==='tracking'?'dock-primary':''} onClick={()=>nav('tracking')}><Radar size={20}/><span>추적</span></button>
-      <button className={activeView==='ai'?'dock-primary':''} onClick={()=>nav('ai')}><Activity size={20}/><span>AI 시황</span></button>
+      <button className={activeView==='ai'?'dock-primary':''} onClick={()=>nav('ai')}><Activity size={20}/><span>{storageMode==='turso'?'AI 패턴':'AI 시황'}</span></button>
       <button className={activeView==='basket'?'dock-primary':''} onClick={()=>nav('basket')}><ShoppingBasket size={20}/><span>장바구니</span></button>
     </nav>
     {selected&&<div className="detail-overlay" role="presentation" onMouseDown={e=>{if(e.target===e.currentTarget)closeDetail();}}>

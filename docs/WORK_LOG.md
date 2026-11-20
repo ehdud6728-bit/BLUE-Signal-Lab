@@ -9,6 +9,81 @@
 - **로컬 검증:** 신규 Node 무비밀 테스트 **11/11 PASS**(기본 dry-run, 토큰 만료 차단, SELECT 전용, 날짜/가격/응답 검증, 원주가·수정주가 플래그, 기밀 미노출). 워크플로 YAML은 `workflow_dispatch` 전용/`contents:read`로 파싱 통과, `git diff --check` 성공. Stock-Hunter 기존 R8 단위 테스트 **9/9 PASS**. 다만 실제 BLUE GitHub Actions에서 pinned R8 checkout과 원천 CSV 인터페이스 연동은 병합 후 실행해 검증해야 함. 실제 KIS 호출/Turso SELECT/토큰 발급·데이터 쓰기·Worker 배포는 **수행하지 않음**.
 - **남은 확인/다음:** PR CI 확인·사용자 병합 → `mode=dry_run` → 기존 Shared KIS Token Steward `mode=check`의 유효 토큰 확인 → `mode=capture` 수동 한 번 → Actions 아티팩트의 R8 `independent_status`를 감사. 5개 날짜 비교 통과도 전체 R116 수정주가 재현·55일 전략 성공 판단을 뜻하지 않는다. Stock-Hunter [R9 PR #13](https://github.com/ehdud6728-bit/Stock-Hunter/pull/13)은 대체 수집 경로로 유지하며 별도 Secret 불필요.
 
+## 2026-11-20 (KST) — 미수집 자동 저장 `audit` KRX 기간조회 실패 후 직접 정확일 판정으로 보완
+
+- **실제 실패:** [Actions #44701977071](https://github.com/ehdud6728-bit/BLUE-Signal-Lab/actions/runs/44701977071) `audit`에서 가드·의존성 설치 성공, KRX KOSPI 2024-10-21~2026-11-19 지수 기간 조회가 `Expecting value: line 1 column 1 (char 0)`으로 실패. Turso SQL 및 EOD/패턴 저장 단계는 시작되지 않아 원격 쓰기 0건. 이 결과를 조회 실패/휴장일로 잘못 간주하지 않음.
+- **사용자 지적:** KIS·KRX 공식 시세가 있는데 별도 거래일 라이브러리를 도입할 이유가 불충분하다. 기존 KRX 정확한 날짜별 KOSPI·KOSDAQ EOD 검증 경로를 재사용하고, KIS tokenP 추가 발급·제3자 달력 의존 없이 가도록 변경.
+- **수정:** 날짜 생성기는 검증 전 평일 후보만 만듦 → Turso 불변 EOD/연구 감사에서 미수집 최대 50개 후보 조회 → 각 날짜마다 기존 KRX 전체시장 검증 성공한 날짜만 최대 5개 `audit` 확인·`dry_run` 연구 검증·명시적 `apply` 저장. 불가 날짜는 `KRX_UNVERIFIED`(휴장 또는 공급자 오류, 구별 불가)로 남기고 다음 후보 처리, 연속 8회 원천 확인 실패 시 중단. 감사 존재·충돌·부분 저장 보호, 예약 기본 OFF 정책 유지.
+- **테스트/원격 상태:** 신규 및 기존 가드/저장기 단위 테스트 재실행 예정. 실제 KRX·Turso 쿼리·쓰기/예약 활성화는 이번 코드 수정 중 수행하지 않음.
+- **다음:** PR CI 통과→사용자 병합→신규 `audit`에서 KRX 날짜별 검증 5개 및 Turso 목록 확인→별도 `apply` 승인 후 순차 저장.
+
+## 2026-11-20 (KST) — 감사 원장 기준 미수집 KRX 거래일 자동 탐색·순차 저장 PR 준비
+
+- **요청/문제:** 수동 11/11~11/12 `apply` [#44696224417](https://github.com/ehdud6728-bit/BLUE-Signal-Lab/actions/runs/44696224417)은 `confirm_write` 빈값으로 가드에서 중단되어 저장 0건. 이전 4일 적용 [#44683473485](https://github.com/ehdud6728-bit/BLUE-Signal-Lab/actions/runs/44683473485)은 11/10 불변 연구 감사 해시 충돌로 뒤 날짜 연구 저장을 진행하지 못했음. 사용자는 일일이 날짜 선택하지 않고 **미수집 날짜만 차례대로 저장**하는 운영을 선호.
+- **개발:** `scripts/turso_missing_history_guard.py`(main/최대5일/2년 범위/쓰기 승인), `scripts/turso_history_sessions.py`(KRX 지수 실제 세션으로 휴장일 제외), `tools/turso/missing-history-plan.mjs`(Turso SELECT 0쓰기, EOD/패턴 감사 별도 비교, 충돌/부분 기록 격리), `.github/workflows/blue_turso_missing_history_backfill.yml`(원장 기반 오래된 미수집 거래일 5개 한정, 기존 불변 importer로 날짜별 독립 재생/오류 시 다음 날짜 진행) 및 단위 테스트. 기존 과거 워크플로·저장 레코드·D1/KIS·전체 종목 지표 옵션은 변경하지 않음.
+- **운영 권한:** 수동 `apply`는 `blue-turso-missing-history-apply`, 매일 05:00 KST 스케줄은 저장소 변수 2개 모두 일치해야 허용. 기본 OFF. 로컬 테스트 외 GitHub Actions 실행/운영 DB 연결·쓰기/변수 활성화 미실행. [실행 방법](TURSO_MISSING_HISTORY_BACKFILL_RUNBOOK.md).
+- **검증:** 신규 Node 단위 테스트 **4/4**, Python 단위 테스트 **5/5** 로컬 통과. CI·실제 KRX 세션 대량 조회·실 Turso 감사 결과는 병합 후 확인할 단계이며 원격 저장 성공이라고 기록하지 않음.
+- **다음:** PR CI → 사용자 병합 → 첫 `audit`에서 실제 미수집·충돌 목록 조회 → 수동 `apply` 1회 확인 → Turso 저장 용량 및 경고 확인 후 별도 사용자 결정으로 자동 예약 변수 활성화 → 장기 표본 기반 익절·손절 후속 연구.
+
+## 2026-11-20 (KST) — 과거 분석 KRX EOD/패턴 원천 불일치 제거 (PR 준비)
+
+- **실행 근거:** PR #57 병합 커밋 `239c2418390fe7275a255a9582afdcebb4279b6a`, [History Replay `dry_run` #44667107812](https://github.com/ehdud6728-bit/BLUE-Signal-Lab/actions/runs/44667107812) 전체 job 성공. 정확한 KRX EOD 11/09~12 각 2,660·2,662·2,665·2,664건(**10,651종목·일**), 기존 R1.1 패턴은 각 155·238·283·122건(**798종목·일**); 모두 `written=0`. EOD/패턴/지표 원격 쓰기 단계 skipped. 로그 아티팩트 업로드 성공.
+- **발견한 저장 전 문제:** 스캐너는 4개 과거 날짜가 marcap 연도 파일에 이미 있으면 KRX로 전환하지 않고 `FinanceData/marcap daily`만 사용. 실제 패턴 스캐너 `observed_stocks`는 2,610·2,612·2,615·2,614 (**10,451종목·일**, KRX보다 총 **200건 적음**). 이력 `dry_run`은 정적 JSON/해시만 검사하며 Turso의 공식 KRX 종가와 대조하지 않으므로 통과한 것이 곧 저장 호환/전체 종목 동등성을 증명하는 것은 아님. `apply`는 먼저 EOD를 쓰고 신호 importer에서 일치 검증하므로 이 상태로 진행하면 일부 날짜 연구 저장 실패/부분 백필 가능성이 있음.
+- **수정:** 기존 검증 완료 `output/history/eod/manifest.json` + `daily.jsonl`(EOD importer `dry_run` 선행)의 날짜/원천/일자별·전체 해시/전체 종목 KRX 일봉을 **그대로 스캐너 목표일에 재사용**. `--verified-eod-dir`는 해당 파일의 증빙을 재확인하고 유효하지 않거나 해당 날짜가 없으면 실패; marcap은 앞선 수개월·연도의 **과거 기술지표 이력**에만 사용. 기존 같은 날짜 marcap 행은 대체하여 KRX에 없는 후보/종가 차이를 방지. 분석된 목표일 종목 수가 KRX 행 수와 다르면 저장 전 중단. 지표 opt-in도 같은 원천 사용. 같은 날짜의 KRX API를 두 번 호출하지 않음.
+- **로컬 검증:** 새 입력 재사용/변조·날짜/원천 거부 Python **4/4**, 기존 R1.1 정확일·KRX 회귀 **21/21**, 기간 guard **4/4**, YAML 두 개/`git diff --check` 통과. 실제 원격 `dry_run`에서 **수정 후 신호 발생 건수는 미확인**이고, 위 798건은 marcap 기반 이전 실행의 발생 건수로 정식 연구 백필 수치가 아님. Turso/D1 SQL·KIS·배포 미실행.
+- **다음:** PR 검증 및 병합 → 같은 4일의 수동 `dry_run`으로 패턴 감사 `observed_stocks`가 KRX 일봉 2,660·2,662·2,665·2,664과 정확히 일치하는지, 수정 후 후보/차트·원장 해시 생성되는지 확인 → 별도 승인 `apply`로만 Turso 백필. EOD 이미 저장된 4일의 기존 감사와 충돌한다면 데이터를 변경·삭제하지 않고 중단.
+
+## 2026-11-20 (KST) — 과거 4일 묶음 `dry_run` 스캐너 연도 인자 실패 수정 (PR 준비)
+
+- **실제 실행:** [History Replay #44664203917](https://github.com/ehdud6728-bit/BLUE-Signal-Lab/actions/runs/44664203917)은 `2026-11-09`~`2026-11-12`, `dry_run`, 전 종목 지표 OFF로 실행. KRX 확정 EOD 네 날짜(2,660·2,662·2,665·2,664종목), **총 10,651건의 원천 검증과 EOD importer `dry_run`까지 통과**(`verified_days=4`, `verified_rows=10651`, `written=0`). 그 뒤 패턴 스캔 단계에서 실패하였으므로 R1.1 연구 스냅샷 검증 **미완료**. 뒤의 EOD/패턴/지표 Turso `apply` 단계 모두 실행되지 않았고 D1 접근·KIS 발급·운영 배포 없음.
+- **실패 원인:** 신규 `.github/workflows/blue_turso_history_research_batch.yml`이 스캐너 `--years 2`를 전달했으나 `market_scan_r11.py`는 연도 **개수가 아닌 `2025,2026` 형식의 실제 달력연도 목록**을 요구. `FinanceData/marcap`의 존재하지 않는 `marcap-2.parquet`를 요청하여 HTTP 404 발생. KRX EOD 공급 오류나 Turso 인증 실패 아님.
+- **수정:** 각 `DAY`에서 `YEAR-1,YEAR`를 계산해 `--years "$RESEARCH_YEARS"`로 전달. 기존 일일 통합 수집 guard와 동일한 기간 규칙으로 맞추고, 연말/연초/2026-11-09을 포함한 실제 워크플로 명령 회귀 테스트 추가. 기존 `plan`/`dry_run`/`apply` 승인 분리, 원천·원장 검증 및 데이터 보존 정책 그대로 유지.
+- **로컬 검증:** 신규 포함 Python 이력 워크플로 guard **4/4 통과**. `dry_run` 재실행·KRX 연구 스캔 실제 완료 여부/원격 GitHub CI는 PR 병합 전까지 미확인. **이 작업에서는 DB 기록 및 원격 스캐너 실행 안 함.**
+- **다음:** PR 리뷰·CI 후 사용자 병합 → 같은 4일 범위의 `dry_run` 다시 실행해 R1.1 연구 원천·manifest까지 검증 → 성공 확인 후에만 별도 승인 `apply` 여부 결정. 4일 EOD 검증 성공만으로 패턴 자료 적재를 완료했다고 판단하지 않음.
+
+## 2026-11-20 (KST) — 과거 묶음 복구·5~500일 패턴 익절/손절 일괄 개발 (PR 준비)
+
+- **운영 기준:** PR #55 병합 `7615436cabd389fa506ae31b38b2079e1d969b48`. 같은 커밋을 사용한 [API 배포 #44655223026](https://github.com/ehdud6728-bit/BLUE-Signal-Lab/actions/runs/44655223026)와 [웹 배포 #44655290849](https://github.com/ehdud6728-bit/BLUE-Signal-Lab/actions/runs/44655290849)의 실제 Deploy 단계 성공. 기존 자료는 [읽기 전용 감사 #44652090911](https://github.com/ehdud6728-bit/BLUE-Signal-Lab/actions/runs/44652090911)에서 EOD 9일·23,957 종목·일, 연구 5일·882 종목·일, 전 종목 지표 0일. 실제 모바일 화면 표시는 미확인.
+- **사용자 요구:** 데이터 확보 → 5·10·20·60일과 120·250·500일 병행 → 익절/손절/시간청산 효과 → 최근 효과를 검증한 AI 관찰 후보 순으로 **한 PR에서 기반 기능을 묶어 진행**. 과거가 없는데 수익률/추천을 만들지 않음.
+- **역사 자료:** 소스·원장·해시를 모두 재사용하는 기존 KRX exact-day EOD/연구 importer를 최대 7달력일/5평일 수동 기간으로 묶음. `plan`은 네트워크 0, `dry_run`은 검증만, `apply`는 날짜 포함 정확 승인 후 EOD·R1.1 패턴 저장. 전 종목 지표는 별도 opt-in 및 이중 확인 문자열. KRX 공급자 장애/휴장일/기존 행 충돌은 자동 덮어쓰기 없이 중단. D1/KIS 발급/AI 호출 없음.
+- **연구 결과:** 새 Turso SELECT 전용 export가 날짜별 EOD·연구 건수·연구 해시 검증, 데이터 범위를 상한으로 제어. 순수 Python 연구는 다음 거래일 시가 진입, 사전 고정 6개 익절/손절/기간 정책 첫 도달, 거래 비용, 고저가 동시 도달 손절 우선, 결측·미성숙 제외, 시점 구분 홀드아웃. 5·10·20·60·120·250·500일 원장 충족 여부/탐색 정책 요약 반환. 별도 승인 `publish`는 원본 보존 불변 요약 테이블에만 저장. API `/api/research/exit-study`·PWA `TursoExitStudy`에 미게시/관찰 통계 표시. **공식 세션 캘린더·기업행동/수정주가·시장/업종 출처 독립 검증 전 추천과 예상 목표가 생성 금지**.
+- **로컬 검증:** Python 이력 guard **3/3**·청산연구 **4/4**, Turso exporter/publisher Node **7/7**, 기존 Turso API/브라우저 회귀 Node **62/62**, 웹 TypeScript/Vite 빌드, Worker Wrangler `--dry-run`, 계획 실행 `turso_sql_queries=0`·`d1_sql_queries=0`, YAML 구문·diff 정합성 통과. 원격 KRX 조회·Turso/D1 SQL 쓰기·KIS tokenP·배포 **없음**. 새로운 원격 GitHub CI는 PR 게시 후 확인. [운영/후속 절차](TURSO_PATTERN_EXIT_BATCH_RUNBOOK.md).
+- **다음:** PR CI → 사용자 병합 → API/웹 별도 수동 배포 → 과거 결측일 작은 `plan`/`dry_run` 검증 → 승인한 범위만 단계적 `apply` → 자료 성숙/독립 검증 후 `study`와 필요시 `publish`. AI 관찰 후보의 실제 활성화는 추가 공식 시장/기업행동 근거 필요.
+
+## 2026-11-20 (KST) — 최근 감사된 5개 연구일의 패턴 발생 빈도 UI/API (PR 준비)
+
+- **실제 감사 근거:** PR #54 병합 `bff985eea0124b1924ca7f59292988a02c00c8eb`. [읽기 전용 감사 #44652090911](https://github.com/ehdud6728-bit/BLUE-Signal-Lab/actions/runs/44652090911)의 `audit` 성공 로그에서 Turso SELECT **5회**, D1 SQL **0회**, 쓰기 없음. EOD 감사 **9일(2026-11-09~19), 전체 종목·일 23,957건**, 최신 8개 날짜의 감사/실물 행 수 모두 일치. 연구 감사 **5일(11/13,16,17,18,19), 패턴 매칭 종목·일 882건**이며 5개 날짜의 감사/실물 건수(196·114·140·189·243) 일치. 전체 종목 기술지표 원장은 **0일(기본 opt-in OFF)**. 거래일 연속성·기업행동·완성된 후속 성과/익절·손절은 미검증. 5일 출현 관찰만 가능하며 **10일 연구일은 5개 부족**, EOD도 9개로 부족함.
+- **이번 코드:** `GET /api/research/pulse`는 Turso 최신 감사 연구일 최대 10개 중 최근 5개 신호 발생을 이름별 집계하고, 원장 날짜별 실제 저장 건수·이벤트 수·원천 해시가 모두 일치할 때만 반환. 전체 관찰 종목·일 1,000개당 빈도를 보여 주며 이전 감사 연구일 5개가 추가로 있을 때만 상대 변화율을 계산(양쪽 패턴 발생이 각각 3회 이상). `AI 패턴` 탭의 `TursoPatternPulse`에 최대 10종 기술신호를 표시. **연속 5거래일 보장, 실제 시장 승률, 미래 5일 청산 성과, 종목 추천, AI 모델 분석은 제공하지 않음.** 데이터가 모자라면 변화율을 숨긴다.
+- **보호:** SELECT 전용, API D1/AI 캐시 호출 없음. 기존 연구 날짜 자동 수집·저장/지표 opt-in/KIS tokenP·토큰 금고·수집기/Workflow 예약 설정을 변경하지 않음. 이 PR은 운영 Worker/PWA 배포나 Turso 백필을 수행하지 않음.
+- **로컬 검증:** Turso API/API 라우팅/브라우저 회귀 Node **59/59** 성공(5+5일 기준선·원천 해시 불일치 거부 포함). 웹 `npm run build` TypeScript/Vite 성공, Worker Wrangler `deploy --dry-run` 성공, YAML 구문·`git diff --check` 통과. 실제 모바일 화면·운영 API 응답 및 원격 CI는 미확인.
+- **다음:** 코드 리뷰/CI → 사용자 병합 → 별도 API/PWA 배포 → 실제 감사일 UI 검증 → 사용자 승인 하에 누락 연구일/과거 EOD 백필 및 전체 종목 지표 opt-in 검토 → 성숙한 5·10·20일 청산 결과의 독립 검증과 최근·장기 비교/AI 추천 연결.
+
+## 2026-11-20 (KST) — AI 패턴 5·10일 초단기 + 중·장기 확보율 읽기 전용 감사 PR 준비
+
+- **운영 확인:** PR #53 병합 `3b09f9306445a8f6641b4752446745ec13984325`, [실제 API 배포 #44647891557](https://github.com/ehdud6728-bit/BLUE-Signal-Lab/actions/runs/44647891557) 및 [웹 배포 #44649578847](https://github.com/ehdud6728-bit/BLUE-Signal-Lab/actions/runs/44649578847) 성공. 기존 배포/CI 재실행하지 않음.
+- **추가 사용자 결정:** 변화가 빠른 시장을 반영하여 **5·10거래일 초단기**, 20·60거래일 단기/지속성, 120·250·500거래일 장기 연구를 **병행**. 최근 5일의 신호와 5일 후 성숙 성과를 혼동하지 않고, 단기 소표본·장기 기준선 충돌 시 자동 추천 금지.
+- **실제 조회 제한:** 공개 API `/api/research/coverage` 직접 조회는 Cloudflare 인증 302로 기간 데이터를 얻지 못함. 인증 우회나 운영 DB 직접 쿼리 대신 GitHub Actions Secrets를 쓰는 새로운 읽기 전용 수동 감사 워크플로 준비. **현재 실제 저장된 기간의 일수는 미확인**.
+- **코드:** `tools/turso/ai-pattern-horizons-audit.mjs`(KST 이전 760달력일/원장 최대 520일, 5·10·20·60/120·250·500 구간별 EOD/연구/옵트인 전 종목 지표 날짜 집계, 최근 최대 8일만 실물 행수 readback, 평일 누락 후보) + 수동 `.github/workflows/blue_turso_ai_pattern_horizons_audit.yml`(기본 `plan`은 DB 연결 0회; 별도 `audit`만 Turso SELECT) + 단위 테스트. API의 `goals.rolling_windows`와 PWA 다음 단계 문구도 기간 구분에 맞춤. **운영 SQL 쓰기·D1·KIS tokenP·모델 호출·매매·배포 없음.** [설명](TURSO_AI_PATTERN_HORIZONS_RUNBOOK.md).
+- **로컬 검증:** 신설 기간 감사 Node **8/8**, 기존 Turso 웹/API/진행 회귀 Node **54/54**, 웹 TypeScript/Vite 빌드·API Worker Wrangler `--dry-run`, 수동 `plan` 출력 `turso_sql_queries=0`, YAML 구문 및 `git diff --check` 통과. 실제 `audit`는 아직 실행하지 않았으며 원격 저장일 수는 확인되지 않음. CI는 PR에서 별도 확인.
+- **다음:** 이 PR 무비밀 테스트/CI → 사용자 병합 → 수동 `audit` 후 실제 원장과 최근 8일 불일치 확인 → 과거 구간 보충은 용량·KRX 출처 확인 및 별도 승인 → 성숙 사례 기반 단기·장기 비교/시황 국면·추천 연구.
+
+## 2026-11-20 (KST) — Turso AI 패턴·익절·손절 데이터 준비 1단계 (PR 준비)
+
+- **운영 기준:** PR #51 병합 `3ada75f89c7b9d5037e66b799b7388366f97094e`, [API #44644472568](https://github.com/ehdud6728-bit/BLUE-Signal-Lab/actions/runs/44644472568)와 [웹 #44644643775](https://github.com/ehdud6728-bit/BLUE-Signal-Lab/actions/runs/44644643775) 실제 배포 성공. 모바일 화면 렌더링 자체는 미확인.
+- **추가 요구:** 단순 D+10 성과나 일반적 AI 시황보다 **최근 잘 작동하는 패턴·종목별 후보·시장 국면별 성능·언제 익절하고 언제 손절/시간 청산할지**를 우선. 과거 1~2년 전체 종목 EOD 백필이 아직 없어 충분한 과거 데이터가 있다고 간주하지 않음.
+- **구현:** Turso 감사 원장 EOD/패턴 일자·행수 **읽기 전용** `/api/research/coverage`, Turso UI `AI 패턴` 데이터 준비 카드. 동일 Worker의 구 D1 AI 시장 리포트를 Turso 모드에서 호출하지 않음. `scripts/exit_policy_research.py` 오프라인 first-touch 익절/손절/시간청산·갭·모호한 일봉 판정. 실제 투자 후보/AI 모델 출력/패턴 백필/DB 쓰기/발급/주문 미시행.
+- **기준:** 미래 일봉을 미리 아는 방식으로 신호일 종가 진입 금지(다음 거래일 시가 사용), 양방향 터치 모호함은 손절 우선, 갭 손절 미화 금지, 미완성 보유기간은 `PENDING`, 샘플 1~11건은 탐색적 소표본.
+- **로컬 검증:** Turso UI/API/브라우저 안전 Node **54/54**, 오프라인 익절·손절 Python **8/8**, Turso 연구 guard/export Python 각각 통과, 원장 import Node **9/9**, 웹 TypeScript/Vite 빌드·API Wrangler `--dry-run`·워크플로 YAML 구문·`git diff --check` 통과. 기존 `test_market_scan_r11.py` 재실행은 현재 로컬 Python에 `requests`가 없어 **시작 전 실패**했으며 CI는 `requests`/`numpy`/`pandas`를 설치한 뒤 실행하도록 설정. 해당 기존 테스트의 성공을 주장하지 않음.
+- **다음:** PR CI/웹·API 빌드 검사 → 사용자 병합/수동 API+웹 배포 → Turso 실제 감사 원장 커버리지 확인 → 사용자 승인 하에 범위 제한 historical dry-run/백필 → 최근 20·60·120거래일 이벤트/시장 국면/익절·손절 walk-forward 통계 → Gemini 모델 설명 연결. [상세 계획](TURSO_AI_PATTERN_EXIT_PLAN.md).
+
+## 2026-11-20 (KST) — 과거 날짜 자동 분석 진행 카드·실제 단계 표시 (PR 준비)
+
+- **운영 증거:** PR #50 병합 `012107165d1fad7d5e8bbcd7782c7c2506c6f99a`. [API #44636946023](https://github.com/ehdud6728-bit/BLUE-Signal-Lab/actions/runs/44636946023)와 [웹 #44637083823](https://github.com/ehdud6728-bit/BLUE-Signal-Lab/actions/runs/44637083823) 실제 배포 성공. 사용자 2026-11-16 검색 후 [자동 Turso 통합 EOD·연구 #44637541535](https://github.com/ehdud6728-bit/BLUE-Signal-Lab/actions/runs/44637541535)가 2026-11-20 08:25:32~08:29:41 KST(4분 9초) 성공; 전체시장 일봉·연구 단계 성공, 지표 opt-in 단계는 의도대로 skipped.
+- **UI 문제/변경:** 분석 요청 자체는 정상이나 화면 상단 배너를 스크롤하면 검색 결과 영역에서 보이지 않고, 일반 `NOT_IMPORTED` 안내만 남아 무반응으로 오해하기 쉬웠음. `TursoResearchProgress` 진행 카드를 통계/검색 결과 사이로 옮겨 4단계 상태·경과 시간·15초 간격 자동 조회·실행 링크·완료 버튼·실패 사유를 한곳에 표시. 실패 시 과거의 '분석 요청합니다' 안내를 그대로 남기지 않음. 정확한 퍼센트 추정은 하지 않음.
+- **API 단계 근거:** `worker/src/turso-research-request.ts`의 기존 Access 보호 상태 조회가 날짜와 접수 시각이 일치하는 GitHub Actions 실행에 대해 **읽기 전용** jobs API를 추가 호출. KRX EOD Turso 감사, 전체시장 스캔, 연구 저장 단계의 각 성공한 실제 step에 따라 `stage`·`requested_at_utc` 반환. GitHub 조회 오류/결과 미확정은 `RUNNING`으로 표시해 추정 단계 전진을 차단. 완료 여부는 변함없이 Turso 연구 감사 원장 및 실제 행수로 판정. 운영 D1 SQL·데이터 쓰기·새 분석 실행 없음.
+- **로컬 검증:** Turso API/브라우저 연동·회귀·진행 단계 테스트 **51/51 통과**, 웹 TypeScript + Vite 빌드 성공, API Wrangler 배포 `--dry-run` 성공. PR CI/운영 배포와 새 모바일 앱 화면 확인은 후속. 작업 브랜치 `feat/turso-research-inline-progress-20261120`.
+- **다음:** PR CI 확인 → 사용자 병합 → 기존 Turso API 배포(승인된 수동 워크플로 `deploy_api`) → 웹 정적 배포 → 미등록 과거 거래일을 검색해 단계 전환·진행·완료 결과 자동 갱신 확인. 테스트 재실행을 위한 운영 D1 조회나 불필요한 KIS tokenP 발급 금지.
+- **추가 사용자 결정:** 화면 진행상태 확인 후 저장된 패턴을 활용한 AI 분석·관찰 후보 추천 개발을 다음 우선순위로 확정. 기존 AI 시황/장바구니 API에는 D1 의존이 남아 있어 Turso로 독립 연결해야 함. 데이터 기준일 엄수, 후속 5/10/20거래일 검증과 소표본/불확실성 표시, 다중 신호 근거·위험 요인·AI 설명 및 매일 갱신을 별도 단계로 추진. 이 PR에 AI 후보 추천의 완성/배포를 포함하지 않음.
 ## 2026-11-20 (KST) — Turso 전체 종목 기술지표 opt-in 및 과거 날짜 검색 자동 분석 연결
 
 - **사용자 문제/결정:** 패턴에 해당한 약 243종목만 저장하는 기존 연구 스냅샷과 별개로, 전체 종목의 매일 일봉·계산 지표를 누적하는 방향에 동의. 이후 다른 날짜를 검색해도 새로운 분석이 시작되지 않고 상태 표시도 보이지 않는 문제를 보고했으며, Turso 중심 날짜별 분석 실행·진행 표시 개발을 승인.

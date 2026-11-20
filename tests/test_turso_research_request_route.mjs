@@ -9,6 +9,9 @@ const script=ts.transpileModule(`
 class InvalidTursoResearchRequest extends Error {}
 const requestTursoResearch=async (_env,day)=>({status:'PENDING',day});
 const tursoResearchRequestStatus=async (_env,day)=>({status:'READY',day});
+const tursoResearchCoverage=async ()=>({storage:'TURSO',status:'AUDIT_COUNTS_ONLY'});
+const tursoPatternPulse=async ()=>({storage:'TURSO',status:'AUDITED_PATTERN_ACTIVITY'});
+const tursoExitStudyReport=async ()=>({storage:'TURSO',status:'NOT_PUBLISHED',report:null});
 ${code}`,{compilerOptions:{module:ts.ModuleKind.ESNext,target:ts.ScriptTarget.ES2022}}).outputText;
 const {default:api}=await import(`data:text/javascript;base64,${Buffer.from(script).toString('base64')}`);
 const origin='https://blue-signal-lab.ehdud6728.workers.dev';
@@ -36,10 +39,43 @@ test('status is Access-gated and never uses the D1 scan table',async()=>{
   assert.deepEqual(await response.json(),{status:'READY',day:'2026-11-19'});
 });
 
+test('research coverage uses only Turso, never a D1 status or AI cache',async()=>{
+  const response=await api.fetch(request('/api/research/coverage','GET'),env,{});
+  assert.equal(response.status,200);
+  assert.deepEqual(await response.json(),{storage:'TURSO',status:'AUDIT_COUNTS_ONLY'});
+});
+
+test('audited pattern pulse remains Turso-only without D1 or AI cache',async()=>{
+  const response=await api.fetch(request('/api/research/pulse','GET'),env,{});
+  assert.equal(response.status,200);
+  assert.deepEqual(await response.json(),{storage:'TURSO',status:'AUDITED_PATTERN_ACTIVITY'});
+});
+
+test('exploratory exit study status reads Turso without legacy AI or D1',async()=>{
+  const response=await api.fetch(request('/api/research/exit-study','GET'),env,{});
+  assert.equal(response.status,200);
+  assert.deepEqual(await response.json(),{storage:'TURSO',status:'NOT_PUBLISHED',report:null});
+});
+
 test('web date-specific search offers Turso request and persisted status polling',async()=>{
   const web=await readFile(new URL('../web/src/main.tsx',import.meta.url),'utf8');
-  assert.match(web,/if\(patternBackend==='turso'\)\{\s*setStatus\([\s\S]*?await requestTursoScan\(queryDate\)/);
+  const progress=await readFile(new URL('../web/src/TursoResearchProgress.tsx',import.meta.url),'utf8');
+  assert.match(web,/if\(patternBackend==='turso'\)\{[\s\S]*?setStatus\(''\);[\s\S]*?await requestTursoScan\(queryDate\)/);
   assert.match(web,/API\+'\/api\/research\/request\/status\?date='/);
   assert.match(web,/localStorage\.setItem\(TURSO_WATCH_KEY,tursoWatchDate\)/);
-  assert.match(web,/Turso 패턴 분석 중/);
+  assert.match(web,/<TursoResearchProgress/);
+  assert.match(progress,/패턴 분석 진행 중/);
+  assert.match(progress,/formatTursoElapsed/);
+});
+
+test('Turso AI tab is pattern readiness only and refreshes its ledger',async()=>{
+  const web=await readFile(new URL('../web/src/main.tsx',import.meta.url),'utf8');
+  const readiness=await readFile(new URL('../web/src/TursoAiReadiness.tsx',import.meta.url),'utf8');
+  assert.match(web,/storageMode==='turso'&&activeView==='ai'&&<section/);
+  assert.match(web,/<TursoAiReadiness key=\{r1594AiRefresh\} api=\{API\}/);
+  assert.match(web,/storageMode==='d1'&&<section[\s\S]*?<AiWidget/);
+  assert.match(readiness,/\/api\/research\/coverage/);
+  assert.match(readiness,/추천 점수·예상 수익·AI 시장 전망을 생성하지 않습니다/);
+  assert.match(readiness,/<TursoPatternPulse api=\{api\} active=\{active\}/);
+  assert.match(readiness,/<TursoExitStudy api=\{api\} active=\{active\}/);
 });

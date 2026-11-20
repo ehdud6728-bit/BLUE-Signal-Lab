@@ -1,0 +1,111 @@
+name: BLUE Turso Short+Long Pattern Exit Study (MANUAL)
+
+on:
+  pull_request:
+    paths:
+      - 'scripts/pattern_exit_study.py'
+      - 'scripts/exit_policy_research.py'
+      - 'tests/test_pattern_exit_study.py'
+      - 'tools/turso/pattern-exit-export.mjs'
+      - 'tools/turso/pattern-exit-export.test.mjs'
+      - 'tools/turso/pattern-exit-publish.mjs'
+      - 'tools/turso/pattern-exit-publish.test.mjs'
+      - 'scripts/turso_history_batch_guard.py'
+      - 'tests/test_turso_history_batch_guard.py'
+      - '.github/workflows/blue_turso_history_research_batch.yml'
+      - '.github/workflows/blue_turso_pattern_exit_study.yml'
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: 'plan: no DB; study: Turso SELECT + artifact; publish: operator-confirmed report-only write'
+        type: choice
+        options: [plan, study, publish]
+        default: plan
+        required: true
+      sessions:
+        description: 'Most recent audited EOD days; published report is exploratory'
+        type: choice
+        options: ['5', '10', '20', '60', '120', '250', '500']
+        default: '60'
+        required: true
+      confirm_publish:
+        description: 'For publish only: blue-turso-exit-research-only'
+        type: string
+        default: ''
+        required: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: blue-turso-pattern-exit-study
+  cancel-in-progress: false
+
+jobs:
+  study:
+    if: github.event_name == 'pull_request' || github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      MODE: ${{ github.event_name == 'pull_request' && 'plan' || inputs.mode }}
+      SESSIONS: ${{ github.event_name == 'pull_request' && '60' || inputs.sessions }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install isolated Turso query client (no lifecycle scripts)
+        working-directory: tools/turso
+        run: npm install --no-audit --no-fund --ignore-scripts --no-package-lock
+      - name: Test offline exits, holdout protection and Turso source checks
+        run: |
+          python3 -m unittest discover -s tests -p 'test_exit_policy_research.py' -v
+          python3 -m unittest discover -s tests -p 'test_pattern_exit_study.py' -v
+          python3 -m unittest discover -s tests -p 'test_turso_history_batch_guard.py' -v
+          node --test tools/turso/pattern-exit-export.test.mjs tools/turso/pattern-exit-publish.test.mjs
+      - name: Plan without SQL, secrets or Worker changes
+        if: env.MODE == 'plan'
+        run: |
+          node tools/turso/pattern-exit-export.mjs --mode=plan --sessions="$SESSIONS"
+          node tools/turso/pattern-exit-publish.mjs
+      - name: Guard manually selected research scope
+        if: env.MODE != 'plan'
+        env:
+          CONFIRM: ${{ inputs.confirm_publish }}
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REPOSITORY" = 'ehdud6728-bit/BLUE-Signal-Lab'
+          test "$GITHUB_REF" = 'refs/heads/main'
+          if [[ "$MODE" != 'study' && "$MODE" != 'publish' ]]; then exit 1; fi
+          if [[ "$MODE" = 'publish' && "$CONFIRM" != 'blue-turso-exit-research-only' ]]; then
+            echo 'BLOCKED: report publication not confirmed'; exit 1
+          fi
+      - name: Export only audited Turso EOD and pattern rows
+        if: env.MODE != 'plan'
+        env:
+          TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
+          TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
+        run: |
+          node tools/turso/pattern-exit-export.mjs --mode=study --sessions="$SESSIONS" \
+            --out=output/exit_study/source.json
+      - name: Compare fixed exit policies with held-out chronological cases
+        if: env.MODE != 'plan'
+        run: |
+          python3 scripts/pattern_exit_study.py \
+            --input output/exit_study/source.json --out output/exit_study/report.json
+      - name: Publish exploratory summary ONLY with manual confirmation
+        if: env.MODE == 'publish'
+        env:
+          EXIT_PUBLICATION_MODE: publish
+          EXIT_CONFIRM: ${{ inputs.confirm_publish }}
+          TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
+          TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
+        run: node tools/turso/pattern-exit-publish.mjs
+      - name: Keep report artifact, not the raw price dataset
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: BLUE_PATTERN_EXIT_REPORT_${{ github.run_id }}
+          path: output/exit_study/report.json
+          if-no-files-found: ignore
+          retention-days: 14
