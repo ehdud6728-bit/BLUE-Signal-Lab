@@ -2,6 +2,12 @@
 
 > 업데이트: 2026-11-20 (한국 시간). 이 파일은 개발 인계용 요약이며, 서버의 실시간 상태를 자동으로 반영하지 않습니다.
 
+## 2026-11-20 (KST) — 운영 적용 확인 및 발견일 기술 배지 보존
+
+- [KRX 당일 `apply` #44734533589](https://github.com/ehdud6728-bit/BLUE-Signal-Lab/actions/runs/44734533589): 2026-11-20 KRX 정확일 EOD 2,662건·연구 신호 89건 Turso 실제 저장 및 read-back 성공. 전 종목 기술지표 보존은 여전히 opt-in OFF. KRX 수집 성공일이므로 KIS 2차 fallback의 성공 사례는 아님.
+- PR #66 병합 후 Collector/API/웹 실제 배포와 별도 KIS 즉시조회 `enable` 성공([Actions #44740418020](https://github.com/ehdud6728-bit/BLUE-Signal-Lab/actions/runs/44740418020), [#44741117341](https://github.com/ehdud6728-bit/BLUE-Signal-Lab/actions/runs/44741117341), [#44741468897](https://github.com/ehdud6728-bit/BLUE-Signal-Lab/actions/runs/44741468897), [#44742032320](https://github.com/ehdud6728-bit/BLUE-Signal-Lab/actions/runs/44742032320)). 실 KIS 시세 갱신·장애 시 대체 저장은 아직 관측 전.
+- 사용자 제보: 검색에서 표시되던 `역배열`/이평 돌파 표식이 장바구니에 담을 때 사라짐. 장바구니 최초 발견일에 기술 배지를 독립 필드로 보존하고 기존 기록은 **동일 감사 검색일**에 한해서 읽기 전용 복원하는 웹 수정 PR 준비. 검색일 신호/시세/매매 근거를 오늘 값으로 재계산하지 않음.
+
 ## 2026-11-20 (KST) — 사용자 승인 KRX→KIS 자동 2차 수집 및 검색 누락 최신가 자동 보완 (PR 준비)
 
 - **사용자 최신 결정:** KRX 양쪽 소스가 검증에 실패하면 단순 저장본 감사에 그치지 말고 기존 유효 KIS 토큰으로 **KIS 공식 일자별 시세를 자동 2차 수집**한다. 예약/승인 `apply`에서 날짜 일치 응답만 Turso **잠정** 테이블·KIS 시세 테이블에 순차 저장하며 KRX 확정 EOD/전체시장 패턴·기술지표를 합성하지 않는다. `dry_run`은 계속 무쓰기/무신규 KIS 수집. 토큰 발급·D1·FULL 전역 미러 변경 없음.

@@ -2,6 +2,7 @@ import {useEffect,useState} from 'react';
 import {ShoppingBasket} from 'lucide-react';
 import StockChart from './StockChart';
 import type {BasketQuickItem} from './SmartBasket';
+import {analysisTechnicalBadges} from './discovery-technical';
 import './symbol-analysis.css';
 
 const API=(import.meta.env.VITE_API_BASE||'https://blue-signal-lab-api-v2.ehdud6728.workers.dev').replace(/\/+$/,'');
@@ -212,7 +213,8 @@ export default function SymbolAnalysisPanel({defaultDate,onAddToBasket,isInBaske
   if(!canAddAnalyzed||!d||!onAddToBasket||addedAlready)return;
   onAddToBasket({code:d.code,name:displayName||d.code,day:d.asof,close_price:d.close!,
    // Persist only verified signals actually satisfied on this historical day.
-   signals:d.matched?d.selected_signals.split(',').map(x=>x.trim()).filter(Boolean):[]},d.matched);
+   signals:d.matched?d.selected_signals.split(',').map(x=>x.trim()).filter(Boolean):[],
+   technicalBadges:analysisTechnicalBadges(predicates)},d.matched);
  };
  return <section className="symbol-analysis-panel" aria-label="종목 정밀분석">
    <div className="symbol-analysis-intro"><h2>🔎 종목 정밀분석</h2><small>전체 종목명·코드 검색 · 과거 기준일 선택</small></div>

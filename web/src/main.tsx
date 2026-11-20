@@ -12,6 +12,7 @@ import {requestSearchPriority} from './search-priority';
 import {comparisonKey,fetchCompared,fetchComparedTursoFirst,fetchComparedTursoOnly,
   refreshKisQuoteToTurso,type PriceCompare} from './price-compare';
 import {missingKisSearchQuotes} from './auto-kis-search';
+import {discoveryTechnicalBadges} from './discovery-technical';
 import './r1595-group-price.css';
 import AiWidget from './AiWidget';
 import React, {useCallback,useEffect, useRef, useState} from 'react';
@@ -707,15 +708,8 @@ function App(){
     if(value===undefined||value===null||!Number.isFinite(value))return null;
     return `${appliedSort==='highest_gain'?'후속 확인 일봉 최고':'후속 확인 일봉 최저'} ${value>0?'+':''}${value.toFixed(2)}%`;
   };
-  // R1591_SEARCH_BADGES: verified EOD indicators only, never inferred from absent data.
-  const techBadges=(r:Signal):string[]=>{
-    const out:string[]=[];const a=num(r,'ma20'),b=num(r,'ma40'),c=num(r,'ma60');
-    if(a!==null&&b!==null&&c!==null&&a<b&&b<c)out.push('역배열');
-    if(flag(r,'ma_to_up'))out.push('정배열 전환');
-    if(flag(r,'ma112_cross'))out.push('112선 돌파');
-    if(flag(r,'ma224_cross'))out.push('224선 돌파');
-    return out;
-  };
+  // Search chips and the basket's immutable discovery record share one rule.
+  const techBadges=(r:Signal)=>discoveryTechnicalBadges(r.extras);
   const techFlag=(r:Signal,k:string)=>extra(r,k)===undefined?'미계산':flag(r,k)?'발생':'해당 없음';
   const maDown=(r:Signal)=>{const a=num(r,'ma20'),b=num(r,'ma40'),c=num(r,'ma60');return a===null||b===null||c===null?'미계산':a<b&&b<c?'해당':'해당 없음';};
   const fmt=(r:Signal,k:string,digits=2)=>{const n=num(r,k);return n==null?'—':n.toLocaleString('ko-KR',{minimumFractionDigits:digits,maximumFractionDigits:digits});};
