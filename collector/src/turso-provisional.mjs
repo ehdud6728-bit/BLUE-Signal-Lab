@@ -44,7 +44,8 @@ export function provisionalStatements(quotes){
   for(const q of quotes){
     const regular=q.phase==='KRX_REGULAR'&&q.source==='KIS_REST_INQUIRE_PRICE'&&
       ['KIS_REPORTED_TRADE_DATE','COLLECTOR_KST_REGULAR_SESSION'].includes(q.provisional_date_basis);
-    const afterClose=q.phase==='KRX_POST_CLOSE'&&q.source==='KIS_REST_INQUIRE_DAILY_PRICE'&&
+    const afterClose=['KRX_POST_CLOSE','KRX_FAILED_KIS_SECONDARY'].includes(q.phase)&&
+      q.source==='KIS_REST_INQUIRE_DAILY_PRICE'&&
       q.provisional_date_basis==='KIS_REPORTED_TRADE_DATE'&&q.is_confirmed_daily===false&&
       q.reported_trade_date===q.trade_date_kst.replaceAll('-','');
     if(q.market!=='J'||q.provisional_status!=='IN_PROGRESS'||

@@ -99,13 +99,13 @@ export async function tursoEodCompare(env:TursoConfig,params:URLSearchParams,
     const result=await client.execute({sql:`SELECT e.trade_day,e.code,e.close,e.high
       FROM blue_eod_daily_v1 e
       JOIN blue_eod_ingest_audit_v1 a ON a.trade_day=e.trade_day AND a.row_count>=1700
-      WHERE e.code IN (${codes.map(()=>'?').join(',')}) AND e.trade_day>?
+      WHERE e.code IN (${codes.map(()=>'?').join(',')}) AND e.trade_day>=?
         AND e.trade_day<=?
       ORDER BY e.trade_day ASC,e.code ASC LIMIT 5001`,args:[...codes,earliest,today]});
     if(result.rows.length>5000)throw Error('TURSO_EOD_COMPARE_RANGE_TOO_LARGE');
     const snapshots=await client.execute({sql:`SELECT trade_date,code,market,received_at_utc,payload_json
       FROM blue_kis_live_quotes_r141
-      WHERE code IN (${codes.map(()=>'?').join(',')}) AND trade_date>?
+      WHERE code IN (${codes.map(()=>'?').join(',')}) AND trade_date>=?
         AND trade_date<=?
       ORDER BY trade_date ASC,received_at_utc DESC LIMIT 5001`,
       args:[...codes,earliest,today]});
@@ -127,22 +127,27 @@ export async function tursoEodCompare(env:TursoConfig,params:URLSearchParams,
         const payload=JSON.parse(String(r.payload_json)) as Record<string,unknown>;
         const price=Number(payload.price),high=Number(payload.high),low=Number(payload.low);
         const timestamp=Date.parse(at);
+        const receivedKstDay=new Date(timestamp+9*3600_000).toISOString().slice(0,10);
         const kstClockSeconds=((timestamp+9*3600_000)%86400_000)/1000;
         // Verify stored row keys AND the original KIS evidence. Invalid rows
         // are omitted, never converted to prices or allowed to hide audited EOD.
         const quoteSource=payload.source==='KIS_REST_INQUIRE_PRICE';
+        const fallbackDaily=payload.phase==='KRX_FAILED_KIS_SECONDARY'&&
+          receivedKstDay>=day&&
+          (Date.parse(receivedKstDay+'T00:00:00Z')-Date.parse(day+'T00:00:00Z'))<=7*86400_000;
         const postCloseSource=payload.source==='KIS_REST_INQUIRE_DAILY_PRICE'&&
           payload.provisional_status==='IN_PROGRESS'&&payload.is_confirmed_daily===false&&
           payload.provisional_date_basis==='KIS_REPORTED_TRADE_DATE'&&
-          payload.phase==='KRX_POST_CLOSE'&&market==='J'&&
-          kstClockSeconds>=15*3600+20*60&&kstClockSeconds<22*3600&&
+          market==='J'&&(
+            (payload.phase==='KRX_POST_CLOSE'&&receivedKstDay===day&&
+              kstClockSeconds>=15*3600+20*60&&kstClockSeconds<22*3600)||fallbackDaily)&&
           payload.reported_trade_date===day.replaceAll('-','');
         if(!codes.includes(code)||!validDay(day)||day>today||
           !['J','NX'].includes(market)||payload.code!==code||
           payload.trade_date_kst!==day||payload.market!==market||
           payload.received_at_utc!==at||(!quoteSource&&!postCloseSource)||
           payload.research_only!==true||!Number.isFinite(timestamp)||
-          new Date(timestamp+9*3600_000).toISOString().slice(0,10)!==day||
+          (receivedKstDay!==day&&!fallbackDaily)||
           !Number.isSafeInteger(price)||price<=0||
           !Number.isSafeInteger(high)||high<price||
           !Number.isSafeInteger(low)||low<=0||low>price||
@@ -153,8 +158,12 @@ export async function tursoEodCompare(env:TursoConfig,params:URLSearchParams,
     }
     const items=pairs.map(({code,day})=>{
       const later=(byCode.get(code)||[]).filter(r=>r.day>day);
-      const quoteRows=(quotesByCode.get(code)||[]).filter(r=>r.day>day);
-      const eodLatest=later.at(-1)||null;
+      // A same-day KIS observation may fill today's "recent price" while
+      // never counting as a *later* realized gain or a post-discovery high.
+      const quoteRows=(quotesByCode.get(code)||[]).filter(r=>r.day>day||
+        (day===today&&r.day===day));
+      const eodLatest=later.at(-1)||
+        (day===today?(byCode.get(code)||[]).find(r=>r.day===day):null)||null;
       const quoteLatest=quoteRows.sort((a,b)=>b.day.localeCompare(a.day)||b.at.localeCompare(a.at)||
         (a.market==='J'?-1:1))[0]||null;
       // Confirmed EOD supersedes a same-day intraday quote. A later KIS
@@ -164,10 +173,10 @@ export async function tursoEodCompare(env:TursoConfig,params:URLSearchParams,
       const auditedDays=new Set(later.map(r=>r.day));
       const highs=[...later.map(r=>({day:r.day,high:r.high,source:'KRX_VERIFIED_EOD_HIGH'})),
         // Audited full-day high supersedes the same-day partial KIS high.
-        ...quoteRows.filter(r=>!auditedDays.has(r.day))
+        ...quoteRows.filter(r=>r.day>day&&!auditedDays.has(r.day))
           .map(r=>({day:r.day,high:r.high,source:'KIS_TURSO_DAY_HIGH'}))];
       const high=highs.sort((a,b)=>b.high-a.high||a.day.localeCompare(b.day))[0]||null;
-      const observedDays=[...later.map(r=>r.day),...quoteRows.map(r=>r.day)].sort();
+      const observedDays=[...later.map(r=>r.day),...quoteRows.filter(r=>r.day>day).map(r=>r.day)].sort();
       return {code,day,status:latestDay?'READY':'NO_LATER_PRICE',
         latest_price:useQuote?quoteLatest!.price:eodLatest?.close??null,latest_day:latestDay,
         latest_source:useQuote?'KIS_TURSO_SNAPSHOT':eodLatest?'KRX_VERIFIED_EOD_CLOSE':null,

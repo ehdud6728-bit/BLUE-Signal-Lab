@@ -152,7 +152,7 @@ test('completed KRX failure with audited KIS rows is PROVISIONAL, not pattern RE
     created_at:now.toISOString(),status:'completed',conclusion:'success',
     updated_at:new Date(now.getTime()-5*60000).toISOString(),
     html_url:'https://github.com/ehdud6728-bit/BLUE-Signal-Lab/actions/runs/12345'};
-  db.jobSteps=[{name:'On KRX failure audit already saved KIS observations without writing EOD',
+  db.jobSteps=[{name:'On KRX failure audit KIS provisional observations without confirming EOD',
     conclusion:'success'}];
   const result=await tursoResearchRequestStatus(env,day,opts);
   assert.equal(result.status,'PROVISIONAL');

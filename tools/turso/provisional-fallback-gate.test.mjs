@@ -59,7 +59,10 @@ test('existing audited KRX EOD cannot masquerade as a KIS fallback or completed 
 test('daily Actions skips EVERY confirmed EOD/research/indicator writer after KRX failure',()=>{
   const yaml=readFileSync(new URL('../../.github/workflows/blue_turso_daily_verified_eod_auto.yml',import.meta.url),'utf8');
   assert.match(yaml,/id: krx_fetch\n\s+continue-on-error: true/);
-  assert.match(yaml,/On KRX failure audit already saved KIS observations without writing EOD/);
+  assert.match(yaml,/On KRX failure collect exact-day KIS secondary observations \(apply only\)/);
+  assert.match(yaml,/krx-kis-fallback-collect\.mjs --mode=apply --day="\$TRADE_DAY"/);
+  assert.match(yaml,/if: \$\{\{ steps\.krx_fetch\.outcome == 'failure' && env\.MODE == 'apply' \}\}/);
+  assert.match(yaml,/On KRX failure audit KIS provisional observations without confirming EOD/);
   assert.match(yaml,/provisional-fallback-gate\.mjs --day="\$TRADE_DAY"/);
   const steps=yaml.split(/(?=^      - name: )/m);
   const protectedNames=['Test strict idempotent Turso writer',

@@ -15,11 +15,11 @@ function mock(rows,failed=false,quoteRows=[]){
    const codes=new Set(query.args.slice(0,-2));
    if(query.sql.includes('FROM blue_kis_live_quotes_r141')){
      return {rows:quoteRows.filter(row=>codes.has(row.code)&&
-       row.trade_date>query.args.at(-2)&&row.trade_date<=query.args.at(-1))};
+       row.trade_date>=query.args.at(-2)&&row.trade_date<=query.args.at(-1))};
    }
    assert.match(query.sql,/JOIN blue_eod_ingest_audit_v1/);
    return {rows:rows.filter(row=>codes.has(row.code)&&
-     row.trade_day>query.args.at(-2)&&row.trade_day<=query.args.at(-1))};
+     row.trade_day>=query.args.at(-2)&&row.trade_day<=query.args.at(-1))};
   },close(){closed++;}
  })};
 }
@@ -136,6 +136,38 @@ test('same-day audited EOD wins over any saved intraday quote',async()=>{
  assert.equal(data.items[0].latest_price,4500);
  assert.equal(data.items[0].latest_source,'KRX_VERIFIED_EOD_CLOSE');
  assert.equal(data.items[0].period_high,4700);
+});
+
+test('today discovery may show same-day KIS quote without inventing post-discovery high',async()=>{
+ const db=mock([],false,[snapshot('2026-11-19')]);
+ const data=await tursoEodCompare(env,new URLSearchParams({items:'225190:2026-11-19'}),
+  '2026-11-19',db.factory);
+ assert.equal(data.items[0].status,'READY');
+ assert.equal(data.items[0].latest_price,23700);
+ assert.equal(data.items[0].latest_source,'KIS_TURSO_SNAPSHOT');
+ assert.equal(data.items[0].period_high,null);
+ assert.equal(data.items[0].high_coverage_to,null);
+});
+
+test('same-day audited KRX close supersedes intraday KIS on today search',async()=>{
+ const db=mock([{trade_day:'2026-11-19',code:'225190',close:'23400',high:'24300'}],
+   false,[snapshot('2026-11-19')]);
+ const data=await tursoEodCompare(env,new URLSearchParams({items:'225190:2026-11-19'}),
+  '2026-11-19',db.factory);
+ assert.equal(data.items[0].latest_price,23400);
+ assert.equal(data.items[0].latest_source,'KRX_VERIFIED_EOD_CLOSE');
+ assert.equal(data.items[0].period_high,null);
+});
+
+test('nightly exact-day KIS fallback after 22:00 is visible as provisional',async()=>{
+ const old=postCloseSnapshot({phase:'KRX_FAILED_KIS_SECONDARY',
+   received_at_utc:'2026-11-19T14:14:12.000Z'});
+ const row={...old,received_at_utc:'2026-11-19T14:14:12.000Z'};
+ const db=mock([],false,[row]);
+ const data=await tursoEodCompare(env,new URLSearchParams({items:'225190:2026-11-17'}),
+  '2026-11-19',db.factory);
+ assert.equal(data.items[0].latest_price,25000);
+ assert.equal(data.items[0].latest_source,'KIS_TURSO_SNAPSHOT');
 });
 
 test('verified-date KIS post-close daily fallback is visible but never counted as audited EOD',async()=>{

@@ -79,7 +79,10 @@ async function fetchComparedTursoInternal(items:{code:string;day:string}[],signa
    for(const row of body.items){
     const key=comparisonKey(row);
     if(!keys.has(key)||valid[key]||!['READY','NO_LATER_PRICE'].includes(row.status)||
-      (row.status==='READY'&&(!row.latest_day||row.latest_day<=row.day||
+      (row.status==='READY'&&(!row.latest_day||
+        (row.latest_day<=row.day&&!(row.latest_day===row.day&&
+          row.day===new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Seoul',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date())&&
+          ['KIS_TURSO_SNAPSHOT','KRX_VERIFIED_EOD_CLOSE'].includes(row.latest_source||'')))||
         !Number.isFinite(row.latest_price)||Number(row.latest_price)<=0)))
       throw Error('TURSO_EOD_COMPARE_INVALID_RESPONSE');
     valid[key]=row;

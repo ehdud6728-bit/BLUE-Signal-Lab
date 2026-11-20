@@ -3,8 +3,9 @@
  * Time-boxed opt-in only. The legacy D1 Cron collector remains unchanged.
  */
 import {createClient} from '@libsql/client/web';
-import {marketsFor,kstParts,getKisQuote,parseQuote,vaultScope,decryptVault,ageDays,inspectCachedToken} from './core.mjs';
+import {marketsFor,kstParts,getKisQuote,getKisDailyQuote,parseQuote,vaultScope,decryptVault,ageDays,inspectCachedToken} from './core.mjs';
 import {buildTursoMirrorStatements} from './turso-mirror.mjs';
+import {provisionalStatements} from './turso-provisional.mjs';
 
 const MAX_PER_TICK=12;
 const MAX_PILOT_MS=30*60*1000;
@@ -132,13 +133,17 @@ export async function collectTursoInstant(env,code,now=new Date(),deps={}){
   if(typeof code!=='string'||!CODE.test(code))return {status:'INVALID_CODE'};
   if(!tursoInstantEnabled(env))return {status:'DISABLED'};
   const phases=(deps.marketsFor||marketsFor)(now,env.CLOSED_DATES||'');
-  if(!phases.length)return {status:'MARKET_CLOSED'};
+  const kst=kstParts(now);
+  const afterClose=!['Sat','Sun'].includes(kst.weekday)&&
+    !String(env.CLOSED_DATES||'').split(',').map(x=>x.trim()).includes(kst.date)&&
+    kst.seconds>=15*3600+20*60&&kst.seconds<22*3600;
+  if(!phases.length&&!afterClose)return {status:'MARKET_CLOSED'};
   const url=String(env.TURSO_DATABASE_URL||'').trim();
   const authToken=String(env.TURSO_AUTH_TOKEN||'').trim();
   if(!/^(libsql|https):\/\//.test(url)||!authToken)return {status:'TURSO_NOT_CONFIGURED'};
   const client=(deps.clientFactory||createClient)({url,authToken,intMode:'string'});
   try{
-    const day=kstParts(now).date;
+    const day=kst.date;
     const reference=await client.execute({sql:`SELECT e.trade_day,e.close,e.name
       FROM blue_eod_daily_v1 e JOIN blue_eod_ingest_audit_v1 a
         ON a.trade_day=e.trade_day AND a.row_count>=1700
@@ -170,13 +175,32 @@ export async function collectTursoInstant(env,code,now=new Date(),deps={}){
       (minute_utc,used) VALUES(?,1) ON CONFLICT(minute_utc) DO UPDATE SET
       used=used+1 WHERE blue_turso_instant_minute_budget_v1.used<?`,args:[minute,INSTANT_PER_MINUTE]});
     if(budget.rowsAffected!==1)return {status:'RATE_LIMITED'};
-    const [market,phase]=phases.find(p=>p[0]==='J')||phases[0];
-    const raw=await (deps.quote||getKisQuote)(env,found.token,market,code);
+    const [market,phase]=afterClose?['J','KRX_POST_CLOSE']:
+      (phases.find(p=>p[0]==='J')||phases[0]);
+    const raw=afterClose?
+      await (deps.quoteDaily||getKisDailyQuote)(env,found.token,'J',code,day):
+      await (deps.quote||getKisQuote)(env,found.token,market,code);
     const received=deps.receivedAt||new Date();
     const quote=parseQuote({code,name:String(row.name||'').slice(0,70),
       eod_close:close,eod_asof:sourceDay,eod_signals:'',
       origin:'TURSO_VERIFIED_EOD_INSTANT'},market,phase,raw,received,day);
-    await client.batch(buildTursoMirrorStatements([quote]),'write');
+    if(afterClose){
+      if(!quote.reported_trade_date||quote.open<quote.low||quote.open>quote.high)
+        throw Error('INVALID_KIS_DAILY_QUOTE');
+      quote.source='KIS_REST_INQUIRE_DAILY_PRICE';
+      quote.provisional_status='IN_PROGRESS';
+      quote.provisional_date_basis='KIS_REPORTED_TRADE_DATE';
+      quote.is_confirmed_daily=false;
+      await client.execute(`CREATE TABLE IF NOT EXISTS blue_kis_provisional_daily_v1 (
+        trade_day TEXT NOT NULL,code TEXT NOT NULL,market TEXT NOT NULL,
+        name TEXT NOT NULL,open INTEGER NOT NULL,high INTEGER NOT NULL,
+        low INTEGER NOT NULL,close INTEGER NOT NULL,volume INTEGER NOT NULL,
+        reference_day TEXT NOT NULL,observed_at_utc TEXT NOT NULL,
+        date_basis TEXT NOT NULL,source TEXT NOT NULL,
+        PRIMARY KEY(trade_day,code))`);
+    }
+    await client.batch(afterClose?provisionalStatements([quote]):
+      buildTursoMirrorStatements([quote]),'write');
     return {status:'SAVED',code,market,price:quote.price,
       trade_date:day,received_at_utc:quote.received_at_utc};
   }catch{

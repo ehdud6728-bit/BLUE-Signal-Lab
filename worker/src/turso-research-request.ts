@@ -88,7 +88,7 @@ async function githubResearchStage(env:Env,runId:number,fetcher:Fetcher){
     const steps=payload.jobs?.find(job=>job.name==='daily_eod')?.steps;
     if(!steps?.length)return 'RUNNING';
     const finished=(name:string)=>steps.some(step=>step.name===name&&step.conclusion==='success');
-    if(finished('On KRX failure audit already saved KIS observations without writing EOD'))
+    if(finished('On KRX failure audit KIS provisional observations without confirming EOD'))
       return 'KIS_PROVISIONAL';
     if(finished('Save research only after Turso EOD audit and exact close match'))return 'VERIFYING';
     if(finished('Scan full market patterns for the SAME verified KST date'))return 'SAVING';
