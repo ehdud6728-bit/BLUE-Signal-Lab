@@ -10,7 +10,11 @@ import {ageDays,getKisQuote,getKisDailyQuote,kstParts,marketsFor,parseQuote} fro
 import {tursoDirectCachedToken} from './turso-direct.mjs';
 import {buildTursoMirrorStatements} from './turso-mirror.mjs';
 
-const PAGE_SIZE=10;
+const PILOT_PAGE=10;
+const FULL_PAGE=40;
+const FULL_START=20;
+const FULL_MIN=10;
+const COOLDOWN_MS=3*60_000;
 const MAX_PILOT_MS=30*60_000;
 const MAX_REFERENCE_AGE_DAYS=7;
 const REGULAR_END=15*3600+20*60;
@@ -57,9 +61,10 @@ export function provisionalStatements(quotes){
   return mirror;
 }
 
-/** Ten symbols/minute, paging audited previous-day KRX symbols in code order.
- * A typical ~2,700-symbol directory completes its first pass in ~4.5 hours.
- * Missing/suspended/provider-rejected symbols remain missing, never fabricated.
+/** Full mode cautiously ramps 20 -> 40 symbols/minute; pilot stays 10.
+ * EGW00201/HTTP 429 halves the next batch and pauses three minutes. Unlike
+ * a process-local timer, the bounded throttle state survives cron restarts.
+ * These are app budgets, NOT a claim of a guaranteed KIS provider quota.
  */
 export async function collectTursoProvisional(env,now=new Date(),deps={}){
   const mode=tursoProvisionalMode(env,now);
@@ -106,17 +111,63 @@ export async function collectTursoProvisional(env,now=new Date(),deps={}){
     if(age<1||age>MAX_REFERENCE_AGE_DAYS)return {status:'STALE_EOD_REFERENCE',asof:day};
     const count=await client.execute({sql:'SELECT COUNT(*) AS n FROM blue_eod_daily_v1 WHERE trade_day=?',args:[day]});
     if(Number(count.rows?.[0]?.n)!==expected)return {status:'INCOMPLETE_EOD_REFERENCE',asof:day};
-    const pages=Math.ceil(expected/PAGE_SIZE);
+    let batchCap=PILOT_PAGE;
+    if(mode==='FULL'){
+      await client.execute(`CREATE TABLE IF NOT EXISTS blue_kis_provisional_pacing_v1 (
+        trade_day TEXT PRIMARY KEY,batch_cap INTEGER NOT NULL,
+        cooldown_until_utc TEXT NOT NULL)`);
+      const saved=await client.execute({sql:`SELECT batch_cap,cooldown_until_utc
+        FROM blue_kis_provisional_pacing_v1 WHERE trade_day=? LIMIT 1`,args:[kst.date]});
+      const state=saved.rows?.[0];
+      if(state){
+        batchCap=Number(state.batch_cap);
+        if(!Number.isInteger(batchCap)||batchCap<FULL_MIN||batchCap>FULL_PAGE)
+          return {status:'INVALID_PROVISIONAL_PACING',asof:day};
+        const next=Date.parse(String(state.cooldown_until_utc));
+        if(!Number.isFinite(next))return {status:'INVALID_PROVISIONAL_PACING',asof:day};
+        if(next>now.getTime())return {status:'KIS_RATE_LIMIT_COOLDOWN',asof:day,
+          retry_after_utc:String(state.cooldown_until_utc)};
+      }else batchCap=FULL_START;
+    }
+    const pageWidth=mode==='FULL'?FULL_PAGE:PILOT_PAGE;
+    const pages=Math.ceil(expected/pageWidth);
     const minute=Math.floor((kst.seconds-9*3600)/60);
     const page=minute%pages;
-    const selected=await client.execute({sql:`SELECT code,name,close FROM blue_eod_daily_v1
-      WHERE trade_day=? ORDER BY code LIMIT ? OFFSET ?`,args:[day,PAGE_SIZE,page*PAGE_SIZE]});
+    const base=await client.execute({sql:`SELECT code,name,close FROM blue_eod_daily_v1
+      WHERE trade_day=? ORDER BY code LIMIT ? OFFSET ?`,args:[day,batchCap,page*pageWidth]});
+    // Every fifth minute, refresh a few recently audited pattern candidates
+    // before the rotating market sweep. Never use unaudited/D1 candidates.
+    let priority=[];
+    if(mode==='FULL'&&minute%5===0){
+      try{
+        const latestResearch=await client.execute({sql:`SELECT trade_day,row_count
+          FROM blue_research_signal_audit_v1 WHERE trade_day<=? AND row_count>0
+          ORDER BY trade_day DESC LIMIT 1`,args:[day]});
+        const research=latestResearch.rows?.[0];
+        const n=Number(research?.row_count||0),take=Math.min(8,Math.floor(batchCap/4));
+        if(n>0&&n<=10000&&take>0){
+          const offset=(Math.floor(minute/5)*take)%n;
+          const rows=await client.execute({sql:`SELECT e.code,e.name,e.close
+            FROM blue_research_signals_v1 s JOIN blue_research_signal_audit_v1 a
+              ON a.trade_day=s.trade_day AND a.source_payload_sha256=s.source_payload_sha256
+            JOIN blue_eod_daily_v1 e ON e.trade_day=? AND e.code=s.code
+            WHERE s.trade_day=? ORDER BY s.code LIMIT ? OFFSET ?`,
+            args:[day,String(research.trade_day),take,offset]});
+          priority=rows.rows||[];
+        }
+      }catch{ /* An optional priority cannot block the full-market sweep. */ }
+    }
+    const seen=new Set();
+    const selected={rows:[...priority,...(base.rows||[])].filter(row=>{
+      const code=String(row.code||'');
+      if(seen.has(code))return false;seen.add(code);return true;
+    }).slice(0,batchCap)};
     if(!selected.rows?.length)return {status:'EMPTY_PAGE',asof:day,page};
     // Unlike the shared research collector, this path never reads D1 backup.
     const found=deps.token?{status:'READY',token:await deps.token(client,env,now)}:
       await tursoDirectCachedToken(client,env,now);
     if(!found.token)return {status:found.status==='READY'?'TURSO_TOKEN_MISSING':found.status,asof:day};
-    const quotes=[];let rejected=0,previous=0;
+    const quotes=[];let rejected=0,previous=0,rateLimited=false;
     for(const r of selected.rows){
       const code=String(r.code||''),close=Number(r.close);
       if(!CODE.test(code)||!Number.isSafeInteger(close)||close<=0){rejected++;continue;}
@@ -141,10 +192,25 @@ export async function collectTursoProvisional(env,now=new Date(),deps={}){
           'KIS_REPORTED_TRADE_DATE':'COLLECTOR_KST_REGULAR_SESSION';
         q.is_confirmed_daily=false;
         quotes.push(q);
-      }catch{rejected++;}
+      }catch(e){
+        rejected++;
+        if(e instanceof Error&&e.message==='KIS_RATE_LIMIT'){
+          rateLimited=true;break; // do NOT retry a throttled provider immediately.
+        }
+      }
     }
-    if(!quotes.length)return {status:'NO_VALID_QUOTES',asof:day,page,
-      attempted:selected.rows.length,rejected};
+    if(mode==='FULL'){
+      const nextCap=rateLimited?Math.max(FULL_MIN,Math.floor(batchCap/2)):
+        rejected>selected.rows.length/2?batchCap:Math.min(FULL_PAGE,batchCap+5);
+      const cooldown=new Date(now.getTime()+(rateLimited?COOLDOWN_MS:0)).toISOString();
+      await client.execute({sql:`INSERT INTO blue_kis_provisional_pacing_v1
+        (trade_day,batch_cap,cooldown_until_utc) VALUES(?,?,?)
+        ON CONFLICT(trade_day) DO UPDATE SET batch_cap=excluded.batch_cap,
+        cooldown_until_utc=excluded.cooldown_until_utc`,
+        args:[kst.date,nextCap,cooldown]});
+    }
+    if(!quotes.length)return {status:rateLimited?'KIS_RATE_LIMIT_BACKOFF':'NO_VALID_QUOTES',asof:day,page,
+      attempted:previous,rejected,rate_limited:rateLimited};
     // No confirmed EOD/research/audit table is modified by these statements.
     await client.execute(`CREATE TABLE IF NOT EXISTS blue_kis_provisional_daily_v1 (
       trade_day TEXT NOT NULL,code TEXT NOT NULL,market TEXT NOT NULL,
@@ -154,8 +220,9 @@ export async function collectTursoProvisional(env,now=new Date(),deps={}){
       date_basis TEXT NOT NULL,source TEXT NOT NULL,
       PRIMARY KEY(trade_day,code))`);
     await client.batch(provisionalStatements(quotes),'write');
-    return {status:'SAVED',mode,asof:day,trade_day:kst.date,
+    return {status:rateLimited?'SAVED_WITH_KIS_COOLDOWN':'SAVED',mode,asof:day,trade_day:kst.date,
       phase:afterClose?'KRX_POST_CLOSE':'KRX_REGULAR',
-      page,pages,attempted:selected.rows.length,saved:quotes.length,rejected};
+      page,pages,attempted:previous,saved:quotes.length,rejected,
+      rate_limited:rateLimited,batch_cap:batchCap};
   }finally{client.close();}
 }

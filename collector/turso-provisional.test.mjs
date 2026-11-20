@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {collectTursoProvisional,tursoProvisionalMode,provisionalStatements}
   from './src/turso-provisional.mjs';
+import {getKisDailyQuote} from './src/core.mjs';
 
 const NOW=new Date('2026-11-19T00:05:12.000Z');
 const POST_CLOSE=new Date('2026-11-19T11:44:12.000Z'); // 20:44 KST
@@ -20,7 +21,8 @@ const quote=(overrides={})=>({rt_cd:'0',output:{
   ...overrides
 }});
 
-function mockDb({auditDay='2026-11-18',count=2601,expected=2601,
+function mockDb({auditDay='2026-11-18',count=2601,expected=2601,pacing=null,
+  research=null,
   currentAudit=null,currentCount=2601,rows=[
   {code:'005930',name:'삼성전자',close:'66000'},
   {code:'000660',name:'SK하이닉스',close:'160000'}
@@ -32,7 +34,15 @@ function mockDb({auditDay='2026-11-18',count=2601,expected=2601,
       state.queries.push({sql,args:query.args||[]});
       if(sql.includes('SELECT row_count FROM blue_eod_ingest_audit_v1'))
         return {rows:currentAudit===null?[]:[{row_count:currentAudit}]};
-      if(sql.includes('SELECT trade_day,row_count'))return {rows:[{trade_day:auditDay,row_count:expected}]};
+      if(sql.includes('SELECT trade_day,row_count')&&sql.includes('FROM blue_eod_ingest_audit_v1'))
+        return {rows:[{trade_day:auditDay,row_count:expected}]};
+      if(sql.includes('SELECT trade_day,row_count')&&sql.includes('FROM blue_research_signal_audit_v1'))
+        return {rows:research?[research]:[]};
+      if(sql.includes('SELECT batch_cap,cooldown_until_utc'))return {rows:pacing?[pacing]:[]};
+      if(sql.includes('CREATE TABLE IF NOT EXISTS blue_kis_provisional_pacing_v1')||
+        sql.includes('INSERT INTO blue_kis_provisional_pacing_v1'))return {rows:[]};
+      if(sql.includes('SELECT e.code,e.name,e.close'))return {rows:research?[{
+        code:'000660',name:'SK하이닉스',close:'160000'}]:[]};
       if(sql.includes('SELECT COUNT(*) AS n'))
         return {rows:[{n:query.args?.[0]==='2026-11-19'?currentCount:count}]};
       if(sql.includes('SELECT code,name,close'))return {rows};
@@ -133,6 +143,66 @@ test('post-close incomplete EOD audit permits date-verified KIS fallback',async(
       quoteDaily:async()=>quote({stck_bsop_date:'20261119'})}));
   assert.equal(result.status,'SAVED');
   assert.equal(result.saved,2);
+  assert.equal(state.batches.length,1);
+});
+
+test('FULL mode ramps from 20 to 25 per minute without raising the 10-symbol pilot',async()=>{
+  const {db,state}=mockDb();
+  const result=await collectTursoProvisional(env({TURSO_PROVISIONAL_QUOTES_ENABLED:'true'}),
+    POST_CLOSE,deps(db,{receivedAt:POST_CLOSE,
+      quoteDaily:async()=>quote({stck_bsop_date:'20261119'})}));
+  assert.equal(result.status,'SAVED');
+  assert.equal(result.batch_cap,20);
+  const select=state.queries.find(q=>q.sql.includes('SELECT code,name,close'));
+  assert.deepEqual(select.args,['2026-11-18',20,1760]); // 20:44 KST, page 44 of 66
+  const ramp=state.queries.find(q=>q.sql.includes('INSERT INTO blue_kis_provisional_pacing_v1'));
+  assert.equal(ramp.args[1],25);
+  assert.equal(state.batches.length,1);
+});
+
+test('FULL mode backs off and persists cooldown on KIS throttle, saving valid earlier quotes',async()=>{
+  const {db,state}=mockDb();let count=0;
+  const result=await collectTursoProvisional(env({TURSO_PROVISIONAL_QUOTES_ENABLED:'true'}),
+    POST_CLOSE,deps(db,{receivedAt:POST_CLOSE,quoteDaily:async()=>{
+      if(++count===2)throw Error('KIS_RATE_LIMIT');
+      return quote({stck_bsop_date:'20261119'});
+    }}));
+  assert.equal(result.status,'SAVED_WITH_KIS_COOLDOWN');
+  assert.equal(result.saved,1);assert.equal(result.rejected,1);
+  const slowdown=state.queries.find(q=>q.sql.includes('INSERT INTO blue_kis_provisional_pacing_v1'));
+  assert.equal(slowdown.args[1],10);
+  assert.equal(slowdown.args[2],new Date(POST_CLOSE.getTime()+3*60_000).toISOString());
+  assert.equal(state.batches.length,1);
+});
+
+test('FULL mode honors persisted cooldown without making a KIS request',async()=>{
+  const {db,state}=mockDb({pacing:{batch_cap:10,
+    cooldown_until_utc:new Date(POST_CLOSE.getTime()+180000).toISOString()}});
+  const result=await collectTursoProvisional(env({TURSO_PROVISIONAL_QUOTES_ENABLED:'true'}),
+    POST_CLOSE,{clientFactory:()=>db,quoteDaily:async()=>{throw Error('MUST_NOT_CALL_KIS');}});
+  assert.equal(result.status,'KIS_RATE_LIMIT_COOLDOWN');
+  assert.equal(state.batches.length,0);
+  assert.ok(!state.queries.some(q=>q.sql.includes('SELECT code,name,close')));
+});
+
+test('KIS HTTP 429 and official EGW00201 have a distinct throttle signal',async()=>{
+  const input=[env(),'cached-token','J','005930','2026-11-19'];
+  await assert.rejects(()=>getKisDailyQuote(...input,async()=>new Response('',{status:429})),
+    /KIS_RATE_LIMIT/);
+  await assert.rejects(()=>getKisDailyQuote(...input,async()=>Response.json({rt_cd:'1',msg_cd:'EGW00201'})),
+    /KIS_RATE_LIMIT/);
+});
+
+test('FULL mode prioritizes independently audited research symbols every five minutes',async()=>{
+  const {db,state}=mockDb({research:{trade_day:'2026-11-18',row_count:189}});
+  const codes=[];
+  const result=await collectTursoProvisional(env({TURSO_PROVISIONAL_QUOTES_ENABLED:'true'}),
+    NOW,deps(db,{quote:async(_env,_token,_market,code)=>{
+      codes.push(code);return quote();
+    }}));
+  assert.equal(result.status,'SAVED');
+  assert.equal(codes[0],'000660');
+  assert.equal(new Set(codes).size,codes.length);
   assert.equal(state.batches.length,1);
 });
 

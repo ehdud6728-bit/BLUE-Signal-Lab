@@ -5,6 +5,7 @@ import PriceCompareMini from './PriceCompareMini';
 import SymbolAnalysisPanel from './SymbolAnalysisPanel';
 import TursoEodRecovery, {type TursoDay} from './TursoEodRecovery';
 import TursoResearchProgress from './TursoResearchProgress';
+import TursoProvisionalToday from './TursoProvisionalToday';
 import TursoAiReadiness from './TursoAiReadiness';
 import {type TursoProgressStage} from './turso-research-progress';
 import {requestSearchPriority} from './search-priority';
@@ -452,6 +453,19 @@ function App(){
       const effectiveHighlightMin=patternOverride?.threshold!==undefined?patternOverride.threshold:highlightMin;
       if(effectiveOnlyPattern&&effectiveHighlightMin!==null){
         u.searchParams.set('only_pattern','1');u.searchParams.set('min_pattern_up',String(effectiveHighlightMin));
+      }
+      // Fast path: a day later than the latest audited research snapshot
+      // cannot already have a Turso pattern result. Do not wait for a costly
+      // missing-day SQL search before showing the real collection status.
+      if(queryMode==='single'&&patternBackend==='turso'&&latest&&queryDate>latest){
+        setRows([]);setDays([]);setTotal(null);setPage(1);setSelected(null);
+        setDataStatus('NOT_IMPORTED');setAppliedNameQuery(queryName);
+        setAppliedSort(querySort);setAppliedAmountEok(queryAmountEok);
+        if(queryDate>todayKST())setStatus('아직 거래가 이루어지지 않은 날짜입니다.');
+        else if(queryDate===todayKST()&&!eodRequestReadyKST())
+          setStatus('오늘 확정 일봉은 아직 없습니다. 아래 KIS 잠정 시세는 수집된 종목만 보여주며 기술 패턴 분석 결과가 아닙니다.');
+        else await requestTursoScan(queryDate);
+        return;
       }
       let r=await fetch(u.toString(),{credentials:'include',cache:'no-store'});
       // D1 is only a secondary path. An HTTP 400 means the query was invalid
@@ -938,6 +952,9 @@ function App(){
               const day=tursoCompletedDate;setActiveView('research');
               void search(1,false,gcFields,gcLogic,day);
             }}/>}
+        {storageMode==='turso'&&searchSource==='patterns'&&patternBackend==='turso'&&
+          mode==='single'&&date===todayKST()&&(!rows.length||dataStatus==='NOT_IMPORTED')&&
+          <TursoProvisionalToday api={API} day={date} query={appliedNameQuery}/>}
         <section className="panel result" ref={resultRef} id="results-panel">
           <div className="result-heading"><h2><BarChart3 size={18}/> 검색된 종목 <small>{dataStatus==='NOT_IMPORTED'?'일봉 미수집':total===null?'검색 전':total+'건'}</small></h2><span className="eod-pill"><Clock3 size={13}/> EOD</span></div>
           <p className="r1599-active-filters">검색 결과 기준 · 거래대금 {(appliedAmountEok??amountEok)>0?(appliedAmountEok??amountEok).toLocaleString('ko-KR')+'억원 이상':'전체'} · 토마토 강조 {highlightMin===null?'꺼짐':highlightMin+'% 이상 · 표본 '+patternSampleMin+'건 이상'}{onlyPattern&&highlightMin!==null?' · 해당 종목만 보기':''}{appliedAmountEok!==null&&appliedAmountEok!==amountEok?' · 거래대금 변경 미적용(검색 버튼을 누르세요)':''}</p>

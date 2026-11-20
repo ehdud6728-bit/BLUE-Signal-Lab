@@ -1,5 +1,12 @@
 # BLUE Signal Lab — Turso 단독 KIS 장중 시세 수집 준비 (PR #31)
 
+## 2026-11-20 개정 — 앱에서 저장된 잠정 시세 빠르게 조회·FULL만 적응 증속
+
+- 기존 아래의 **10종목/분은 2026-11-19 초기 설계 및 현행 PILOT** 기준이다. 변경 코드에서는 운영자가 **별도 승인한 FULL** (`TURSO_PROVISIONAL_QUOTES_ENABLED=true`)에서만 처음 20종목/분으로 시작하고 성공 시 25→30→35→최대 40종목/분까지 증속한다. 이는 KIS 공식 할당량이 아니라 우리 자체 예산이다. 다른 Collector 요청량이 있으므로 실제 속도와 공급자 제한은 운영 파일럿으로 확인한다.
+- KIS `EGW00201`/HTTP 429가 발생하면 그 회차의 남은 호출을 중단한다. `blue_kis_provisional_pacing_v1`에 절반으로 줄인 다음 예산(최소 10)과 3분 cooldown을 저장해 다음 Cron에서도 적용한다. 성공한 앞선 관측만 원래 불변 검증 규칙대로 저장한다. 매 5분 최근 감사 완료된 **연구 패턴 종목 일부(최대 8개)**를 우선하되 전시장 매분 갱신을 약속하지 않는다. 기존 장바구니·추적 우선 호출은 별도 Collector 경로다.
+- `/api/research/provisional?date=오늘KST&q=검색어`는 **이미 Turso에 저장된 잠정 시세**만 조회한다. 날짜·출처/기준일·가격/시각·전체 대비 부분 수집 건수를 화면에 명시하고 **오늘 새로 발생한 확정 패턴 또는 전체시장 완성으로 표시하지 않는다**. KIS tokenP·D1·API 측 신규 저장 없음. 장마감 확정은 기존 평일 22:20 KST KRX EOD 예약이며 패턴 R1.1 자동 저장은 별도 변수 `BLUE_TURSO_RESEARCH_AUTO_ENABLED=true` 승인 후에만 동작한다.
+- PR 병합만으로 **API/PWA/Collector 배포, FULL 활성화, 예약 변수 변경은 발생하지 않는다.** API+PWA 배포 및 Collector 적응 증속 배포 후에는 기존 잠정 읽기 전용 감사/15·30분 파일럿을 먼저 검증한다.
+
 ## 잠정 일봉 감사 (읽기 전용, 별도 활성화 불필요)
 
 - GitHub Actions **`BLUE Turso Provisional Day Audit (READ ONLY)`**를 수동 실행하고 `day_kst`에 `2026-11-19`처럼 실제 KST 거래일을 입력한다. 빈 값은 오늘, 최대 7일 전까지만 허용한다. 테스트는 무시크릿으로 실행되며 실제 감사는 Turso에 날짜 제한 SELECT만 실행한다. D1·KIS·토큰 발급·Worker 설정·종목 원시값에 접근하거나 변경하지 않는다.
