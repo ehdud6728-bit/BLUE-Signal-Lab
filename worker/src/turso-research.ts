@@ -74,7 +74,7 @@ export async function tursoResearchCoverage(env:ResearchEnv,factory?:Factory){
     return {storage:'TURSO',status:'AUDIT_COUNTS_ONLY',eod:a,research:b,
       readiness:a.audited_days<140||b.audited_days<120?'INSUFFICIENT_FOR_RECENT_EXIT_RESEARCH':
         'GAP_AND_OUTCOME_VALIDATION_REQUIRED',
-      goals:{rolling_windows:[20,60,120],eod_audited_days_min:140,
+      goals:{rolling_windows:[5,10,20,60,120,250,500],eod_audited_days_min:140,
         research_audited_days_min:120,history_target_days:250},
       note:'감사 원장 집계만 확인했습니다. 거래일 연속성·실제 행수·수정주가·지수/업종·완성된 미래 성과·독립 검증은 별도 확인이 필요합니다.'};
   },factory);

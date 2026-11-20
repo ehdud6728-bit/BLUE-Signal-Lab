@@ -1,0 +1,45 @@
+name: BLUE AI Pattern Short+Long History Audit (READ ONLY)
+
+on:
+  pull_request:
+    paths:
+      - 'tools/turso/ai-pattern-horizons-audit.mjs'
+      - 'tools/turso/ai-pattern-horizons-audit.test.mjs'
+      - '.github/workflows/blue_turso_ai_pattern_horizons_audit.yml'
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: 'plan: no DB access. audit: bounded Turso SELECT-only snapshot counts for 5/10/20/60 and 120/250/500 session research.'
+        type: choice
+        options: [plan, audit]
+        required: true
+        default: plan
+
+permissions:
+  contents: read
+
+concurrency:
+  group: blue-ai-pattern-horizons-audit
+  cancel-in-progress: false
+
+jobs:
+  audit:
+    if: github.event_name == 'pull_request' || github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install isolated Turso client (no lifecycle scripts)
+        working-directory: tools/turso
+        run: npm install --no-audit --no-fund --ignore-scripts --no-package-lock
+      - name: Verify read-only, bounded short and long research horizons without credentials
+        run: node --test tools/turso/ai-pattern-horizons-audit.test.mjs
+      - name: Run plan or explicitly selected read-only Turso audit
+        env:
+          AUDIT_MODE: ${{ inputs.mode }}
+          TURSO_DATABASE_URL: ${{ inputs.mode == 'audit' && secrets.TURSO_DATABASE_URL || '' }}
+          TURSO_AUTH_TOKEN: ${{ inputs.mode == 'audit' && secrets.TURSO_AUTH_TOKEN || '' }}
+        run: node tools/turso/ai-pattern-horizons-audit.mjs

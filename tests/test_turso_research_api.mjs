@@ -63,6 +63,7 @@ test('AI readiness is audit-ledger coverage only and does not invent history',as
     last_day:'2026-11-19',declared_rows:2660});
   assert.equal(out.research.audited_days,1);
   assert.equal(out.readiness,'INSUFFICIENT_FOR_RECENT_EXIT_RESEARCH');
+  assert.deepEqual(out.goals.rolling_windows,[5,10,20,60,120,250,500]);
   assert.equal(db.calls.length,2);
   assert.ok(db.calls.every(x=>!x.sql.includes('D1')&&!x.sql.includes('scan_requests')));
   assert.equal(db.closed,1);

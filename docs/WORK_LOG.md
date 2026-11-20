@@ -2,6 +2,15 @@
 
 새 채팅에서 프로젝트를 이어가기 위한 **결정/구현/검증 이력**입니다. 대화 전체를 저장하지 않고 실제 개발에 필요한 내용만 보존합니다. 최신 항목을 위에 추가하고, 결과가 달라지면 추측 대신 검증된 상태로 수정합니다.
 
+## 2026-11-20 (KST) — AI 패턴 5·10일 초단기 + 중·장기 확보율 읽기 전용 감사 PR 준비
+
+- **운영 확인:** PR #53 병합 `3b09f9306445a8f6641b4752446745ec13984325`, [실제 API 배포 #44647891557](https://github.com/ehdud6728-bit/BLUE-Signal-Lab/actions/runs/44647891557) 및 [웹 배포 #44649578847](https://github.com/ehdud6728-bit/BLUE-Signal-Lab/actions/runs/44649578847) 성공. 기존 배포/CI 재실행하지 않음.
+- **추가 사용자 결정:** 변화가 빠른 시장을 반영하여 **5·10거래일 초단기**, 20·60거래일 단기/지속성, 120·250·500거래일 장기 연구를 **병행**. 최근 5일의 신호와 5일 후 성숙 성과를 혼동하지 않고, 단기 소표본·장기 기준선 충돌 시 자동 추천 금지.
+- **실제 조회 제한:** 공개 API `/api/research/coverage` 직접 조회는 Cloudflare 인증 302로 기간 데이터를 얻지 못함. 인증 우회나 운영 DB 직접 쿼리 대신 GitHub Actions Secrets를 쓰는 새로운 읽기 전용 수동 감사 워크플로 준비. **현재 실제 저장된 기간의 일수는 미확인**.
+- **코드:** `tools/turso/ai-pattern-horizons-audit.mjs`(KST 이전 760달력일/원장 최대 520일, 5·10·20·60/120·250·500 구간별 EOD/연구/옵트인 전 종목 지표 날짜 집계, 최근 최대 8일만 실물 행수 readback, 평일 누락 후보) + 수동 `.github/workflows/blue_turso_ai_pattern_horizons_audit.yml`(기본 `plan`은 DB 연결 0회; 별도 `audit`만 Turso SELECT) + 단위 테스트. API의 `goals.rolling_windows`와 PWA 다음 단계 문구도 기간 구분에 맞춤. **운영 SQL 쓰기·D1·KIS tokenP·모델 호출·매매·배포 없음.** [설명](TURSO_AI_PATTERN_HORIZONS_RUNBOOK.md).
+- **로컬 검증:** 신설 기간 감사 Node **8/8**, 기존 Turso 웹/API/진행 회귀 Node **54/54**, 웹 TypeScript/Vite 빌드·API Worker Wrangler `--dry-run`, 수동 `plan` 출력 `turso_sql_queries=0`, YAML 구문 및 `git diff --check` 통과. 실제 `audit`는 아직 실행하지 않았으며 원격 저장일 수는 확인되지 않음. CI는 PR에서 별도 확인.
+- **다음:** 이 PR 무비밀 테스트/CI → 사용자 병합 → 수동 `audit` 후 실제 원장과 최근 8일 불일치 확인 → 과거 구간 보충은 용량·KRX 출처 확인 및 별도 승인 → 성숙 사례 기반 단기·장기 비교/시황 국면·추천 연구.
+
 ## 2026-11-20 (KST) — Turso AI 패턴·익절·손절 데이터 준비 1단계 (PR 준비)
 
 - **운영 기준:** PR #51 병합 `3ada75f89c7b9d5037e66b799b7388366f97094e`, [API #44644472568](https://github.com/ehdud6728-bit/BLUE-Signal-Lab/actions/runs/44644472568)와 [웹 #44644643775](https://github.com/ehdud6728-bit/BLUE-Signal-Lab/actions/runs/44644643775) 실제 배포 성공. 모바일 화면 렌더링 자체는 미확인.
