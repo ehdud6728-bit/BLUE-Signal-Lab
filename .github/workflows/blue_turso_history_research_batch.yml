@@ -78,6 +78,7 @@ jobs:
         run: |
           python -m unittest discover -s tests -p 'test_turso_verified_eod_range.py' -v
           python -m unittest discover -s tests -p 'test_turso_history_replay_source.py' -v
+          python -m unittest discover -s tests -p 'test_turso_parallel_pattern_scan.py' -v
           python -m unittest discover -s tests -p 'test_turso_signal_snapshot_export.py' -v
           node --test tools/turso/eod-range-import.test.mjs \
             tools/turso/signal-snapshot-import.test.mjs \
@@ -116,7 +117,7 @@ jobs:
               INDICATOR_ARGS+=(--turso-indicators-out "output/history/$DAY/indicators")
             fi
             python scripts/market_scan_r11.py --date "$DAY" --years "$RESEARCH_YEARS" \
-              --verified-eod-dir output/history/eod \
+              --verified-eod-dir output/history/eod --scan-workers 2 --scan-chunk-size 500 \
               --daily-provider auto --out "output/history/$DAY/source" "${INDICATOR_ARGS[@]}"
             python scripts/export_turso_signal_snapshot.py \
               --input-dir "output/history/$DAY/source" --out "output/history/$DAY/signals"

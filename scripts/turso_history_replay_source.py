@@ -6,7 +6,7 @@ research never silently falls back to a smaller marcap target-day universe.
 """
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, timedelta
 import hashlib
 import json
 from pathlib import Path
@@ -21,6 +21,30 @@ FIELDS = {'open': 'Open', 'high': 'High', 'low': 'Low', 'close': 'Close',
 CODE = re.compile(r'[0-9A-Z]{6}\Z')
 HASH = re.compile(r'[0-9a-f]{64}\Z')
 MAX_INT = (1 << 63) - 1
+
+
+def can_reuse_verified_target(source_latest: date, target: date) -> bool:
+    """Avoid losing intervening bars when marcap lags more than one weekday.
+
+    If marcap already reaches the target, replacing that single audited day is
+    safe. Otherwise, when more than one weekday is absent, retain the original
+    verified multi-day KRX repair path. This is not an exchange holiday
+    calendar or permission to invent missing EOD rows.
+    """
+    if source_latest >= target:
+        return True
+    weekdays = pd.bdate_range(source_latest + timedelta(days=1), target)
+    return len(weekdays) <= 1
+
+
+def daily_legacy_source_label(verified_source: str, account_available: bool) -> str:
+    """Preserve pre-optimization research provenance string/hash semantics."""
+    if verified_source == 'KRX_PYKRX_EXACT_DAY_VERIFIED':
+        return 'KRX pykrx verified account daily'
+    if verified_source == 'KRX_OPENAPI_EXACT_DAY_VERIFIED':
+        return ('KRX Open API exact-date verified fallback' if account_available
+                else 'KRX Open API verified daily')
+    raise ValueError('UNRECOGNIZED_KRX_VERIFIED_SOURCE')
 
 
 def load_verified_day(directory: str | Path, target: date) -> tuple[pd.DataFrame, str]:

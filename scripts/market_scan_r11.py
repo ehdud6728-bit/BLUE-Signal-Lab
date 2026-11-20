@@ -27,7 +27,7 @@ import requests
 
 from market_scan import load_marcap, normalise, enrich, export
 from market_scan_r08 import SourcePending, krx_day, COLS
-from market_scan_r08_diagnostics import scan_r08
+from turso_parallel_pattern_scan import scan_r08_parallel
 from export_turso_indicator_snapshot import export_indicator_snapshot
 from chart_research_r10 import (generate as generate_chart_research, chart_rows,
                                 backtest)
@@ -35,7 +35,8 @@ from zone_reaction_r15111 import analyze_zone_reactions
 from market_scan_r08_diagnostics import macd_metrics
 from corporate_actions import (adjust_verified_actions, ADJUSTED, ALREADY_ADJUSTED,
                                REVIEW, VERIFIED_ACTIONS)
-from turso_history_replay_source import load_verified_day
+from turso_history_replay_source import (load_verified_day, can_reuse_verified_target,
+                                         daily_legacy_source_label)
 
 KST = timezone(timedelta(hours=9))
 EOD_MIN_TIME_KST = time(15, 40)
@@ -489,9 +490,15 @@ def main():
     p.add_argument("--local-data-dir")
     p.add_argument("--verified-eod-dir", default="",
                    help="Use the already audited KRX EOD range for the selected historical day")
+    p.add_argument("--reuse-target-eod-dir", default="",
+                   help="Reuse the already verified daily KRX target if history needs no other missing weekdays")
     p.add_argument("--daily-provider", choices=["auto", "openapi", "pykrx"], default="auto")
     p.add_argument("--turso-indicators-out", default="",
                    help="Optional full-market indicator snapshot files; never writes databases")
+    p.add_argument("--scan-workers", type=int, choices=(1, 2, 3, 4), default=1,
+                   help="Bounded full-market research processes; 1 preserves legacy serial scan")
+    p.add_argument("--scan-chunk-size", type=int, default=500,
+                   help="Active KRX symbols per parallel research partition (1..1000)")
     p.add_argument("--diagnose-code", default="", help="optional six-character ticker; research-only as-of signal audit")
     args = p.parse_args()
     raw, hashes = load_marcap([int(x) for x in args.years.split(",")], args.local_data_dir)
@@ -509,6 +516,16 @@ def main():
         verified_count = len(verified_day)
         upgraded = merge_verified_days(raw, target, [verified_day], [target.isoformat()])
         days = [target.isoformat()]
+    elif args.reuse_target_eod_dir and can_reuse_verified_target(latest, target):
+        # Daily EOD and research share one independently audited KRX payload.
+        # Keep historical workflow's --verified-eod-dir contract unchanged.
+        # If the baseline is too stale, upgraded_history must repair every
+        # intervening weekday; a target-only replacement would hide gaps.
+        verified_day, canonical_source = load_verified_day(args.reuse_target_eod_dir, target)
+        target_source = daily_legacy_source_label(canonical_source, has_account)
+        verified_count = len(verified_day)
+        upgraded = merge_verified_days(raw, target, [verified_day], [target.isoformat()])
+        days = [target.isoformat()]
     elif requires_fetch:
         provider = selected_provider(args.daily_provider, key, has_account)
         upgraded, days, target_source = upgraded_history(
@@ -521,7 +538,9 @@ def main():
     # the analysis working copy, with a traceable company-IR event registry.
     analysis_raw, corporate_actions_audit = adjust_verified_actions(upgraded, target)
     all_indicators = [] if args.turso_indicators_out else None
-    rows, audit = scan_r08(analysis_raw, target.isoformat(), indicator_sink=all_indicators)
+    rows, audit = scan_r08_parallel(analysis_raw, target.isoformat(),
+        workers=args.scan_workers, chunk_size=args.scan_chunk_size,
+        indicator_sink=all_indicators)
     if verified_count is not None and audit['observed_stocks'] != verified_count:
         raise ValueError('HISTORY_KRX_RESEARCH_UNIVERSE_MISMATCH')
     for row in rows:

@@ -10,7 +10,8 @@ import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'scripts'))
 from market_scan_r11 import merge_verified_days
-from turso_history_replay_source import load_verified_day
+from turso_history_replay_source import (load_verified_day, can_reuse_verified_target,
+                                         daily_legacy_source_label)
 from turso_verified_eod_range import build_range
 
 
@@ -28,6 +29,24 @@ def day_frame(day):
 
 
 class HistoryReplaySourceTest(unittest.TestCase):
+    def test_daily_reuse_skips_only_when_intervening_weekdays_need_repair(self):
+        self.assertTrue(can_reuse_verified_target(date(2026, 11, 19), date(2026, 11, 20)))
+        self.assertTrue(can_reuse_verified_target(date(2026, 11, 20), date(2026, 11, 20)))
+        self.assertTrue(can_reuse_verified_target(date(2026, 11, 20), date(2026, 11, 19)))
+        self.assertTrue(can_reuse_verified_target(date(2026, 11, 13), date(2026, 11, 16)))
+        self.assertFalse(can_reuse_verified_target(date(2026, 11, 18), date(2026, 11, 20)))
+        self.assertFalse(can_reuse_verified_target(date(2026, 11, 13), date(2026, 11, 17)))
+
+    def test_daily_source_provenance_matches_preexisting_labels(self):
+        self.assertEqual(daily_legacy_source_label(SOURCE, True),
+                         'KRX pykrx verified account daily')
+        self.assertEqual(daily_legacy_source_label('KRX_OPENAPI_EXACT_DAY_VERIFIED', True),
+                         'KRX Open API exact-date verified fallback')
+        self.assertEqual(daily_legacy_source_label('KRX_OPENAPI_EXACT_DAY_VERIFIED', False),
+                         'KRX Open API verified daily')
+        with self.assertRaisesRegex(ValueError, 'UNRECOGNIZED'):
+            daily_legacy_source_label('FinanceData/marcap daily', False)
+
     def setUp(self):
         self.temp = TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
