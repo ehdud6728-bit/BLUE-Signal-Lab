@@ -2,11 +2,12 @@ import assert from 'node:assert/strict';
 import {test} from 'node:test';
 import {DatabaseSync} from 'node:sqlite';
 import {InvalidResearchQuery,tursoResearchDates,tursoResearchSearch,tursoResearchChart,
-  tursoResearchCoverage,tursoPatternPulse} from '../worker/src/turso-research.ts';
+  tursoResearchCoverage,tursoPatternPulse,tursoExitStudyReport} from '../worker/src/turso-research.ts';
 
 const env={TURSO_DATABASE_URL:'libsql://unit.invalid',TURSO_AUTH_TOKEN:'dummy'};
 const day='2026-11-18';
-function setup({partial=false,backendError=false,wrongSource=false,additionalDays=false}={}){
+function setup({partial=false,backendError=false,wrongSource=false,additionalDays=false,
+  publishedReport=false,unsafeReport=false}={}){
   const db=new DatabaseSync(':memory:');
   db.exec(`CREATE TABLE blue_research_signal_audit_v1 (
     trade_day TEXT,row_count INT,observed_stocks INT,signal_events INT,source_payload_sha256 TEXT);
@@ -49,6 +50,18 @@ function setup({partial=false,backendError=false,wrongSource=false,additionalDay
   }
   db.prepare('INSERT INTO blue_eod_ingest_audit_v1 VALUES (?,?)').run('2026-11-19',2660);
   db.prepare('INSERT INTO blue_eod_daily_v1 VALUES (?,?,?,?)').run('2026-11-19','005930',11100,9000);
+  if(publishedReport){
+    db.exec(`CREATE TABLE blue_pattern_exit_reports_v1 (
+      asof_day TEXT,report_json TEXT,report_sha256 TEXT)`);
+    const report={schema:'BLUE_TURSO_PATTERN_EXIT_REPORT_V1',storage:'TURSO',
+      asof_day:'2026-11-19',eod_audited_days:9,research_audited_days:5,
+      short_and_long_windows:[5,10,20,60,120,250,500].map(sessions=>({sessions})),
+      trading_calendar_verified:false,corporate_actions_verified:false,
+      market_and_sector_benchmark_verified:false,
+      investment_recommendation_enabled:unsafeReport,candidate_stocks:[]};
+    db.prepare('INSERT INTO blue_pattern_exit_reports_v1 VALUES (?,?,?)')
+      .run('2026-11-19',JSON.stringify(report),'a'.repeat(64));
+  }
   let closed=0;const calls=[];
   const factory=()=>({async execute(cmd){
     const sql=typeof cmd==='string'?cmd:cmd.sql,args=typeof cmd==='string'?[]:cmd.args;
@@ -127,6 +140,29 @@ test('even with matching row counts a wrong audit source hash rejects the pulse'
   await assert.rejects(()=>tursoPatternPulse(env,db.factory),
     /TURSO_PULSE_INCOMPLETE_AUDITED_DAY/);
   assert.equal(db.closed,1);
+});
+
+test('unpublished exit research has an honest, read-only Turso empty state',async()=>{
+  const db=setup(),out=await tursoExitStudyReport(env,db.factory);
+  assert.equal(out.status,'NOT_PUBLISHED');
+  assert.equal(out.report,null);
+  assert.equal(db.calls.length,1);
+  assert.match(db.calls[0].sql,/sqlite_master/);
+  assert.equal(db.closed,1);
+});
+
+test('published exploratory study is served without D1 and cannot contain active advice',async()=>{
+  const db=setup({publishedReport:true}),out=await tursoExitStudyReport(env,db.factory);
+  assert.equal(out.status,'EXPLORATORY_ONLY');
+  assert.equal(out.report.asof_day,'2026-11-19');
+  assert.equal(out.report.investment_recommendation_enabled,false);
+  assert.equal(db.calls.length,2);
+  assert.ok(db.calls.every(x=>!x.sql.includes('ai_analysis_cache')));
+  assert.equal(db.closed,1);
+  const unsafe=setup({publishedReport:true,unsafeReport:true});
+  await assert.rejects(()=>tursoExitStudyReport(env,unsafe.factory),
+    /INVALID_TURSO_EXIT_REPORT/);
+  assert.equal(unsafe.closed,1);
 });
 
 test('all filters are evaluated before paging with exact historical chart setups',async()=>{

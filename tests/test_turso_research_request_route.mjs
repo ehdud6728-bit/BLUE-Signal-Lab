@@ -11,6 +11,7 @@ const requestTursoResearch=async (_env,day)=>({status:'PENDING',day});
 const tursoResearchRequestStatus=async (_env,day)=>({status:'READY',day});
 const tursoResearchCoverage=async ()=>({storage:'TURSO',status:'AUDIT_COUNTS_ONLY'});
 const tursoPatternPulse=async ()=>({storage:'TURSO',status:'AUDITED_PATTERN_ACTIVITY'});
+const tursoExitStudyReport=async ()=>({storage:'TURSO',status:'NOT_PUBLISHED',report:null});
 ${code}`,{compilerOptions:{module:ts.ModuleKind.ESNext,target:ts.ScriptTarget.ES2022}}).outputText;
 const {default:api}=await import(`data:text/javascript;base64,${Buffer.from(script).toString('base64')}`);
 const origin='https://blue-signal-lab.ehdud6728.workers.dev';
@@ -50,6 +51,12 @@ test('audited pattern pulse remains Turso-only without D1 or AI cache',async()=>
   assert.deepEqual(await response.json(),{storage:'TURSO',status:'AUDITED_PATTERN_ACTIVITY'});
 });
 
+test('exploratory exit study status reads Turso without legacy AI or D1',async()=>{
+  const response=await api.fetch(request('/api/research/exit-study','GET'),env,{});
+  assert.equal(response.status,200);
+  assert.deepEqual(await response.json(),{storage:'TURSO',status:'NOT_PUBLISHED',report:null});
+});
+
 test('web date-specific search offers Turso request and persisted status polling',async()=>{
   const web=await readFile(new URL('../web/src/main.tsx',import.meta.url),'utf8');
   const progress=await readFile(new URL('../web/src/TursoResearchProgress.tsx',import.meta.url),'utf8');
@@ -70,4 +77,5 @@ test('Turso AI tab is pattern readiness only and refreshes its ledger',async()=>
   assert.match(readiness,/\/api\/research\/coverage/);
   assert.match(readiness,/추천 점수·예상 수익·AI 시장 전망을 생성하지 않습니다/);
   assert.match(readiness,/<TursoPatternPulse api=\{api\} active=\{active\}/);
+  assert.match(readiness,/<TursoExitStudy api=\{api\} active=\{active\}/);
 });
