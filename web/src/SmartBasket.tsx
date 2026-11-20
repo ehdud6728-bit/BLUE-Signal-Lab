@@ -16,6 +16,7 @@ import type {StopMethod} from './stop-loss';
 import BasketSupplyRecordRow from './BasketSupplyRecordRow';
 import {readSupplyAtDiscovery,supplyFromSearchExtras,validSupplyRecord,type BasketSupplyRecord} from './basket-supply-record';
 import {fetchResearchEvidenceTursoFirst} from './turso-research-reader';
+import {discoveryTechnicalBadges,validDiscoveryTechnicalBadges,type DiscoveryTechBadge} from './discovery-technical';
 
 // R153_PERFORMANCE_MONITOR: KIS results are server-verified; never fabricate missing candles.
 type Performance={code:string;day:string;status:string;baseline?:number;
@@ -47,13 +48,14 @@ const API=(import.meta.env.VITE_API_BASE||'https://blue-signal-lab-api-v2.ehdud6
 const STORE='blue_r15_basket_v1';
 const MAX_REGULAR=100, MAX_PROTECTED=20;
 export type BasketSelectionOrigin='SEARCH'|'ANALYSIS';
-export type BasketQuickItem={code:string;name:string|null;day:string;close_price:number|null;signals:string[];extras?:Record<string,unknown>};
+export type BasketQuickItem={code:string;name:string|null;day:string;close_price:number|null;signals:string[];extras?:Record<string,unknown>;technicalBadges?:DiscoveryTechBadge[]};
 export type BasketQuickAddRequest={serial:number;item:BasketQuickItem;selectionOrigin?:BasketSelectionOrigin;analysisMatched?:boolean};
 type SearchRow=BasketQuickItem;
 type AiPick={code:string;name:string;day:string;close_price:number;signals:string[];reason:string;risk:string;watch:string;source:'AI'};
 type AiResult={status:string;asof?:string;items?:AiPick[];generated_at?:string;model?:string;cached?:boolean;message?:string;error?:string};
 type BasketItem={id:string;source:'MANUAL'|'AI';code:string;name:string;day:string;baseline:number;
   added_at:string;signals:string[];memo:string;reason?:string;risk?:string;watch?:string;
+  technicalBadges?:DiscoveryTechBadge[];
   selectionOrigin?:BasketSelectionOrigin;analysisMatched?:boolean;
   protected?:boolean;protected_at?:string;
   patternUp10d?:number;patternN10d?:number;patternLabel10d?:string;patternDays10d?:string[];
@@ -91,6 +93,7 @@ function validItem(x:any):x is BasketItem{
    (x.patternLabel10d===undefined||(typeof x.patternLabel10d==='string'&&x.patternLabel10d.length<=150))&&
    (x.patternDays10d===undefined||(Array.isArray(x.patternDays10d)&&x.patternDays10d.length<=12&&
     x.patternDays10d.every((d:unknown)=>typeof d==='string'&&validDay(d)&&d<=x.day)))&&
+   (x.technicalBadges===undefined||validDiscoveryTechnicalBadges(x.technicalBadges))&&
    (x.supplyRecord===undefined||(validSupplyRecord(x.supplyRecord)&&x.supplyRecord.asof===x.day))&&
    (x.supplyMemo===undefined||(typeof x.supplyMemo==='string'&&x.supplyMemo.length<=400));
 }
@@ -232,8 +235,14 @@ export default function SmartBasket({quickAddRequest,onItemsChange,active=true,r
    try{
     const found=await fetchResearchEvidenceTursoFirst(it.code,it.day,patternSampleMin);
     if(!found||disposed)continue;
-    const snapshot=patternEvidence(found);if(!('patternN10d' in snapshot))continue;
-    setItems(old=>old.map(x=>perfId(x)===key?{...x,...snapshot}:x));
+    const snapshot=patternEvidence(found);
+    // Restore older basket entries from the exact saved research day only.
+    // An absent or unaudited source must not create technical badges.
+    const badges=discoveryTechnicalBadges(found.extras);
+    if(!('patternN10d' in snapshot)&&!badges.length)continue;
+    setItems(old=>old.map(x=>perfId(x)===key?{
+      ...x,...snapshot,...(x.technicalBadges===undefined&&badges.length?{technicalBadges:badges}:{})
+    }:x));
    }catch{/* Historical evidence is optional. Never invent it on network errors. */}
   }};
   void Promise.all([worker(),worker(),worker()]);
@@ -283,8 +292,12 @@ export default function SmartBasket({quickAddRequest,onItemsChange,active=true,r
   if(items.filter(x=>!x.protected).length>=MAX_REGULAR){setError('일반 관찰함은 100건까지 가능합니다. 오래 보려는 종목은 장기 관찰로 보호하세요.');return;}
   const p=source==='AI'?data as AiPick:null;
   const initialSupply=source==='MANUAL'?supplyFromSearchExtras((data as SearchRow).extras,data.day):undefined;
+  const technicalBadges=source==='MANUAL'?
+    (validDiscoveryTechnicalBadges((data as SearchRow).technicalBadges)?(data as SearchRow).technicalBadges!:
+      discoveryTechnicalBadges((data as SearchRow).extras)):[];
   setItems(prev=>[{id,source,code:data.code,name:data.name||data.code,day:data.day,
     baseline:data.close_price as number,added_at:new Date().toISOString(),signals:data.signals||[],memo:'',
+    technicalBadges,
     ...(source==='MANUAL'?{selectionOrigin,...(selectionOrigin==='ANALYSIS'&&typeof analysisMatched==='boolean'?{analysisMatched}:{})}:{}),
     reason:p?.reason,risk:p?.risk,watch:p?.watch,...patternEvidence(data),
     ...(initialSupply?{supplyRecord:initialSupply}:{}),supplyMemo:''},...prev]);
@@ -544,7 +557,10 @@ export default function SmartBasket({quickAddRequest,onItemsChange,active=true,r
      </div>
      <div className="basket-discovery-signals" aria-label="선택 기준일 기술 신호">
        <span className="basket-discovery-signals-title">{it.selectionOrigin==='ANALYSIS'?'분석 기준일 기술 신호':'발견 당시 기술 신호'}</span>
-       <div className="basket-discovery-signals-list">{signalChips.length?signalChips.map(t=><span className="basket-discovery-signal-chip" key={t}>{t}</span>):
+       <div className="basket-discovery-signals-list">{(signalChips.length||it.technicalBadges?.length)?<>
+         {signalChips.map(t=><span className="basket-discovery-signal-chip" key={t}>{t}</span>)}
+         {it.technicalBadges?.map(t=><span className="r1591-search-tech" key={t}>{t}</span>)}
+       </>:
          <small className="r154-no-signal">{it.selectionOrigin==='ANALYSIS'&&it.analysisMatched===false?'검색 신호 미충족 · 사용자 직접 선택':'원본 신호 확인 불가'}</small>}</div>
      </div>
      <StopLossRow active={active} code={it.code} day={it.day} baseline={it.baseline}
