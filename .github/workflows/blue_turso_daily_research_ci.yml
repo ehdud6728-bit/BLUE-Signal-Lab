@@ -19,9 +19,11 @@ on:
       - 'scripts/market_scan_r08_diagnostics.py'
       - 'scripts/market_scan_r11.py'
       - 'scripts/turso_history_replay_source.py'
+      - 'scripts/turso_verified_eod_range.py'
       - 'tests/test_market_scan.py'
       - 'tests/test_market_scan_r11.py'
       - 'tests/test_turso_history_replay_source.py'
+      - 'tests/test_turso_verified_eod_range.py'
       - '.github/workflows/blue_turso_history_research_batch.yml'
       - '.github/workflows/blue_turso_missing_history_backfill.yml'
       - 'scripts/turso_parallel_pattern_scan.py'
@@ -59,6 +61,7 @@ jobs:
           python -m unittest discover -s tests -p 'test_market_scan.py' -v
           python -m unittest discover -s tests -p 'test_market_scan_r11.py' -v
           python -m unittest discover -s tests -p 'test_turso_history_replay_source.py' -v
+          python -m unittest discover -s tests -p 'test_turso_verified_eod_range.py' -v
           python -m unittest discover -s tests -p 'test_turso_parallel_pattern_scan.py' -v
       - uses: actions/setup-node@v4
         with:
