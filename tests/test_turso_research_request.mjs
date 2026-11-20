@@ -145,6 +145,22 @@ test('progress phases come only from successful audited GitHub steps, never elap
   db.db.close();
 });
 
+test('completed KRX failure with audited KIS rows is PROVISIONAL, not pattern READY/FAILED',async()=>{
+  const db=mock(),opts={now,factory:db.factory,fetcher:db.fetcher};
+  await requestTursoResearch(env,day,opts);
+  db.run={id:12345,display_title:`BLUE Turso ${day} · apply`,
+    created_at:now.toISOString(),status:'completed',conclusion:'success',
+    updated_at:new Date(now.getTime()-5*60000).toISOString(),
+    html_url:'https://github.com/ehdud6728-bit/BLUE-Signal-Lab/actions/runs/12345'};
+  db.jobSteps=[{name:'On KRX failure audit already saved KIS observations without writing EOD',
+    conclusion:'success'}];
+  const result=await tursoResearchRequestStatus(env,day,opts);
+  assert.equal(result.status,'PROVISIONAL');
+  assert.match(result.reason,/KIS 잠정/);
+  assert.equal(result.actions_url,db.run.html_url);
+  db.db.close();
+});
+
 test('without GitHub token no Turso queue mutations are allowed',async()=>{
   const db=mock();
   await assert.rejects(()=>requestTursoResearch({...env,GITHUB_TOKEN:''},day,

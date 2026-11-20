@@ -63,6 +63,8 @@ jobs:
       - name: Validate exact-day source logic before collection
         run: python -m unittest discover -s tests -p 'test_turso_verified_eod_range.py' -v
       - name: Fetch one exact KRX trading day and validate market coverage
+        id: krx_fetch
+        continue-on-error: true
         env:
           KRX_AUTH_KEY: ${{ secrets.KRX_AUTH_KEY }}
           KRX_ID: ${{ secrets.KRX_DATA_ID || secrets.KRX_ID }}
@@ -79,24 +81,32 @@ jobs:
       - name: Install isolated Turso importer
         working-directory: tools/turso
         run: npm install --no-audit --no-fund --ignore-scripts --no-package-lock
+      - name: On KRX failure audit already saved KIS observations without writing EOD
+        if: ${{ steps.krx_fetch.outcome == 'failure' }}
+        env:
+          TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
+          TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
+        run: node tools/turso/provisional-fallback-gate.mjs --day="$TRADE_DAY"
       - name: Test strict idempotent Turso writer
+        if: ${{ steps.krx_fetch.outcome == 'success' }}
         run: node --test tools/turso/eod-range-import.test.mjs
       - name: Validate manifest and daily source hashes without DB access
+        if: ${{ steps.krx_fetch.outcome == 'success' }}
         run: node tools/turso/eod-range-import.mjs --mode=dry_run --input-dir=output/turso_daily_eod
       - name: Write verified KRX EOD into Turso only and audit read-back
-        if: ${{ env.MODE == 'apply' }}
+        if: ${{ steps.krx_fetch.outcome == 'success' && env.MODE == 'apply' }}
         env:
           TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
           TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
         run: node tools/turso/eod-range-import.mjs --mode=apply --input-dir=output/turso_daily_eod
       - name: Test independent research snapshot source exporter
-        if: ${{ env.RUN_RESEARCH == 'true' }}
+        if: ${{ steps.krx_fetch.outcome == 'success' && env.RUN_RESEARCH == 'true' }}
         run: python -m unittest discover -s tests -p 'test_turso_signal_snapshot_export.py' -v
       - name: Prove 500-symbol parallel scan equals original serial output
-        if: ${{ env.RUN_RESEARCH == 'true' }}
+        if: ${{ steps.krx_fetch.outcome == 'success' && env.RUN_RESEARCH == 'true' }}
         run: python -m unittest discover -s tests -p 'test_turso_parallel_pattern_scan.py' -v
       - name: Scan full market patterns for the SAME verified KST date
-        if: ${{ env.RUN_RESEARCH == 'true' }}
+        if: ${{ steps.krx_fetch.outcome == 'success' && env.RUN_RESEARCH == 'true' }}
         env:
           KRX_AUTH_KEY: ${{ secrets.KRX_AUTH_KEY }}
           KRX_ID: ${{ secrets.KRX_DATA_ID || secrets.KRX_ID }}
@@ -115,7 +125,7 @@ jobs:
             --daily-provider auto --out output/turso_daily_research/source \
             "${INDICATOR_ARGS[@]}"
       - name: Reject stale research dates and incomplete KRX coverage
-        if: ${{ env.RUN_RESEARCH == 'true' }}
+        if: ${{ steps.krx_fetch.outcome == 'success' && env.RUN_RESEARCH == 'true' }}
         run: |
           python - <<'PY'
           import json, os
@@ -127,21 +137,21 @@ jobs:
           print('BLUE_TURSO_RESEARCH_EXACT_DAY_VERIFIED', audit['asof'], audit['matched_stocks'])
           PY
       - name: Export R1.1 signals, patterns and dated chart evidence
-        if: ${{ env.RUN_RESEARCH == 'true' }}
+        if: ${{ steps.krx_fetch.outcome == 'success' && env.RUN_RESEARCH == 'true' }}
         run: |
           python scripts/export_turso_signal_snapshot.py \
             --input-dir output/turso_daily_research/source \
             --out output/turso_daily_research/snapshot
       - name: Test audited, immutable Turso research writer
-        if: ${{ env.RUN_RESEARCH == 'true' }}
+        if: ${{ steps.krx_fetch.outcome == 'success' && env.RUN_RESEARCH == 'true' }}
         run: node --test tools/turso/signal-snapshot-import.test.mjs
       - name: Validate research snapshot hashes without database writes
-        if: ${{ env.RUN_RESEARCH == 'true' }}
+        if: ${{ steps.krx_fetch.outcome == 'success' && env.RUN_RESEARCH == 'true' }}
         run: |
           node tools/turso/signal-snapshot-import.mjs \
             --mode=dry_run --input-dir=output/turso_daily_research/snapshot
       - name: Save research only after Turso EOD audit and exact close match
-        if: ${{ env.RUN_RESEARCH == 'true' && env.MODE == 'apply' }}
+        if: ${{ steps.krx_fetch.outcome == 'success' && env.RUN_RESEARCH == 'true' && env.MODE == 'apply' }}
         env:
           TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
           TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
@@ -149,15 +159,15 @@ jobs:
           node tools/turso/signal-snapshot-import.mjs \
             --mode=apply --input-dir=output/turso_daily_research/snapshot
       - name: Test full-market Turso indicator safety without credentials
-        if: ${{ env.RUN_INDICATORS == 'true' }}
+        if: ${{ steps.krx_fetch.outcome == 'success' && env.RUN_INDICATORS == 'true' }}
         run: node --test tools/turso/indicator-snapshot-import.test.mjs
       - name: Validate all symbol technical indicator hashes without DB access
-        if: ${{ env.RUN_INDICATORS == 'true' }}
+        if: ${{ steps.krx_fetch.outcome == 'success' && env.RUN_INDICATORS == 'true' }}
         run: |
           node tools/turso/indicator-snapshot-import.mjs \
             --mode=dry_run --input-dir=output/turso_daily_research/indicators
       - name: Apply full-market indicators only with explicit independent opt-in
-        if: ${{ env.RUN_INDICATORS == 'true' && env.MODE == 'apply' }}
+        if: ${{ steps.krx_fetch.outcome == 'success' && env.RUN_INDICATORS == 'true' && env.MODE == 'apply' }}
         env:
           TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
           TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}

@@ -3,17 +3,21 @@ import {Clock3,RefreshCw} from 'lucide-react';
 import './turso-provisional-today.css';
 
 type Quote={code:string;name:string;price:number;open:number;high:number;low:number;
-  volume:number;observed_at_utc:string;source:string;date_basis:string};
+  volume:number;observed_at_utc:string;source:string;date_basis:string;
+  observations?:string[];reference_comparable?:boolean};
 type Snapshot={storage:string;data_status:string;day:string;complete_market:boolean;
-  pattern_analysis:boolean;reference_day:string|null;reference_market_count:number|null;
+  pattern_analysis:boolean;observation_preview?:boolean;
+  reference_day:string|null;reference_market_count:number|null;
   observed_count:number;total:number;latest_observed_utc:string|null;items:Quote[]};
 function kst(utc:string|null){if(!utc)return '미확인';
   const d=new Date(utc);return Number.isFinite(d.getTime())?
     new Intl.DateTimeFormat('ko-KR',{timeZone:'Asia/Seoul',month:'2-digit',day:'2-digit',
       hour:'2-digit',minute:'2-digit',hour12:false}).format(d):'미확인';}
 const won=(v:number)=>v.toLocaleString('ko-KR');
+const CANDLE_LABELS:Record<string,string>={UP_CANDLE:'양봉',NEAR_HIGH:'고가권 마감/관측',
+  ABOVE_REFERENCE_HIGH:'전 기준일 고가 돌파 관측',DOUBLE_REFERENCE_VOLUME:'전 기준일 거래량 2배 관측'};
 
-/** A separate quote-only card; provisional rows must never become pattern matches. */
+/** Provisional observations only; never merge these into confirmed BLUE pattern matches. */
 export default function TursoProvisionalToday({api,day,query=''}:{api:string;day:string;query?:string}){
   const [state,setState]=useState<Snapshot|null>(null);
   const [loading,setLoading]=useState(false);
@@ -61,10 +65,12 @@ export default function TursoProvisionalToday({api,day,query=''}:{api:string;day
       </p>
       {state?.observed_count===0&&<p>아직 수집된 당일 잠정 시세가 없습니다. KIS 수집기는 별도 설정이 활성화된 경우에만 순차 저장합니다.</p>}
       {state&&state.total>0&&<>
+        {state.observation_preview&&<p className="blue-provisional-info">잠정 일봉 관찰: 양봉·고가권·전 기준일 고가·거래량 비교 (기존 BLUE 패턴 신호와 별개)</p>}
         <div className="blue-provisional-list">
           {state.items.map(q=><div className="blue-provisional-row" key={q.code}>
             <div><strong>{q.name||q.code}</strong> <span>{q.code}</span>
-              <small>시가 {won(q.open)} · 고가 {won(q.high)} · 저가 {won(q.low)}</small></div>
+              <small>시가 {won(q.open)} · 고가 {won(q.high)} · 저가 {won(q.low)}</small>
+              {q.observations?.length?<small className="blue-provisional-observations">관찰: {q.observations.map(k=>CANDLE_LABELS[k]).filter(Boolean).join(' · ')}</small>:null}</div>
             <div className="blue-provisional-price"><strong>{won(q.price)}원</strong>
               <small>{kst(q.observed_at_utc)}</small></div>
           </div>)}
@@ -73,6 +79,6 @@ export default function TursoProvisionalToday({api,day,query=''}:{api:string;day
       </>}
       {state&&state.total===0&&state.observed_count>0&&<p>현재 수집된 종목 중 검색어와 일치하는 종목이 없습니다.</p>}
     </>}
-    <p className="blue-provisional-warning">일부 종목의 KIS 관측값이며 실시간 전체시장·오늘 발생한 기술 패턴·확정 종가가 아닙니다. 수집 시각이 오래된 종목도 포함될 수 있습니다. 장 마감 후 KRX 분석 완료 시 확정 검색 결과로 전환됩니다.</p>
+    <p className="blue-provisional-warning">일부 종목의 KIS 미확정 관측값입니다. 표시된 일봉 관찰 조건은 단순 가격 비교로 RSI·MACD·골든크로스 등 BLUE 기술 패턴 검증이나 종목 추천이 아닙니다. 당일 전체시장 수집/확정 종가가 아니며 수신 시각이 오래될 수 있습니다. KRX 감사 일봉과 패턴 저장이 완료되면 확정 검색으로 전환됩니다.</p>
   </section>;
 }

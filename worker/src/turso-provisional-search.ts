@@ -1,6 +1,6 @@
-/** Read-only same-day KIS provisional observations. NOT a pattern scanner.
+/** Read-only same-day KIS provisional observations and bounded candle previews.
  * The existing collector writes these limited-coverage quotes to Turso;
- * this endpoint never calls KIS, issues a token or touches D1.
+ * this endpoint never calls KIS, issues a token, touches D1 or writes research signals.
  */
 import {createClient} from '@libsql/client/web';
 
@@ -23,6 +23,20 @@ function validDay(day:string){if(!DAY.test(day))return false;
 function fail():never{throw new InvalidProvisionalQuery();}
 function like(raw:string){return `%${raw.replace(/[\\%_]/g,'\\$&')}%`;}
 
+// A single provisional candle cannot establish BLUE/RSI/MACD/ENV/GC patterns.
+// These deterministic, price-only observations are explicitly NOT signals.
+export function provisionalCandleObservations(q:{open:number;high:number;low:number;
+  price:number;volume:number},previous:{high:number;volume:number}|null){
+  const observations:string[]=[];
+  if(q.price>q.open)observations.push('UP_CANDLE');
+  if(q.high>q.low&&10*(q.price-q.low)>=8*(q.high-q.low))
+    observations.push('NEAR_HIGH');
+  if(previous&&q.price>previous.high)observations.push('ABOVE_REFERENCE_HIGH');
+  if(previous&&previous.volume>0&&q.volume>=2*previous.volume)
+    observations.push('DOUBLE_REFERENCE_VOLUME');
+  return observations;
+}
+
 export async function tursoProvisionalSearch(env:Env,p:URLSearchParams,
   factory:Factory=createClient,now=new Date()){
   const day=p.get('date')||'',q=(p.get('q')||'').trim();
@@ -44,10 +58,16 @@ export async function tursoProvisionalSearch(env:Env,p:URLSearchParams,
       reference_market_count<1700||reference_market_count>10000))
       throw Error('INVALID_PROVISIONAL_REFERENCE_AUDIT');
     const empty={storage:'TURSO',data_status:'KIS_PARTIAL_PROVISIONAL',
-      day,source:'KIS_SAVED_ONLY',pattern_analysis:false,complete_market:false,
+      day,source:'KIS_SAVED_ONLY',pattern_analysis:false,observation_preview:true,
+      observation_scope:'SINGLE_CANDLE_AND_AUDITED_REFERENCE_ONLY',complete_market:false,
       reference_day,reference_market_count,observed_count:0,total:0,
       latest_observed_utc:null,items:[]};
     if(!reference_day)return empty;
+    // A stored audit without its full underlying KRX day is not a safe baseline.
+    const coverage=await client.execute({sql:
+      'SELECT COUNT(*) AS n FROM blue_eod_daily_v1 WHERE trade_day=?',args:[reference_day]});
+    if(Number(coverage.rows[0]?.n)!==reference_market_count)
+      throw Error('INCOMPLETE_PROVISIONAL_REFERENCE');
     const table=await client.execute(`SELECT 1 AS found FROM sqlite_master
       WHERE type='table' AND name='blue_kis_provisional_daily_v1' LIMIT 1`);
     if(!table.rows.length)return empty;
@@ -66,8 +86,11 @@ export async function tursoProvisionalSearch(env:Env,p:URLSearchParams,
       FROM blue_kis_provisional_daily_v1 p WHERE ${trusted}${condition}`,args}):null;
     const total=filtered?Number(filtered.rows[0]?.n):observed_count;
     const rows=await client.execute({sql:`SELECT p.trade_day,p.code,p.name,p.open,p.high,
-      p.low,p.close,p.volume,p.reference_day,p.observed_at_utc,p.date_basis,p.source
-      FROM blue_kis_provisional_daily_v1 p WHERE ${trusted}${condition}
+      p.low,p.close,p.volume,p.reference_day,p.observed_at_utc,p.date_basis,p.source,
+      e.high AS previous_high,e.volume AS previous_volume
+      FROM blue_kis_provisional_daily_v1 p
+      LEFT JOIN blue_eod_daily_v1 e ON e.trade_day=p.reference_day AND e.code=p.code
+      WHERE ${trusted}${condition}
       ORDER BY p.observed_at_utc DESC,p.code ASC LIMIT ?`,args:[...args,limit]});
     const items=rows.rows.map(r=>{
       const code=String(r.code),price=Number(r.close),open=Number(r.open),
@@ -77,10 +100,17 @@ export async function tursoProvisionalSearch(env:Env,p:URLSearchParams,
         low<=0||low>open||low>price||high<open||high<price||volume<0||
         !Number.isFinite(Date.parse(at))||Date.parse(at)>now.getTime()+300000)
         throw Error('INVALID_PROVISIONAL_ROW');
+      const prevHigh=r.previous_high===null||r.previous_high===undefined?null:Number(r.previous_high);
+      const prevVolume=r.previous_volume===null||r.previous_volume===undefined?null:Number(r.previous_volume);
+      const previous=prevHigh!==null&&prevVolume!==null&&
+        Number.isSafeInteger(prevHigh)&&prevHigh>0&&Number.isSafeInteger(prevVolume)&&prevVolume>=0
+        ?{high:prevHigh,volume:prevVolume}:null;
       return {day,code,name:String(r.name||code).slice(0,70),open,high,low,
         price,volume,observed_at_utc:at,reference_day,
         source:String(r.source),date_basis:String(r.date_basis),
-        provisional:true,pattern_confirmed:false};
+        provisional:true,pattern_confirmed:false,
+        observations:provisionalCandleObservations({price,open,high,low,volume},previous),
+        reference_comparable:previous!==null};
     });
     if(!Number.isSafeInteger(total)||total<items.length||total>observed_count)
       throw Error('INVALID_PROVISIONAL_TOTAL');

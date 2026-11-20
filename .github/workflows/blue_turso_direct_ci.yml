@@ -7,6 +7,9 @@ on:
       - 'collector/src/core.mjs'
       - 'collector/test/core.test.mjs'
       - 'collector/src/turso-provisional.mjs'
+      - 'tools/turso/provisional-fallback-gate.mjs'
+      - 'tools/turso/provisional-fallback-gate.test.mjs'
+      - '.github/workflows/blue_turso_daily_verified_eod_auto.yml'
       - 'collector/turso-provisional.test.mjs'
       - '.github/workflows/blue_turso_provisional_pilot.yml'
       - 'collector/src/index.mjs'
@@ -83,7 +86,7 @@ jobs:
         working-directory: tools/turso
         run: npm install --no-audit --no-fund --ignore-scripts --no-package-lock
       - name: Test shared token vault, D1 fallback and collector safety
-        run: node --test collector/turso-direct.test.mjs collector/turso-provisional.test.mjs collector/test/turso-instant.test.mjs collector/test/turso-mirror.test.mjs tools/turso/kis-token-steward.test.mjs tools/turso/d1-token-backup.test.mjs tools/turso/quote-parity-audit.test.mjs tools/turso/primary-readiness-audit.test.mjs
+        run: node --test collector/turso-direct.test.mjs collector/turso-provisional.test.mjs collector/test/turso-instant.test.mjs collector/test/turso-mirror.test.mjs tools/turso/kis-token-steward.test.mjs tools/turso/d1-token-backup.test.mjs tools/turso/quote-parity-audit.test.mjs tools/turso/primary-readiness-audit.test.mjs tools/turso/provisional-fallback-gate.test.mjs
       - name: Test Cloudflare read-only settings sanitizer
         run: node --test tools/turso/collector-runtime-settings-audit.test.mjs
       - name: Test browser Turso-only manual refresh without D1 fallback

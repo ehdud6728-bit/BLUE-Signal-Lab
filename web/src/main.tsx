@@ -72,6 +72,9 @@ const todayKST=()=>new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Seoul',year:'
 const eodRequestReadyKST=()=>new Intl.DateTimeFormat('en-GB',{
   timeZone:'Asia/Seoul',hour:'2-digit',minute:'2-digit',hourCycle:'h23'
 }).format(new Date()) >= '15:40';
+const provisionalWindowKST=()=>new Intl.DateTimeFormat('en-GB',{
+  timeZone:'Asia/Seoul',hour:'2-digit',minute:'2-digit',hourCycle:'h23'
+}).format(new Date()) < '22:00';
 const SCAN_WATCH_KEY='blue_r1581_pending_scan_date_v1';
 const TURSO_WATCH_KEY='blue_turso_pending_research_date_v1';
 const rememberedScanDate=():string=>{
@@ -462,8 +465,8 @@ function App(){
         setDataStatus('NOT_IMPORTED');setAppliedNameQuery(queryName);
         setAppliedSort(querySort);setAppliedAmountEok(queryAmountEok);
         if(queryDate>todayKST())setStatus('아직 거래가 이루어지지 않은 날짜입니다.');
-        else if(queryDate===todayKST()&&!eodRequestReadyKST())
-          setStatus('오늘 확정 일봉은 아직 없습니다. 아래 KIS 잠정 시세는 수집된 종목만 보여주며 기술 패턴 분석 결과가 아닙니다.');
+        else if(queryDate===todayKST()&&provisionalWindowKST())
+          setStatus('오늘 KRX 확정 분석은 아직 없습니다. 22시까지는 아래 KIS 수집분의 잠정 일봉 관찰을 보여드립니다. 확정 BLUE 패턴은 별도 검증이 필요합니다.');
         else await requestTursoScan(queryDate);
         return;
       }
@@ -495,10 +498,12 @@ function App(){
       if(d.data_status==='NOT_IMPORTED'){
         if(queryMode==='single'){
           if(patternBackend==='turso'){
-            // An inline progress card carries the request outcome and errors.
-            // Do not leave a generic "requesting" notice after a failed POST.
-            setStatus('');
-            await requestTursoScan(queryDate);
+            if(queryDate===todayKST()&&provisionalWindowKST())
+              setStatus('KRX 확정 일봉 대기 중입니다. KIS 잠정 관찰은 아래에서 확인하세요.');
+            else{
+              // An inline progress card carries the KRX request outcome.
+              setStatus('');await requestTursoScan(queryDate);
+            }
           }else if(queryDate>todayKST()){
             setStatus('미래 날짜의 주가 데이터는 아직 존재하지 않습니다.');
           }else if(queryDate===todayKST()&&!eodRequestReadyKST()){
@@ -534,6 +539,9 @@ function App(){
           void loadDates().catch(()=>null);
         }else if(d.status==='FAILED'){
           setWatchDate('');setScanInfo(`${watchDate} 분석 실패: `+(d.reason||'GitHub 실행 기록을 확인하세요.'));
+        }else if(d.status==='PROVISIONAL'){
+          setWatchDate('');setScanInfo(`${watchDate} KIS 잠정 자료만 확인됨 · `+
+            (d.reason||'KRX 확정 패턴은 아직 저장되지 않았습니다.'));
         }else if(d.status==='PENDING'){
           setScanInfo(`${watchDate} 분석 진행 중 · 다른 화면에서도 서버 작업은 계속됩니다.`);
         }else if(d.status==='NOT_IMPORTED'){
