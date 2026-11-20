@@ -96,7 +96,7 @@ export async function tursoEodCompare(env:TursoConfig,params:URLSearchParams,
   return withTurso(env,async client=>{
     const codes=[...new Set(pairs.map(p=>p.code))];
     const earliest=pairs.reduce((a,b)=>a<b.day?a:b.day,pairs[0].day);
-    const result=await client.execute({sql:`SELECT e.trade_day,e.code,e.close,e.high
+    const result=await client.execute({sql:`SELECT e.trade_day,e.code,e.close,e.high,e.low
       FROM blue_eod_daily_v1 e
       JOIN blue_eod_ingest_audit_v1 a ON a.trade_day=e.trade_day AND a.row_count>=1700
       WHERE e.code IN (${codes.map(()=>'?').join(',')}) AND e.trade_day>=?
@@ -110,15 +110,16 @@ export async function tursoEodCompare(env:TursoConfig,params:URLSearchParams,
       ORDER BY trade_date ASC,received_at_utc DESC LIMIT 5001`,
       args:[...codes,earliest,today]});
     if(snapshots.rows.length>5000)throw Error('TURSO_KIS_COMPARE_RANGE_TOO_LARGE');
-    const byCode=new Map<string,{day:string;close:number;high:number}[]>();
+    const byCode=new Map<string,{day:string;close:number;high:number;low:number}[]>();
     for(const r of result.rows){
       const day=String(r.trade_day),code=String(r.code);
-      const close=Number(r.close),high=Number(r.high);
+      const close=Number(r.close),high=Number(r.high),low=Number(r.low);
       if(!validDay(day)||!codes.includes(code)||!Number.isSafeInteger(close)||close<=0||
-        !Number.isSafeInteger(high)||high<close)throw Error('TURSO_EOD_COMPARE_INVALID_PRICE');
-      const rows=byCode.get(code)||[];rows.push({day,close,high});byCode.set(code,rows);
+        !Number.isSafeInteger(high)||high<close||
+        !Number.isSafeInteger(low)||low<=0||low>close)throw Error('TURSO_EOD_COMPARE_INVALID_PRICE');
+      const rows=byCode.get(code)||[];rows.push({day,close,high,low});byCode.set(code,rows);
     }
-    type QuoteSnapshot={day:string;price:number;high:number;at:string;market:string};
+    type QuoteSnapshot={day:string;price:number;high:number;low:number;at:string;market:string};
     const quotesByCode=new Map<string,QuoteSnapshot[]>();
     for(const r of snapshots.rows){
       try{
@@ -153,7 +154,7 @@ export async function tursoEodCompare(env:TursoConfig,params:URLSearchParams,
           !Number.isSafeInteger(low)||low<=0||low>price||
           (payload.reported_trade_date!=null&&payload.reported_trade_date!==day.replaceAll('-','')))continue;
         const rows=quotesByCode.get(code)||[];
-        rows.push({day,price,high,at,market});quotesByCode.set(code,rows);
+        rows.push({day,price,high,low,at,market});quotesByCode.set(code,rows);
       }catch{/* A corrupt or unverified snapshot does not invalidate audited EOD. */}
     }
     const items=pairs.map(({code,day})=>{
@@ -176,6 +177,11 @@ export async function tursoEodCompare(env:TursoConfig,params:URLSearchParams,
         ...quoteRows.filter(r=>r.day>day&&!auditedDays.has(r.day))
           .map(r=>({day:r.day,high:r.high,source:'KIS_TURSO_DAY_HIGH'}))];
       const high=highs.sort((a,b)=>b.high-a.high||a.day.localeCompare(b.day))[0]||null;
+      const lows=[...later.map(r=>({day:r.day,low:r.low,source:'KRX_VERIFIED_EOD_LOW'})),
+        // The audited full-day low supersedes same-day partial KIS snapshots.
+        ...quoteRows.filter(r=>r.day>day&&!auditedDays.has(r.day))
+          .map(r=>({day:r.day,low:r.low,source:'KIS_TURSO_DAY_LOW'}))];
+      const low=lows.sort((a,b)=>a.low-b.low||a.day.localeCompare(b.day))[0]||null;
       const observedDays=[...later.map(r=>r.day),...quoteRows.filter(r=>r.day>day).map(r=>r.day)].sort();
       return {code,day,status:latestDay?'READY':'NO_LATER_PRICE',
         latest_price:useQuote?quoteLatest!.price:eodLatest?.close??null,latest_day:latestDay,
@@ -183,17 +189,22 @@ export async function tursoEodCompare(env:TursoConfig,params:URLSearchParams,
         latest_at:useQuote?quoteLatest!.at:null,latest_market:useQuote?quoteLatest!.market:null,
         period_high:high?.high??null,period_high_day:high?.day??null,
         period_high_source:high?.source??null,
+        period_low:low?.low??null,period_low_day:low?.day??null,
+        period_low_source:low?.source??null,
         high_coverage_from:observedDays[0]??null,
         high_coverage_to:observedDays.at(-1)??null,
+        low_coverage_from:observedDays[0]??null,
+        low_coverage_to:observedDays.at(-1)??null,
         // Import range is currently short; it cannot establish complete
         // coverage for arbitrary older local basket discovery dates.
-        high_complete:false} satisfies PriceCompareRow & {high_coverage_from:string|null};
+        high_complete:false,low_complete:false} satisfies PriceCompareRow & {
+          high_coverage_from:string|null;low_coverage_from:string|null};
     });
     const hasSavedQuotes=[...quotesByCode.values()].some(rows=>rows.length>0);
     return {status:'OK',storage:'TURSO',
       source:hasSavedQuotes?'KRX_VERIFIED_EOD_PLUS_KIS_SAVED':'KRX_VERIFIED_EOD_ONLY',items,
       note:hasSavedQuotes?
-        'KRX 확정 종가와 별도로 수집된 KIS 저장 시세를 날짜·시각과 함께 구분합니다. 실시간 체결가가 아니며 최고가는 부분 관측입니다.':
-        '검증된 KRX 확정 일봉만 사용합니다. 장중 현재가가 아니며 기간 최고가는 부분 관측입니다.'};
+        'KRX 확정 종가와 별도로 수집된 KIS 저장 시세를 날짜·시각과 함께 구분합니다. 실시간 체결가가 아니며 최고·최저가는 부분 관측입니다.':
+        '검증된 KRX 확정 일봉만 사용합니다. 장중 현재가가 아니며 기간 최고·최저가는 부분 관측입니다.'};
   },factory);
 }

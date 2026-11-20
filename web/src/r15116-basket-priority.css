@@ -1,6 +1,6 @@
 /* R1.5.11.6: price-first basket, readable at phone widths. */
 .blue-basket.r152-basket-compact .basket-price-focus{
- display:grid!important;grid-template-columns:repeat(3,minmax(0,1fr))!important;
+ display:grid!important;grid-template-columns:repeat(4,minmax(0,1fr))!important;
  gap:9px!important;margin:10px 0 9px;
 }
 .blue-basket .basket-price-focus>div{
@@ -9,6 +9,7 @@
  justify-content:center;gap:5px;
 }
 .blue-basket .basket-price-focus .basket-price-high{background:#eff5ff;border-color:#b5cef3}
+.blue-basket .basket-price-focus .basket-price-low{background:#f1f5ff;border-color:#c2cfef}
 .blue-basket .basket-price-focus .basket-price-recent{background:#ecf9f7;border-color:#a7dad0}
 .blue-basket .basket-price-focus .basket-price-return{background:#fff2ef;border-color:#edbaae}
 .blue-basket .basket-price-focus span{font-size:12px;color:#345a80;font-weight:850;line-height:1.35}
@@ -19,6 +20,7 @@
  font-variant-numeric:tabular-nums;color:#18365c;
 }
 .blue-basket .basket-price-focus .basket-price-high b{color:#1b51a2}
+.blue-basket .basket-price-focus .basket-price-low b{color:#4660a3}
 .blue-basket .basket-price-focus .basket-price-recent b{color:#166656}
 .blue-basket .basket-price-focus .basket-price-return b.basket-rise{color:#c54a34}
 .blue-basket .basket-price-focus .basket-price-return b.basket-fall{color:#245dba}
@@ -41,14 +43,6 @@
  }
  .blue-basket .basket-price-focus>div{padding:10px 9px;min-height:100px}
  .blue-basket.r152-basket-compact .basket-price-focus b{font-size:clamp(16px,4.25vw,23px)!important}
- .blue-basket.r152-basket-compact .basket-price-focus>div:last-child{
-  grid-column:1/-1!important;min-height:78px;display:grid;
-  grid-template-columns:1fr auto;column-gap:12px;align-content:center;
- }
- .blue-basket .basket-price-return>span{grid-column:1;grid-row:1}
- .blue-basket.r152-basket-compact .basket-price-return>b{
-  grid-column:2;grid-row:1/3;font-size:26px!important;text-align:right;
- }
- .blue-basket .basket-price-return>small{grid-column:1;grid-row:2}
+ .blue-basket.r152-basket-compact .basket-price-focus>div:last-child{grid-column:auto!important}
  .blue-basket .basket-origin-secondary .r154-discovery-price{min-width:0}
 }

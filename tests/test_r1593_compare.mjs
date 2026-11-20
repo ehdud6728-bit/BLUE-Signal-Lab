@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {decodePairs,chartAfterSearch,bestObservation,highSummary,comparePrices} from '../worker/src/price-compare.ts';
+import {decodePairs,chartAfterSearch,bestObservation,highSummary,lowSummary,comparePrices} from '../worker/src/price-compare.ts';
 
 test('date validation and request cap reject arbitrary tickers, duplicates and future dates',()=>{
  assert.equal(decodePairs('005930:2026-11-02','2026-11-12')?.length,1);
@@ -26,6 +26,16 @@ test('partial chart history has a partial coverage label, not proven complete',(
  const r=chartAfterSearch(JSON.stringify({bars:[{t:'2026-11-04',h:125,c:120}]}),'2026-11-02','2026-11-04');
  assert.equal(r.high.full,false);
  assert.equal(highSummary([r.high],'2026-11-04').complete,false);
+});
+test('saved chart uses later lows only, without inventing lows from closes',()=>{
+ const bars=[{t:'2026-11-02',h:110,c:105,l:80},
+  {t:'2026-11-03',h:130,c:120,l:97},{t:'2026-11-04',h:125,c:118,l:99}];
+ const r=chartAfterSearch(JSON.stringify({bars}),'2026-11-02','2026-11-04');
+ assert.equal(r.low.price,97);assert.equal(r.low.day,'2026-11-03');
+ assert.equal(lowSummary([r.low]).complete,false);
+ const missing=chartAfterSearch(JSON.stringify({bars:[{t:'2026-11-03',h:130,c:120}]}),
+  '2026-11-02','2026-11-04');
+ assert.equal(missing.low,null);
 });
 test('recent price is selected by trading date before source priority',()=>{
  const all=[{price:100,day:'2026-11-10',source:'EOD',at:null,market:null,priority:99},
@@ -57,9 +67,9 @@ function mockDb(){
    async first(){calls.push({sql,args});
     if(sql.includes('SELECT s.close_price FROM signals s'))return {close_price:100};
     if(sql.includes('SELECT c.chart_json,c.day FROM chart_snapshots'))return {day:'2026-11-08',chart_json:JSON.stringify({bars:[
-      {t:'2026-11-02',h:108,c:100},
-      {t:'2026-11-05',h:115,c:110},
-      {t:'2026-11-08',h:132,c:122}]})};
+      {t:'2026-11-02',h:108,c:100,l:95},
+      {t:'2026-11-05',h:115,c:110,l:103},
+      {t:'2026-11-08',h:132,c:122,l:117}]})};
     if(sql.includes('SELECT s.day,s.close_price FROM signals s'))return {day:'2026-11-08',close_price:122};
     return null;
    },async all(){calls.push({sql,args});
@@ -79,6 +89,9 @@ test('same ticker and multiple discovered dates do not share an earlier-date hig
  assert.equal(response.status,200);assert.equal(body.items.length,2);
  assert.equal(body.items[0].period_high,143);
  assert.equal(body.items[1].period_high,190);
+ assert.equal(body.items[0].period_low,103);
+ assert.equal(body.items[1].period_low,103);
+ assert.equal(body.items[0].low_complete,false);
  assert.equal(body.items[0].latest_price,128);
  assert.equal(body.items[1].latest_price,128);
  assert.ok(db.calls.every(x=>!/(INSERT|UPDATE|DELETE|KIS_APP_SECRET)/i.test(x.sql)));

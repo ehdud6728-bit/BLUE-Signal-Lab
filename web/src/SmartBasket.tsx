@@ -534,6 +534,10 @@ export default function SmartBasket({quickAddRequests,onItemsChange,onAddFeedbac
      ];
      const highest=highs.sort((a,b)=>b.price-a.price)[0];
      const maxHigh=highest?.price??null,maxHighDay=highest?.day||null;
+     // Only independently saved, post-discovery daily lows may claim a period low.
+     // A recent close is not the day's low; do not silently substitute it.
+     const minLow=comp?.period_low&&comp.period_low>0?comp.period_low:null;
+     const minLowDay=comp?.period_low_day||null;
      const pending=!pr||['QUEUED','NOT_REGISTERED','HISTORY_PARTIAL'].includes(pr.status);
      const state=pr?statusText(pr.status):'등록 확인 중';
     return <article className={"basket-record"+(isHot(it)?" r1591-basket-tomato":"")} key={it.id}>
@@ -567,6 +571,8 @@ export default function SmartBasket({quickAddRequests,onItemsChange,onAddFeedbac
      <div className="basket-record-stats r153-price-grid basket-price-focus" aria-label="장바구니 주요 가격 지표">
        <div className="basket-price-high"><span>검색 이후 관측 최고가</span><b>{maxHigh?`${cash(maxHigh)}원`:'—'}</b>
          <small>{maxHigh?`최고 수익률 ${pctText(pctChange(maxHigh,it.baseline))} · ${maxHighDay||''}${comp&&!comp.high_complete?' · 부분 관측':''}`:pending?'수집 중':'기간 고가 미확인'}</small></div>
+       <div className="basket-price-low"><span>검색 이후 관측 최저가</span><b>{minLow?`${cash(minLow)}원`:'—'}</b>
+         <small>{minLow?`최저 수익률 ${pctText(pctChange(minLow,it.baseline))} · ${minLowDay||''} · ${sourceName(comp?.period_low_source)} · ${comp?.low_complete?'확인 구간':'부분 관측'}`:pending?'수집 중':'기간 저가 미확인'}</small></div>
        <div className="basket-price-recent"><span>최근시세</span><b>{shownRecent?`${cash(shownRecent)}원`:'—'}</b>
          <small>{shownRecentDay?`${shownRecentDay}${observedAt?' '+observedAt:''} · ${shownSource}`:'후속 시세 미수집'} · 실시간 체결가 아님</small></div>
        <div className="basket-price-return"><span>현재수익률 <small>발견가 기준</small></span><b className={growth==null?'':growth>=0?'basket-rise':'basket-fall'}>{pctText(growth)}</b>

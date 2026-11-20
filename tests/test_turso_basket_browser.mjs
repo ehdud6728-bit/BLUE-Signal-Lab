@@ -9,7 +9,7 @@ const source=(await readFile(new URL('../web/src/price-compare.ts',import.meta.u
  .replace('import.meta.env.VITE_API_BASE','undefined');
 const js=ts.transpileModule(source,{compilerOptions:{module:ts.ModuleKind.ESNext,
  target:ts.ScriptTarget.ES2022}}).outputText;
-const {fetchComparedTursoFirst,fetchComparedTursoOnly,refreshKisQuoteToTurso}=
+const {fetchComparedTursoFirst,fetchComparedTursoOnly,refreshKisQuoteToTurso,sourceName}=
  await import(`data:text/javascript;base64,${Buffer.from(js).toString('base64')}`);
 
 function response(body,status=200){return {ok:status>=200&&status<300,status,
@@ -19,7 +19,9 @@ const request=[{code:'225190',day:'2026-11-17'}];
 const snapshot={code:'225190',day:'2026-11-17',status:'READY',
  latest_price:4500,latest_day:'2026-11-18',latest_source:'KRX_VERIFIED_EOD_CLOSE',
  latest_at:null,latest_market:null,period_high:4700,period_high_day:'2026-11-18',
- period_high_source:'KRX_VERIFIED_EOD_HIGH',high_coverage_to:'2026-11-18',high_complete:false};
+ period_high_source:'KRX_VERIFIED_EOD_HIGH',high_coverage_to:'2026-11-18',high_complete:false,
+ period_low:4350,period_low_day:'2026-11-18',period_low_source:'KRX_VERIFIED_EOD_LOW',
+ low_coverage_to:'2026-11-18',low_complete:false};
 
 test('Turso success reads only Turso and preserves later close source',async()=>{
  const prev=globalThis.fetch,paths=[];
@@ -28,6 +30,19 @@ test('Turso success reads only Turso and preserves later close source',async()=>
   const data=await fetchComparedTursoFirst(request);
   assert.deepEqual(paths,['/api/eod/prices/compare']);
   assert.equal(data['225190:2026-11-17'].latest_price,4500);
+  assert.equal(data['225190:2026-11-17'].period_low,4350);
+  assert.equal(sourceName(data['225190:2026-11-17'].period_low_source),'Turso KRX 일봉 저가');
+ }finally{globalThis.fetch=prev;}
+});
+
+test('invalid or discovery-day period low cannot be shown as a verified later low',async()=>{
+ const prev=globalThis.fetch,paths=[];
+ try{
+  globalThis.fetch=async url=>{paths.push(new URL(url).pathname);
+   return response({storage:'TURSO',items:[{...snapshot,period_low:999999,
+    period_low_day:'2026-11-17'}]});};
+  await assert.rejects(()=>fetchComparedTursoOnly(request),/TURSO_EOD_COMPARE_INVALID_RESPONSE/);
+  assert.deepEqual(paths,['/api/eod/prices/compare']);
  }finally{globalThis.fetch=prev;}
 });
 
