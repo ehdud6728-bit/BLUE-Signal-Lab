@@ -159,8 +159,10 @@ export async function getKisQuote(env, token, market, code){
       authorization:'Bearer '+token,appkey:env.KIS_APP_KEY,appsecret:env.KIS_APP_SECRET,
       tr_id:'FHKST01010100',custtype:'P',accept:'application/json'
     },signal:controller.signal});
+    if(response.status===429)throw Error('KIS_RATE_LIMIT');
     if(!response.ok)throw Error(`KIS_HTTP_${response.status}`);
     const data=await response.json();
+    if(data?.msg_cd==='EGW00201')throw Error('KIS_RATE_LIMIT');
     if(!data||data.rt_cd!=='0')throw Error('KIS_RESPONSE_INVALID');
     return data;
   }finally{clearTimeout(abort);}
@@ -183,8 +185,10 @@ export async function getKisDailyQuote(env,token,market,code,day,fetchFn=fetch){
       authorization:'Bearer '+token,appkey:env.KIS_APP_KEY,appsecret:env.KIS_APP_SECRET,
       tr_id:'FHKST01010400',custtype:'P',accept:'application/json'
     },signal:controller.signal});
+    if(response.status===429)throw Error('KIS_RATE_LIMIT');
     if(!response.ok)throw Error('KIS_DAILY_HTTP_UNAVAILABLE');
     const data=await response.json();
+    if(data?.msg_cd==='EGW00201')throw Error('KIS_RATE_LIMIT');
     if(data?.rt_cd!=='0'||!Array.isArray(data.output)||data.output.length>40)
       throw Error('KIS_DAILY_RESPONSE_INVALID');
     const rows=data.output.filter(x=>String(x?.stck_bsop_date||'')===day.replaceAll('-',''));

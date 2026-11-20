@@ -12,6 +12,7 @@ import {runEodCloudflareCron} from './eod-cron';
 import {InvalidEodQuery,tursoEodDates,tursoEodSearch,tursoEodCompare} from './turso-eod';
 import {InvalidResearchQuery,tursoResearchDates,tursoResearchSearch,tursoResearchChart,tursoResearchCoverage,tursoPatternPulse,tursoExitStudyReport} from './turso-research';
 import {InvalidTursoResearchRequest,requestTursoResearch,tursoResearchRequestStatus} from './turso-research-request';
+import {InvalidProvisionalQuery,tursoProvisionalSearch} from './turso-provisional-search';
 interface Env {
   DB: D1Database;
   TURSO_DATABASE_URL?:string;
@@ -124,6 +125,13 @@ export default {
       if(p==='/api/research/dates'&&request.method==='GET'){
         try{return respond(await tursoResearchDates(env));}
         catch{return respond({error:'TURSO_RESEARCH_UNAVAILABLE',fallback:'D1'},503);}
+      }
+      // KIS quotes are an explicitly PARTIAL, provisional view of the current
+      // KST date; neither a KRX EOD search nor a verified technical signal.
+      if(p==='/api/research/provisional'&&request.method==='GET'){
+        try{return respond(await tursoProvisionalSearch(env,u.searchParams));}
+        catch(e){if(e instanceof InvalidProvisionalQuery)return respond({error:e.message},400);
+          return respond({error:'TURSO_PROVISIONAL_UNAVAILABLE'},503);}
       }
       if(p==='/api/research/coverage'&&request.method==='GET'){
         try{return respond(await tursoResearchCoverage(env));}
