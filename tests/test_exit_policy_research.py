@@ -1,7 +1,7 @@
 import unittest
 
 from scripts.exit_policy_research import (
-    VerifiedBar, ExitPolicy, simulate_exit, describe_exits,
+    VerifiedBar, ExitPolicy, simulate_exit, describe_exits, observe_path,
 )
 
 
@@ -72,6 +72,30 @@ class ExitPolicyTests(unittest.TestCase):
         self.assertEqual(report['status'], 'SMALL_SAMPLE')
         self.assertEqual(report['n'], 3)
         self.assertEqual(report['take_count'], 3)
+
+    def test_path_extrema_respects_signal_next_open_and_distinct_session_order(self):
+        days = ['2026-11-02', '2026-11-03', '2026-11-04', '2026-11-05', '2026-11-06']
+        highs = [115, 110, 108, 107, 106]
+        lows = [99, 91, 95, 96, 97]
+        later = [b(day, 100, high, low, 102) for day, high, low in zip(days, highs, lows)]
+        out = observe_path([self.signal, *later], 0, 5)
+        self.assertEqual(out.entry_price, 100)
+        self.assertEqual(out.high_day, '2026-11-02')
+        self.assertEqual(out.low_day, '2026-11-03')
+        self.assertEqual(out.extrema_order, 'HIGH_FIRST')
+        self.assertAlmostEqual(out.max_gain_pct, 15)
+        self.assertAlmostEqual(out.max_loss_pct, -9)
+        self.assertEqual(observe_path([self.signal, *later[:-1]], 0, 5), None)
+
+    def test_same_day_extrema_order_is_unknown_not_assumed(self):
+        future = [b(day, 100, h, l, 101) for day, h, l in zip(
+            ['2026-11-02', '2026-11-03', '2026-11-04', '2026-11-05', '2026-11-06'],
+            [101, 120, 102, 103, 104], [99, 80, 98, 97, 96])]
+        out = observe_path([self.signal, *future], 0, 5)
+        self.assertEqual(out.extrema_order, 'SAME_SESSION_UNRESOLVED')
+        self.assertEqual(out.high_day, out.low_day)
+        with self.assertRaisesRegex(ValueError, 'INVALID_PATH_HORIZON'):
+            observe_path([self.signal, *future], 0, 7)
 
 
 if __name__ == '__main__':

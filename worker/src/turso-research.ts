@@ -185,6 +185,36 @@ export async function tursoExitStudyReport(env:ResearchEnv,factory?:Factory){
       report.corporate_actions_verified!==false||
       report.market_and_sector_benchmark_verified!==false)
       throw Error('INVALID_TURSO_EXIT_REPORT');
+    // Older immutable reports may omit these additive research-only fields.
+    // Never allow a published summary to inject a fabricated path ranking.
+    if(report.observed_path_windows!==undefined){
+      const path=report.observed_path_windows;
+      if(!Array.isArray(path)||path.length!==4||
+        path.map((w:{holding_sessions:number})=>w.holding_sessions).join(',')!=='5,10,20,60'||
+        path.some((w:{mature_signal_stock_days:number;pending_recent:number;
+          excluded_missing_price_path:number;patterns:unknown[];
+          investment_recommendation_enabled:boolean;same_session_order_knowable:boolean})=>
+          !Number.isSafeInteger(w.mature_signal_stock_days)||w.mature_signal_stock_days<0||
+          !Number.isSafeInteger(w.pending_recent)||w.pending_recent<0||
+          !Number.isSafeInteger(w.excluded_missing_price_path)||w.excluded_missing_price_path<0||
+          !Array.isArray(w.patterns)||w.patterns.length>12||
+          w.investment_recommendation_enabled!==false||w.same_session_order_knowable!==false||
+          w.patterns.some((p:unknown)=>{
+            if(!p||typeof p!=='object')return true;
+            const v=p as Record<string,unknown>;
+            return typeof v.pattern!=='string'||!/^[A-Z0-9_]{2,60}$/.test(v.pattern)||
+              !Number.isSafeInteger(v.n)||Number(v.n)<3||
+              !Number.isFinite(v.median_max_gain_pct)||Number(v.median_max_gain_pct)<0||
+              !Number.isFinite(v.median_max_loss_pct)||Number(v.median_max_loss_pct)>0||
+              Number(v.median_max_loss_pct)<-100||
+              !Number.isSafeInteger(v.low_first_count)||!Number.isSafeInteger(v.high_first_count)||
+              !Number.isSafeInteger(v.same_session_unresolved_count)||
+              Number(v.low_first_count)<0||Number(v.high_first_count)<0||
+              Number(v.same_session_unresolved_count)<0||
+              Number(v.low_first_count)+Number(v.high_first_count)+
+                Number(v.same_session_unresolved_count)!==v.n;
+          })))throw Error('INVALID_TURSO_EXIT_REPORT');
+    }
     return {storage:'TURSO',status:'EXPLORATORY_ONLY',report,
       note:'독립 검증 전 탐색 연구입니다. 매매 추천과 달리 출현·성숙 표본·익절·손절 관측 결과만 표시합니다.'};
   },factory);

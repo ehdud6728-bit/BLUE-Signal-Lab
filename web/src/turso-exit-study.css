@@ -17,3 +17,17 @@
 .turso-exit-warning{font-size:11px;color:#966525;background:#fff3db;padding:8px;border-radius:7px;line-height:1.6}
 .turso-exit-caveat{font-weight:600}
 .turso-exit-error{display:flex;gap:6px;color:#b3444c;font-size:11px;align-items:center}
+.turso-path-title{margin:15px 0 8px;display:grid;gap:3px}
+.turso-path-title strong{font-size:13px;color:#294d85}
+.turso-path-title small{font-size:10px;color:#7587a0}
+.turso-path-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:8px}
+.turso-path-card{min-width:0;padding:10px;border:1px solid #d5e1f2;border-radius:9px;background:#fff;display:grid;gap:5px}
+.turso-path-card>strong{font-size:12px;color:#254e87}
+.turso-path-card>small,.turso-path-card p{font-size:10px;color:#687e98;line-height:1.55;margin:0}
+.turso-path-card details{border-top:1px solid #edf1f7;padding-top:6px}
+.turso-path-card summary{font-size:10px;color:#295bb2;font-weight:850;cursor:pointer}
+.turso-path-pattern{display:grid;gap:3px;border-bottom:1px solid #eff3f9;padding:7px 0;font-size:11px;line-height:1.5}
+.turso-path-pattern>b{color:#263f61}
+.turso-path-pattern small{font-size:10px;color:#677f9e}
+.turso-path-rise{color:#c64c36;font-weight:900}
+.turso-path-fall{color:#245fba;font-weight:900}

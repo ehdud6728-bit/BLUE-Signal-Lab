@@ -58,6 +58,50 @@ class ExitOutcome:
     observed_bar_mae_pct: float
 
 
+@dataclass(frozen=True)
+class PathExtrema:
+    """Descriptive high/low after the signal, not a tradable intraday path."""
+    signal_day: str
+    entry_day: str
+    entry_price: float
+    holding_sessions: int
+    high_day: str
+    low_day: str
+    max_gain_pct: float
+    max_loss_pct: float
+    # Across distinct daily candles only; same-session order is unknowable.
+    extrema_order: str
+
+
+def observe_path(bars: Sequence[VerifiedBar], signal_index: int,
+                 horizon_sessions: int) -> PathExtrema | None:
+    """Observe exact next-session-open H/L extremes over H audited sessions.
+
+    Callers MUST supply the full ordered trading-session path, excluding gaps
+    after separately verifying audit dates. Never infer an intraday high/low
+    sequence from a single daily OHLC bar.
+    """
+    if (not isinstance(signal_index, int) or isinstance(signal_index, bool) or
+            not 0 <= signal_index < len(bars) or
+            not isinstance(horizon_sessions, int) or isinstance(horizon_sessions, bool) or
+            horizon_sessions not in (5, 10, 20, 60)):
+        raise ValueError('INVALID_PATH_HORIZON')
+    _valid_bars(bars)
+    if signal_index + horizon_sessions >= len(bars):
+        return None
+    future = bars[signal_index + 1:signal_index + horizon_sessions + 1]
+    entry = future[0].open
+    peak = max(future, key=lambda x: x.high)
+    trough = min(future, key=lambda x: x.low)
+    order = ('HIGH_FIRST' if peak.day < trough.day else
+             'LOW_FIRST' if trough.day < peak.day else
+             'SAME_SESSION_UNRESOLVED')
+    return PathExtrema(bars[signal_index].day, future[0].day, entry,
+                       horizon_sessions, peak.day, trough.day,
+                       100 * (peak.high / entry - 1),
+                       100 * (trough.low / entry - 1), order)
+
+
 def _valid_bars(bars: Sequence[VerifiedBar]) -> None:
     previous = ''
     for bar in bars:
