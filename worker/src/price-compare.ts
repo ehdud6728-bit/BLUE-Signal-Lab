@@ -9,10 +9,13 @@ export type PriceCompareRow = {
  latest_at:string|null;latest_market:string|null;
  period_high:number|null;period_high_day:string|null;period_high_source:string|null;
  high_coverage_to:string|null;high_complete:boolean;
+ period_low:number|null;period_low_day:string|null;period_low_source:string|null;
+ low_coverage_to:string|null;low_complete:boolean;
  quote_status?:string|null;quote_checked_at?:string|null;quote_error?:string|null;
 };
 type Observation={price:number;day:string;source:string;at:string|null;market:string|null;priority:number};
 type HighObservation={price:number;day:string;source:string;coverageTo:string;full:boolean};
+type LowObservation={price:number;day:string;source:string;coverageTo:string};
 const validDay=(s:string)=>/^20\d{2}-\d{2}-\d{2}$/.test(s)&&!Number.isNaN(Date.parse(s+'T00:00:00Z'))&&new Date(s+'T00:00:00Z').toISOString().slice(0,10)===s;
 const money=(v:unknown):number|null=>typeof v==='number'&&Number.isFinite(v)&&v>0?v:null;
 const iso=(s:unknown):s is string=>typeof s==='string'&&validDay(s);
@@ -28,27 +31,31 @@ export function decodePairs(value:string,today:string):CompareItem[]|null {
  return pairs;
 }
 export function chartAfterSearch(json:string,baseDay:string,asof:string):{
- latest:Observation|null; high:HighObservation|null
+ latest:Observation|null; high:HighObservation|null; low:LowObservation|null
 } {
  try{
   const chart=JSON.parse(json) as {bars?:unknown};
-  if(!Array.isArray(chart.bars)||chart.bars.length>500)return {latest:null,high:null};
+  if(!Array.isArray(chart.bars)||chart.bars.length>500)return {latest:null,high:null,low:null};
   const bars=chart.bars.flatMap(raw=>{
    if(!raw||typeof raw!=='object')return [];
    const b=raw as Record<string,unknown>;
    if(!iso(b.t)||b.t>asof)return [];
    const close=money(b.c),high=money(b.h);
    if(close===null||high===null||high<close)return [];
-   return [{day:b.t,c:close,h:high}];
+   const low=money(b.l);
+   return [{day:b.t,c:close,h:high,l:low!==null&&low<=close?low:null}];
   }).sort((a,b)=>a.day.localeCompare(b.day));
   const later=bars.filter(x=>x.day>baseDay);
-  if(!later.length)return {latest:null,high:null};
+  if(!later.length)return {latest:null,high:null,low:null};
   const last=later[later.length-1];
   const best=later.reduce((a,b)=>b.h>a.h?b:a);
+  const lowBars=later.filter(x=>x.l!==null);
+  const lowest=lowBars.sort((a,b)=>a.l!-b.l!)[0]||null;
   return {latest:{price:last.c,day:last.day,source:'VERIFIED_CHART_EOD',at:null,market:null,priority:45},
    high:{price:best.h,day:best.day,source:'VERIFIED_CHART_HIGH',coverageTo:last.day,
-    full:bars.some(x=>x.day<=baseDay)}};
- }catch{return {latest:null,high:null};}
+    full:bars.some(x=>x.day<=baseDay)},
+   low:lowest?{price:lowest.l!,day:lowest.day,source:'VERIFIED_CHART_LOW',coverageTo:last.day}:null};
+ }catch{return {latest:null,high:null,low:null};}
 }
 export function bestObservation(all:Observation[]):Observation|null {
  const values=all.filter(x=>money(x.price)!==null&&iso(x.day));
@@ -69,6 +76,16 @@ export function highSummary(all:HighObservation[],latestDay:string|null):{
  return {price:highest.price,day:highest.day,source:highest.source,
   coverageTo:cover?.coverageTo||valid.map(x=>x.coverageTo).sort().reverse()[0],complete};
 }
+export function lowSummary(all:LowObservation[]):{
+ price:number|null;day:string|null;source:string|null;coverageTo:string|null;complete:false
+} {
+ const valid=all.filter(x=>money(x.price)!==null&&iso(x.day)&&iso(x.coverageTo)&&x.day<=x.coverageTo);
+ if(!valid.length)return {price:null,day:null,source:null,coverageTo:null,complete:false};
+ const lowest=valid.reduce((a,b)=>b.price<a.price?b:a);
+ // D1 snapshots and saved charts do not prove continuous per-day coverage.
+ return {price:lowest.price,day:lowest.day,source:lowest.source,
+  coverageTo:valid.map(x=>x.coverageTo).sort().at(-1)!,complete:false};
+}
 export async function comparePrices(db:D1Database,url:URL):Promise<Response>{
  const today=new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Seoul',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date());
  const pairs=decodePairs(url.searchParams.get('items')||'',today);
@@ -85,9 +102,11 @@ export async function comparePrices(db:D1Database,url:URL):Promise<Response>{
   if(!money(proof?.close_price)){
    out.push({code,day,status:'NOT_VERIFIED',latest_price:null,latest_day:null,latest_source:null,
     latest_at:null,latest_market:null,period_high:null,period_high_day:null,
-    period_high_source:null,high_coverage_to:null,high_complete:false});continue;
+    period_high_source:null,high_coverage_to:null,high_complete:false,
+    period_low:null,period_low_day:null,period_low_source:null,
+    low_coverage_to:null,low_complete:false});continue;
   }
-  const candidates:Observation[]=[];const highs:HighObservation[]=[];
+  const candidates:Observation[]=[];const highs:HighObservation[]=[];const lows:LowObservation[]=[];
   let quoteStatus:string|null=null,quoteCheckedAt:string|null=null,quoteError:string|null=null;
   if(tables.has('blue_basket_watch_r153')){
    // Multiple discovery dates for one ticker share *latest quote* evidence,
@@ -139,6 +158,8 @@ export async function comparePrices(db:D1Database,url:URL):Promise<Response>{
       at:typeof q.received_at_utc==='string'?q.received_at_utc:null,market,priority:market==='J'?75:73});
      if(money(q.high))highs.push({price:q.high as number,day:q.trade_date_kst,
       source:'KIS_SNAPSHOT_DAY_HIGH',coverageTo:q.trade_date_kst,full:false});
+    if(money(q.low)&&Number(q.low)<=Number(q.price))lows.push({price:q.low as number,
+      day:q.trade_date_kst,source:'KIS_SNAPSHOT_DAY_LOW',coverageTo:q.trade_date_kst});
     }catch{/* malformed quote is omitted */}
    }
   }
@@ -151,6 +172,7 @@ export async function comparePrices(db:D1Database,url:URL):Promise<Response>{
    if(snap){const summary=chartAfterSearch(snap.chart_json,day,snap.day);
     if(summary.latest)candidates.push(summary.latest);
     if(summary.high)highs.push(summary.high);
+    if(summary.low)lows.push(summary.low);
    }
   }
   // A later verified signal-day close is only a fallback (not continuous daily data).
@@ -162,13 +184,16 @@ export async function comparePrices(db:D1Database,url:URL):Promise<Response>{
    day:eod.day,source:'MATCHED_SIGNAL_EOD_ONLY',at:null,market:null,priority:35});
   const latest=bestObservation(candidates);
   const high=highSummary(highs,latest?.day||null);
+  const low=lowSummary(lows);
   out.push({code,day,status:latest?'READY':'NO_LATER_PRICE',latest_price:latest?.price||null,
    latest_day:latest?.day||null,latest_source:latest?.source||null,latest_at:latest?.at||null,
    latest_market:latest?.market||null,period_high:high.price,period_high_day:high.day,
    period_high_source:high.source,
    high_coverage_to:high.coverageTo,high_complete:high.complete,
+   period_low:low.price,period_low_day:low.day,period_low_source:low.source,
+   low_coverage_to:low.coverageTo,low_complete:low.complete,
    quote_status:quoteStatus,quote_checked_at:quoteCheckedAt,quote_error:quoteError});
  }
  return reply({status:'OK',items:out,asof:today,source:'D1_VERIFIED_SAVED_ONLY',note:
-  '최근 확인가는 서버 저장 시세이며 실시간 체결 보장이 없습니다. 기간 최고가는 저장된 검증 자료 범위 안에서만 계산합니다.'});
+  '최근 확인가는 서버 저장 시세이며 실시간 체결 보장이 없습니다. 기간 최고·최저가는 저장된 검증 자료 범위 안에서만 계산합니다.'});
 }

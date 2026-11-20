@@ -4,6 +4,9 @@ export type PriceCompare = {
  latest_price:number|null;latest_day:string|null;latest_source:string|null;latest_at:string|null;latest_market:string|null;
  period_high:number|null;period_high_day:string|null;period_high_source:string|null;
  high_coverage_to:string|null;high_complete:boolean;high_coverage_from?:string|null;
+ /** Optional while the read-only Worker API is rolled out separately from web. */
+ period_low?:number|null;period_low_day?:string|null;period_low_source?:string|null;
+ low_coverage_to?:string|null;low_complete?:boolean;low_coverage_from?:string|null;
  quote_status?:string|null;quote_checked_at?:string|null;quote_error?:string|null;
 };
 export const comparisonKey=(v:{code:string;day:string})=>`${v.code}:${v.day}`;
@@ -28,17 +31,21 @@ export function sourceName(s:string|null|undefined):string {
   case 'KIS_DAILY_CLOSE':return 'KIS 일봉 종가';
   case 'KRX_VERIFIED_EOD_CLOSE':return 'Turso KRX 확정 종가';
   case 'KRX_VERIFIED_EOD_HIGH':return 'Turso KRX 일봉 고가';
+  case 'KRX_VERIFIED_EOD_LOW':return 'Turso KRX 일봉 저가';
   case 'KIS_SAVED_QUOTE':return 'KIS 저장 시세';
   case 'KIS_STORED_SNAPSHOT':return 'KIS 저장 시세';
   case 'KIS_TURSO_SNAPSHOT':return 'Turso KIS 저장 시세 (체결 시각 미검증)';
   case 'KIS_TURSO_DAY_HIGH':return 'Turso KIS 장중 고가';
+  case 'KIS_TURSO_DAY_LOW':return 'Turso KIS 잠정 저가';
   case 'KIS_SEARCH_PRIORITY_R1594':return 'KIS 우선 수집 시세';
   case 'KIS_SEARCH_PRIORITY_DAY_HIGH_R1594':return 'KIS 우선 수집 장중 고가';
   case 'VERIFIED_CHART_EOD':return '검증 일봉 종가';
   case 'VERIFIED_CHART_HIGH':return '검증 일봉 고가';
+  case 'VERIFIED_CHART_LOW':return '저장된 차트 저가';
   case 'KIS_DAILY_HIGH':return 'KIS 일봉 고가';
   case 'KIS_QUOTE_DAY_HIGH':return 'KIS 저장 장중 고가';
   case 'KIS_SNAPSHOT_DAY_HIGH':return 'KIS 저장 장중 고가';
+  case 'KIS_SNAPSHOT_DAY_LOW':return 'KIS 저장 잠정 저가';
   case 'MATCHED_SIGNAL_EOD_ONLY':return '저장된 검색일 종가';
   default:return '저장된 시세';
  }
@@ -83,7 +90,10 @@ async function fetchComparedTursoInternal(items:{code:string;day:string}[],signa
         (row.latest_day<=row.day&&!(row.latest_day===row.day&&
           row.day===new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Seoul',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date())&&
           ['KIS_TURSO_SNAPSHOT','KRX_VERIFIED_EOD_CLOSE'].includes(row.latest_source||'')))||
-        !Number.isFinite(row.latest_price)||Number(row.latest_price)<=0)))
+        !Number.isFinite(row.latest_price)||Number(row.latest_price)<=0))||
+      (row.period_low!=null&&(!Number.isSafeInteger(row.period_low)||row.period_low<=0||
+        !row.period_low_day||row.period_low_day<=row.day||
+        !['KRX_VERIFIED_EOD_LOW','KIS_TURSO_DAY_LOW'].includes(row.period_low_source||''))))
       throw Error('TURSO_EOD_COMPARE_INVALID_RESPONSE');
     valid[key]=row;
    }

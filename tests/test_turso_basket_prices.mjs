@@ -25,9 +25,9 @@ function mock(rows,failed=false,quoteRows=[]){
 }
 
 const prices=[
- {trade_day:'2026-11-17',code:'225190',close:'4480',high:'4550'},
- {trade_day:'2026-11-18',code:'225190',close:'4500',high:'4700'},
- {trade_day:'2026-11-18',code:'005930',close:'194700',high:'199950'}
+ {trade_day:'2026-11-17',code:'225190',close:'4480',high:'4550',low:'4280'},
+ {trade_day:'2026-11-18',code:'225190',close:'4500',high:'4700',low:'4350'},
+ {trade_day:'2026-11-18',code:'005930',close:'194700',high:'199950',low:'193000'}
 ];
 
 test('LK Samyang Nov 17 discovery uses only Nov 18 verified EOD',async()=>{
@@ -39,6 +39,11 @@ test('LK Samyang Nov 17 discovery uses only Nov 18 verified EOD',async()=>{
  assert.equal(r.latest_day,'2026-11-18');
  assert.equal(r.period_high,4700);
  assert.equal(r.period_high_day,'2026-11-18');
+ assert.equal(r.period_low,4350);
+ assert.equal(r.period_low_day,'2026-11-18');
+ assert.equal(r.period_low_source,'KRX_VERIFIED_EOD_LOW');
+ assert.equal(r.low_complete,false);
+ assert.equal(r.low_coverage_to,'2026-11-18');
  assert.equal(r.latest_source,'KRX_VERIFIED_EOD_CLOSE');
  assert.equal(r.high_complete,false);
  assert.equal(r.high_coverage_from,'2026-11-18');
@@ -53,12 +58,15 @@ test('same code discovered on different days has independent subsequent highs',a
   '225190:2026-11-16,225190:2026-11-17,225190:2026-11-18,005930:2026-11-17'}),
  '2026-11-19',db.factory);
  assert.equal(data.items[0].high_coverage_from,'2026-11-17');
+ assert.equal(data.items[0].period_low,4280);
  assert.equal(data.items[0].latest_price,4500);
  assert.equal(data.items[1].high_coverage_from,'2026-11-18');
  assert.equal(data.items[1].period_high,4700);
+ assert.equal(data.items[1].period_low,4350);
  assert.equal(data.items[2].status,'NO_LATER_PRICE');
  assert.equal(data.items[2].latest_price,null);
  assert.equal(data.items[2].period_high,null);
+ assert.equal(data.items[2].period_low,null);
  assert.equal(data.items[3].latest_price,194700);
  assert.deepEqual(db.calls[0].args,['225190','005930','2026-11-16','2026-11-19']);
 });
@@ -69,6 +77,7 @@ test('no valid later row stays unverified rather than copying discovery price',a
  '2026-11-19',db.factory);
  assert.equal(data.items[0].status,'NO_LATER_PRICE');
  assert.equal(data.items[0].latest_price,null);
+ assert.equal(data.items[0].period_low,null);
  assert.equal(data.items[0].high_complete,false);
 });
 
@@ -80,10 +89,13 @@ test('invalid requests cannot query Turso; malformed verified prices fail closed
    '2026-11-19',db.factory),InvalidEodQuery);
  }
  assert.equal(db.calls.length,0);
- const bad=mock([{trade_day:'2026-11-18',code:'225190',close:'5000',high:'4000'}]);
+ const bad=mock([{trade_day:'2026-11-18',code:'225190',close:'5000',high:'4000',low:'4900'}]);
  await assert.rejects(()=>tursoEodCompare(env,new URLSearchParams({items:'225190:2026-11-17'}),
    '2026-11-19',bad.factory),/INVALID_PRICE/);
  assert.equal(bad.closed,1);
+ const badLow=mock([{trade_day:'2026-11-18',code:'225190',close:'5000',high:'5100',low:'5200'}]);
+ await assert.rejects(()=>tursoEodCompare(env,new URLSearchParams({items:'225190:2026-11-17'}),
+  '2026-11-19',badLow.factory),/INVALID_PRICE/);
 });
 
 test('provider failure closes Turso connection, no fallback write',async()=>{
@@ -123,6 +135,8 @@ test('newer KIS saved quote overrides old audited EOD with exact receive time, n
  assert.equal(row.latest_market,'J');
  assert.equal(row.period_high,23950);
  assert.equal(row.period_high_source,'KIS_TURSO_DAY_HIGH');
+ assert.equal(row.period_low,4350);
+ assert.equal(row.period_low_source,'KRX_VERIFIED_EOD_LOW');
  assert.equal(row.high_complete,false);
  assert.equal(row.high_coverage_to,'2026-11-19');
  assert.equal(db.calls.length,2);
@@ -136,6 +150,7 @@ test('same-day audited EOD wins over any saved intraday quote',async()=>{
  assert.equal(data.items[0].latest_price,4500);
  assert.equal(data.items[0].latest_source,'KRX_VERIFIED_EOD_CLOSE');
  assert.equal(data.items[0].period_high,4700);
+ assert.equal(data.items[0].period_low,4350);
 });
 
 test('today discovery may show same-day KIS quote without inventing post-discovery high',async()=>{
@@ -146,17 +161,19 @@ test('today discovery may show same-day KIS quote without inventing post-discove
  assert.equal(data.items[0].latest_price,23700);
  assert.equal(data.items[0].latest_source,'KIS_TURSO_SNAPSHOT');
  assert.equal(data.items[0].period_high,null);
+ assert.equal(data.items[0].period_low,null);
  assert.equal(data.items[0].high_coverage_to,null);
 });
 
 test('same-day audited KRX close supersedes intraday KIS on today search',async()=>{
- const db=mock([{trade_day:'2026-11-19',code:'225190',close:'23400',high:'24300'}],
+ const db=mock([{trade_day:'2026-11-19',code:'225190',close:'23400',high:'24300',low:'23200'}],
    false,[snapshot('2026-11-19')]);
  const data=await tursoEodCompare(env,new URLSearchParams({items:'225190:2026-11-19'}),
   '2026-11-19',db.factory);
  assert.equal(data.items[0].latest_price,23400);
  assert.equal(data.items[0].latest_source,'KRX_VERIFIED_EOD_CLOSE');
  assert.equal(data.items[0].period_high,null);
+ assert.equal(data.items[0].period_low,null);
 });
 
 test('nightly exact-day KIS fallback after 22:00 is visible as provisional',async()=>{
@@ -179,6 +196,7 @@ test('verified-date KIS post-close daily fallback is visible but never counted a
  assert.equal(data.items[0].latest_day,'2026-11-19');
  assert.equal(data.items[0].high_complete,false);
  assert.equal(data.items[0].period_high_source,'KIS_TURSO_DAY_HIGH');
+ assert.equal(data.items[0].period_low,4350);
 });
 
 test('post-close snapshot without same-day date and provisional flags fails closed',async()=>{
@@ -205,5 +223,25 @@ test('malformed, future-day, and pre-discovery KIS records never create an obser
   '2026-11-19',db.factory);
  assert.equal(data.items[0].status,'NO_LATER_PRICE');
  assert.equal(data.items[0].latest_price,null);
+ assert.equal(data.items[0].period_low,null);
  assert.equal(db.closed,1);
+});
+
+test('KIS-only later low is provisional, never mixed with a discovery-day low',async()=>{
+ const db=mock([],false,[snapshot('2026-11-17',4100,4300),snapshot('2026-11-19',4650,4790)]);
+ const data=await tursoEodCompare(env,new URLSearchParams({items:'225190:2026-11-17'}),
+  '2026-11-19',db.factory);
+ const row=data.items[0];
+ assert.equal(row.period_low,4350);
+ assert.equal(row.period_low_day,'2026-11-19');
+ assert.equal(row.period_low_source,'KIS_TURSO_DAY_LOW');
+ assert.equal(row.low_complete,false);
+});
+
+test('later-day EOD low supersedes even a lower saved KIS snapshot on the same day',async()=>{
+ const db=mock(prices,false,[snapshot('2026-11-18',4400,5000)]);
+ const row=(await tursoEodCompare(env,new URLSearchParams({items:'225190:2026-11-17'}),
+  '2026-11-19',db.factory)).items[0];
+ assert.equal(row.period_low,4350);
+ assert.equal(row.period_low_source,'KRX_VERIFIED_EOD_LOW');
 });
