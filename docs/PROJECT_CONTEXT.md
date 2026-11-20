@@ -4,8 +4,10 @@
 
 ## 2026-11-20 (KST) — KRX 실제 미수집 거래일만 Turso 순차 백필 (코드 준비)
 
+- **2026-11-20 실행 #44701977071 후 소스 변경:** 기존 KOSPI pykrx `get_index_ohlcv_by_date` 760일 **기간 조회가 JSON 응답 오류**로 실패했으며 `audit`은 DB 조회까지 도달하지 못함. KIS tokenP를 추가 발급하거나 제3자 캘린더로 전환하지 않고, 토·일 제외 후보→Turso 미수집 감사 판정→**실제 KRX 정확일 전체시장 검증** 순서로 변경 준비. 최대 50개 후보를 차례로 보되 5개 KRX 확인일만 처리하고, 미검증 날짜(휴장/공급자 장애 불명)는 별도 표시·다음 후보로 진행, 연속 8개 실패 시 중단. `audit`는 KRX 호출·Turso SELECT만, 실제 쓰기/예약 활성화 없음.
+
 - 사용자 결정: 완료된 KRX 일봉·패턴 감사 날짜를 재실행하지 않고, Turso 원장의 **EOD/패턴 누락을 분리**해 오래된 미수집 거래일부터 자동 탐색·최대 5일씩 저장. 11/10처럼 불변 연구 감사와 EOD 관측 수가 충돌하는 날짜는 보존하고 다른 날짜로 진행한다.
-- 신규 `blue_turso_missing_history_backfill.yml`: KRX KOSPI 지수로 휴장일을 제외한 거래일 후보 파악 → Turso 읽기 전용 감사 원장 조회 → `audit`/`dry_run`/명시적 `apply` 단계 분리. 이때 같은 KRX 해시 검증 EOD를 해당 날짜 R1.1 연구에 전달; 기존 불변 importer와 원장만 사용. 선택한 각 날짜의 실패는 건너뛴 다음 날짜로 계속 진행하되 최종 워크플로는 실패 표시.
+- 신규 `blue_turso_missing_history_backfill.yml`: 평일 미확정 후보 목록 → Turso 읽기 전용 감사 원장 조회 → KRX 정확일 전체시장 검증 → `audit`/`dry_run`/명시적 `apply` 단계 분리. 같은 KRX 해시 검증 EOD를 해당 날짜 R1.1 연구에 전달; 기존 불변 importer와 원장만 사용. 검증 실패 날짜는 건너뛰되 수집 완료로 표기하지 않음.
 - **자동 예약 기본 OFF:** 저장소 변수 `BLUE_TURSO_MISSING_HISTORY_AUTO_ENABLED=true`와 `BLUE_TURSO_MISSING_HISTORY_AUTO_CONFIRM=blue-turso-missing-history-scheduled` 모두 지정해야 매일 05:00 KST에 최대 5개 누락 거래일 `apply` 시도. 자동 활성화/원격 DB 쓰기/운영 배포 없음. 전체 종목 지표·D1·KIS 토큰·AI 추천은 건드리지 않음. [운영 안내](TURSO_MISSING_HISTORY_BACKFILL_RUNBOOK.md).
 - 기존 완료로 **판정한 근거는 불변 감사 원장**이며, 전 기간 개별 행의 재집계나 휴장일 캘린더의 별도 독립 교차 검증까지 완료한 의미는 아님. 전 기간 백필에 따른 Turso 용량/비용은 사용자 확인 필요.
 

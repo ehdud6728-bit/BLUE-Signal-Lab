@@ -1,11 +1,9 @@
 import unittest
-from datetime import datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
-import pandas as pd
-
 from scripts.turso_missing_history_guard import guard, MANUAL_CONFIRM, SCHEDULE_CONFIRM
-from scripts.turso_history_sessions import verified_sessions
+from scripts.turso_history_sessions import weekday_candidates
 
 
 NOW = datetime(2026, 11, 20, 4, 0, tzinfo=timezone.utc)
@@ -39,28 +37,17 @@ class MissingHistoryTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'MISSING_HISTORY_MAIN_ONLY'):
             guard('workflow_dispatch', 'audit', '760', '5', '', REPO, 'refs/heads/dev', NOW)
 
-    def test_index_sessions_skip_proven_closed_weekdays(self):
-        def index(_start, _end, symbol):
-            self.assertEqual(symbol, '1001')
-            return pd.DataFrame({'종가': [3500, 3510, 3520, 3530]},
-                                index=pd.to_datetime(['2026-11-09', '2026-11-10',
-                                                      '2026-11-12', '2026-11-13']))
-        days=verified_sessions(pd.Timestamp('2026-11-09').date(),
-                               pd.Timestamp('2026-11-13').date(), index)
-        self.assertEqual(days, ['2026-11-09', '2026-11-10', '2026-11-12', '2026-11-13'])
+    def test_weekdays_remain_unverified_until_exact_krx_day_source_passes(self):
+        days=weekday_candidates(date(2026, 11, 9), date(2026, 11, 15))
+        self.assertEqual(days, ['2026-11-09', '2026-11-10', '2026-11-11',
+                                '2026-11-12', '2026-11-13'])
 
-    def test_truncated_or_invalid_calendar_is_not_treated_as_holidays(self):
-        start=pd.Timestamp('2026-11-09').date()
-        end=pd.Timestamp('2026-11-20').date()
-        def short(*_):
-            return pd.DataFrame({'종가': [3000]},index=pd.to_datetime(['2026-11-09']))
-        def invalid(*_):
-            return pd.DataFrame({'종가': [3000, 3001]},
-                                index=pd.to_datetime(['2026-11-09', '2026-11-14']))
-        with self.assertRaisesRegex(ValueError, 'HISTORY_KRX_CALENDAR_INCOMPLETE'):
-            verified_sessions(start, end, short)
-        with self.assertRaisesRegex(ValueError, 'HISTORY_KRX_CALENDAR_INVALID_SESSION'):
-            verified_sessions(start, end, invalid)
+    def test_calendar_range_guard_is_offline_and_bounded(self):
+        with self.assertRaisesRegex(ValueError, 'HISTORY_CALENDAR_RANGE_INVALID'):
+            weekday_candidates(date(2026, 11, 20), date(2026, 11, 19))
+        with self.assertRaisesRegex(ValueError, 'HISTORY_CALENDAR_RANGE_INVALID'):
+            weekday_candidates(date(2024, 1, 1), date(2026, 11, 19))
+        self.assertEqual(weekday_candidates(date(2026, 11, 14), date(2026, 11, 15)), [])
 
     def test_workflow_keeps_schedule_disabled_and_old_writer_immutable(self):
         root=Path(__file__).resolve().parents[1]
@@ -70,6 +57,9 @@ class MissingHistoryTest(unittest.TestCase):
         self.assertIn('blue-turso-eod-research-writer', workflow)
         self.assertIn('missing-history-plan.mjs', workflow)
         self.assertIn('turso_history_sessions.py', workflow)
+        self.assertIn('BLUE_MISSING_HISTORY_DAY_KRX_UNVERIFIED',workflow)
+        self.assertIn('if (( SUCCESS >= BATCH_SIZE ))',workflow)
+        self.assertIn("HISTORY_CANDIDATE_LIMIT: '50'",workflow)
         self.assertNotIn('D1_DATABASE_ID', workflow)
         self.assertNotIn('include_indicators', workflow)
 

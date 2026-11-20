@@ -1,4 +1,4 @@
-/** Select the oldest KRX index sessions without a completed Turso EOD+signal audit.
+/** Select unverified weekday candidates missing an EOD+signal audit.
  * Read-only: even apply mode only writes a selection file; the workflow owns
  * explicit authorization and invokes the existing immutable importers.
  */
@@ -15,7 +15,8 @@ const integer=(v,min,max)=>v!==null&&v!==undefined&&v!==''&&
   Number.isSafeInteger(Number(v))&&Number(v)>=min&&Number(v)<=max;
 
 export function validateHistorySessions(data){
-  if(data?.format!=='BLUE_KRX_INDEX_SESSIONS_V1'||!DAY.test(data.start)||
+  if(data?.format!=='BLUE_KRX_DAY_PROOF_CANDIDATES_V1'||
+      data.source_proof!=='PENDING_KRX_EXACT_DAY'||!DAY.test(data.start)||
       !DAY.test(data.end)||data.start>data.end||
       !Array.isArray(data.sessions)||
       data.sessions.length<1||data.sessions.length>600)fail('MISSING_HISTORY_CALENDAR_INVALID');
@@ -59,9 +60,10 @@ async function countDay(client,table,day){
   return n;
 }
 
-export async function planMissingHistory(client,{calendar,batchSize=5}={}){
+export async function planMissingHistory(client,{calendar,batchSize=5,candidateLimit=batchSize}={}){
   const sessions=validateHistorySessions(calendar);
-  if(!Number.isInteger(batchSize)||batchSize<1||batchSize>5||!client?.execute)
+  if(!Number.isInteger(batchSize)||batchSize<1||batchSize>5||
+    !Number.isInteger(candidateLimit)||candidateLimit<batchSize||candidateLimit>50||!client?.execute)
     fail('MISSING_HISTORY_ARGS_INVALID');
   const start=calendar.start,end=calendar.end;
   const named=await client.execute(`SELECT name FROM sqlite_master WHERE type='table' AND
@@ -92,7 +94,7 @@ export async function planMissingHistory(client,{calendar,batchSize=5}={}){
     missingAudits++;
     // Only a bounded number of candidates have their actual rows counted.
     // Already-audited, immutable days are not recomputed or overwritten.
-    if(selected.length>=batchSize)continue;
+    if(selected.length>=candidateLimit)continue;
     const haveEod=names.has(TABLES.eod)?await countDay(client,TABLES.eod,day):0;
     const haveSignal=names.has(TABLES.signal)?await countDay(client,TABLES.signal,day):0;
     queries+=Number(names.has(TABLES.eod))+Number(names.has(TABLES.signal));
@@ -105,23 +107,25 @@ export async function planMissingHistory(client,{calendar,batchSize=5}={}){
       signals:sa?'already_audited':'missing'});
   }
   return {format:'BLUE_MISSING_HISTORY_PLAN_V1',start,end,
-    exchange_sessions:sessions.length,already_audited:audited,
+    weekday_candidates:sessions.length,already_audited:audited,
     missing_audit_sessions:missingAudits,selected,blocked,
-    remaining_possible:Math.max(0,missingAudits-selected.length),
+    max_verified_days:batchSize,source_proof:'PENDING_KRX_EXACT_DAY',
+    remaining_possible:Math.max(0,missingAudits-Math.min(batchSize,selected.length)),
     turso_select_queries:queries,d1_sql_queries:0,db_writes:0,
-    note:'Only KRX index sessions are candidates. Existing immutable audits are not replayed; partial/conflicting records require separate inspection.'};
+    note:'Weekdays are candidates, not proven sessions. Each day must pass exact KRX full-market EOD verification; unverified days are separately reported, never called holidays. Immutable audits are not replayed.'};
 }
 
 async function main(){
   const calendar=JSON.parse(await readFile(process.env.HISTORY_SESSIONS_FILE||'output/missing/sessions.json','utf8'));
   const batchSize=Number(process.env.HISTORY_BATCH||5);
+  const candidateLimit=Number(process.env.HISTORY_CANDIDATE_LIMIT||batchSize);
   const url=String(process.env.TURSO_DATABASE_URL||'').trim(),
     authToken=String(process.env.TURSO_AUTH_TOKEN||'').trim();
   if(!/^(libsql|https):\/\//.test(url)||!authToken)
     fail('MISSING_HISTORY_TURSO_CONFIG_MISSING');
   const client=createClient({url,authToken,intMode:'string'});
   let plan;
-  try{plan=await planMissingHistory(client,{calendar,batchSize});}
+  try{plan=await planMissingHistory(client,{calendar,batchSize,candidateLimit});}
   finally{client.close();}
   const path=process.env.HISTORY_PLAN_FILE||'output/missing/selection.json';
   await mkdir(dirname(path),{recursive:true});
