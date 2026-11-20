@@ -81,8 +81,16 @@ jobs:
       - name: Install isolated Turso importer
         working-directory: tools/turso
         run: npm install --no-audit --no-fund --ignore-scripts --no-package-lock
-      - name: On KRX failure audit already saved KIS observations without writing EOD
-        if: ${{ steps.krx_fetch.outcome == 'failure' }}
+      - name: On KRX failure collect exact-day KIS secondary observations (apply only)
+        if: ${{ steps.krx_fetch.outcome == 'failure' && env.MODE == 'apply' }}
+        env:
+          TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
+          TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
+          KIS_APP_KEY: ${{ secrets.KIS_APP_KEY }}
+          KIS_APP_SECRET: ${{ secrets.KIS_APP_SECRET }}
+        run: node tools/turso/krx-kis-fallback-collect.mjs --mode=apply --day="$TRADE_DAY"
+      - name: On KRX failure audit KIS provisional observations without confirming EOD
+        if: ${{ always() && steps.krx_fetch.outcome == 'failure' }}
         env:
           TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
           TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}

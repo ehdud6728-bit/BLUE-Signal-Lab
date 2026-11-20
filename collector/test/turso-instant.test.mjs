@@ -39,7 +39,25 @@ test('disabled, invalid symbol and market closed make no Turso or D1 connection'
   assert.equal(tursoInstantEnabled(env({TURSO_INSTANT_QUOTES_ENABLED:'false'})),false);
   assert.equal((await collectTursoInstant(env(),'ABC/00',NOW)).status,'INVALID_CODE');
   assert.equal((await collectTursoInstant(env({TURSO_INSTANT_QUOTES_ENABLED:'false'}),'005930',NOW)).status,'DISABLED');
-  assert.equal((await collectTursoInstant(env(),'005930',new Date('2026-11-19T12:00:00Z'))).status,'MARKET_CLOSED');
+  assert.equal((await collectTursoInstant(env(),'005930',new Date('2026-11-19T13:10:00Z'))).status,'MARKET_CLOSED');
+});
+test('after close an instant lookup uses exact-date KIS daily quote and provisional-only storage',async()=>{
+  const {client,state}=mockClient();
+  const closing=new Date('2026-11-19T12:00:00Z'); // 21:00 KST
+  let priceCalls=0,dailyCalls=0;
+  const result=await collectTursoInstant(env(),'005930',closing,deps(client,{
+    receivedAt:closing,
+    quote:async()=>{priceCalls++;throw Error('CURRENT_PRICE_NOT_ALLOWED');},
+    quoteDaily:async()=>{dailyCalls++;return quote;}
+  }));
+  assert.equal(result.status,'SAVED');
+  assert.equal(priceCalls,0);assert.equal(dailyCalls,1);
+  assert.equal(state.batches[0].statements.length,3);
+  const provisional=state.batches[0].statements.find(s=>s.sql.includes('INSERT INTO blue_kis_provisional_daily_v1'));
+  assert.ok(provisional);
+  assert.equal(provisional.args[11],'KIS_REPORTED_TRADE_DATE');
+  assert.equal(provisional.args[12],'KIS_REST_INQUIRE_DAILY_PRICE_PROVISIONAL');
+  assert.equal(state.batches[0].statements.some(s=>/blue_eod_ingest_audit|blue_research_signals/.test(s.sql)),false);
 });
 test('instant KIS quote saves latest and history in Turso without reading D1',async()=>{
   const {client,state}=mockClient();let calls=0;

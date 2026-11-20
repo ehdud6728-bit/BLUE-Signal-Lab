@@ -2,6 +2,13 @@
 
 새 채팅에서 프로젝트를 이어가기 위한 **결정/구현/검증 이력**입니다. 대화 전체를 저장하지 않고 실제 개발에 필요한 내용만 보존합니다. 최신 항목을 위에 추가하고, 결과가 달라지면 추측 대신 검증된 상태로 수정합니다.
 
+## 2026-11-20 (KST) — KRX 불가 시 KIS 자동 2차 수집·검색 누락가 자동 조회 (PR 준비)
+
+- **요청:** KRX가 안 되면 보조 KIS를 `apply`에서 실제 자동 호출하고, 사용자가 종목을 검색하면 최근가가 비거나 낡은 종목의 KIS 최신 시세를 별도 버튼 없이 반영한다.
+- **코드:** `tools/turso/krx-kis-fallback-collect.mjs`는 직전 감사 KRX 전체 종목을 1,750ms 이상 간격으로 KIS 정확일 daily-price에서 읽고 20개 유효 건마다 Turso 잠정/시세·이력 저장. 재실행 누락분만 조회, KIS 429·유효날짜 불명·토큰 없음 시 안전 중단, KRX 확정 원장·연구 쓰기 없음. 일일 `apply` KRX 실패 단계에 연결, `dry_run`/정상 KRX 경로는 그대로. `worker/src/turso-eod.ts`의 같은 날 KRX 확정 우선·KIS 당일 잠정/22시 이후 정밀 출처 읽기, `collector/src/turso-direct.mjs`의 15:20~22:00 정확일 KIS 온디맨드까지 연결. `web/src/main.tsx` 검색 직후 최신가 누락 종목 최대 100개 순차 자동조회·진행 표시, 기간 최고가/검색일 거래대금·확정 신호 보존.
+- **검증:** 관련 Collector/Node/Turso/API·웹 회귀 **124/124 PASS**, 통합 Python Workflow 가드 **6/6 PASS**, 웹 TypeScript/Vite 빌드, API·Collector Wrangler `deploy --dry-run` 성공(2026-11-20 로컬). 실제 KIS 호출/Turso·D1 원격 SQL/운영 배포/Worker Secret 갱신·FULL 활성화 **수행하지 않음**. 공식 KIS 예제의 `inquire-daily-price`/`FHKST01010400` 및 정확 영업일 필드 대조. [운영 안내](KRX_KIS_AUTOMATIC_FALLBACK.md).
+- **다음:** PR CI→사용자 병합→Collector/API/웹 순차 재배포→사용자 승인 KIS 즉시조회 flag enable(전역 FULL 아님)→검색 1~2종목 새 KIS 저장과 KRX 실패시 일일 `apply`의 KIS 잠정 자료/호출 제한 실측.
+
 ## 2026-11-20 (KST) — PR #64 병합 후 통합 안전 CI 구문 검사 보완 (PR 준비)
 
 - **병합 확인:** PR #64 [병합 커밋 `0b03afc`](https://github.com/ehdud6728-bit/BLUE-Signal-Lab/pull/64) 로컬 `origin/main` 계보 확인. 무비밀 [KIS 안전 CI #44730835529](https://github.com/ehdud6728-bit/BLUE-Signal-Lab/actions/runs/44730835529), [웹/API 안전 CI #44730835495](https://github.com/ehdud6728-bit/BLUE-Signal-Lab/actions/runs/44730835495)는 성공. [통합 연구 안전 CI #44730835563](https://github.com/ehdud6728-bit/BLUE-Signal-Lab/actions/runs/44730835563)만 신규 `steps.krx_fetch.outcome == 'success'` 조건을 알지 못하는 **기존 테스트의 고정 문자열 검사**에서 실패했고, 실 KIS/DB/파이프라인은 시작되지 않음.

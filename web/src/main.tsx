@@ -11,6 +11,7 @@ import {type TursoProgressStage} from './turso-research-progress';
 import {requestSearchPriority} from './search-priority';
 import {comparisonKey,fetchCompared,fetchComparedTursoFirst,fetchComparedTursoOnly,
   refreshKisQuoteToTurso,type PriceCompare} from './price-compare';
+import {missingKisSearchQuotes} from './auto-kis-search';
 import './r1595-group-price.css';
 import AiWidget from './AiWidget';
 import React, {useCallback,useEffect, useRef, useState} from 'react';
@@ -228,11 +229,61 @@ function App(){
   const [r1593Prices,setR1593Prices]=useState<Record<string,PriceCompare>>({});
   const [r1593Busy,setR1593Busy]=useState(false);
   const [r1593Error,setR1593Error]=useState('');
+  const [r1593AutoStatus,setR1593AutoStatus]=useState('');
+  const autoQuoteAttempted=useRef<Set<string>>(new Set());
   useEffect(()=>{
     if(activeView!=='research'||!rows.length)return;
     const ctrl=new AbortController();setR1593Busy(true);setR1593Error('');setR1593Prices({});
+    setR1593AutoStatus('');
     const readPrices=patternBackend==='turso'?fetchComparedTursoFirst:fetchCompared;
-    void readPrices(rows,ctrl.signal,partial=>{if(!ctrl.signal.aborted)setR1593Prices(prev=>({...prev,...partial}));}).then(result=>{if(!ctrl.signal.aborted)setR1593Prices(prev=>({...prev,...result}));})
+    void readPrices(rows,ctrl.signal,partial=>{if(!ctrl.signal.aborted)setR1593Prices(prev=>({...prev,...partial}));}).then(result=>{
+      if(ctrl.signal.aborted)return;
+      setR1593Prices(prev=>({...prev,...result}));
+      // A search itself authorizes a bounded missing-price check. The server
+      // still requires Cloudflare Access and enforces global KIS quotas.
+      if(patternBackend!=='turso')return;
+      const parts=new Intl.DateTimeFormat('en-US',{timeZone:'Asia/Seoul',weekday:'short',
+        hour:'2-digit',minute:'2-digit',hourCycle:'h23'}).formatToParts(new Date());
+      const clock=Object.fromEntries(parts.map(x=>[x.type,x.value]));
+      const hhmm=Number(clock.hour)*60+Number(clock.minute);
+      if(!['Mon','Tue','Wed','Thu','Fri'].includes(clock.weekday)||hhmm<540||hhmm>=1320)return;
+      const today=todayKST();
+      const missing=missingKisSearchQuotes(rows,result,today).filter(item=>
+        !autoQuoteAttempted.current.has(today+':'+item.code));
+      if(!missing.length)return;
+      void (async()=>{
+        let refreshed=0;
+        setR1593AutoStatus(`최신가 없는 ${missing.length}종목 KIS 자동 조회 시작 · 검색 결과는 바로 사용 가능`);
+        for(let i=0;i<missing.length&&!ctrl.signal.aborted;i++){
+          const item=missing[i];
+          autoQuoteAttempted.current.add(today+':'+item.code);
+          try{
+            const fetched=await refreshKisQuoteToTurso(item.code,ctrl.signal);
+            if(['SAVED','COOLDOWN'].includes(fetched.status)){
+              const latest=await fetchComparedTursoOnly([item],ctrl.signal);
+              if(!ctrl.signal.aborted){setR1593Prices(prev=>({...prev,...latest}));
+                if(latest[comparisonKey(item)]?.status==='READY')refreshed++;}
+            }
+            if(!ctrl.signal.aborted)setR1593AutoStatus(`KIS 최신가 자동 확인 ${i+1}/${missing.length}종목 · ${refreshed}종목 반영`);
+            if(fetched.status==='DISABLED'||fetched.status==='MARKET_CLOSED'||
+              fetched.status==='RATE_LIMITED'||fetched.status.startsWith('TURSO_TOKEN_'))break;
+          }catch(e){if(ctrl.signal.aborted)break;}
+          // Twelve calls/minute is the *total* existing server cap. Space
+          // browser requests, and let the server refuse concurrent users.
+          if(i<missing.length-1&&!ctrl.signal.aborted){
+            await new Promise<void>(resolve=>{
+              const timer=window.setTimeout(done,5100);
+              function done(){ctrl.signal.removeEventListener('abort',onAbort);resolve();}
+              function onAbort(){window.clearTimeout(timer);done();}
+              ctrl.signal.addEventListener('abort',onAbort,{once:true});
+            });
+          }
+        }
+        if(!ctrl.signal.aborted)setR1593AutoStatus(refreshed?
+          `KIS 최신가 ${refreshed}종목 반영 · 나머지는 저장 시각 또는 수집 제한을 확인하세요.`:
+          'KIS 최신가를 확보하지 못했습니다. 저장 시세와 수집 상태를 유지합니다.');
+      })();
+    })
       .catch(e=>{if(!ctrl.signal.aborted)setR1593Error(e instanceof Error?e.message:'최근 시세 확인 실패');})
       .finally(()=>{if(!ctrl.signal.aborted)setR1593Busy(false);});
     return ()=>ctrl.abort();
@@ -971,6 +1022,7 @@ function App(){
             :'검색일 확정 종가와 이후 D1 저장 시세·기간 고가를 구분해 표시합니다. 가격이 없으면 미수집으로 표시합니다.'}</p>
           {total===0&&(appliedAmountEok??amountEok)>0&&<p className="r15125-result-scope" role="status">현재 거래대금 최소 {(appliedAmountEok??amountEok).toLocaleString('ko-KR')}억원 조건으로는 검색 대상이 없습니다. 저거래대금 하단 터치 종목도 찾으려면 거래대금을 ‘전체(0억원)’로 바꾸고 검색해 보세요.</p>}
           {r1593Error&&<p className="r1593-comparison-status" role="status">가격 비교: {r1593Error}</p>}
+          {r1593AutoStatus&&patternBackend==='turso'&&<p className="r1593-comparison-status" role="status">{r1593AutoStatus}</p>}
           {r1595RequestNote&&<p className="r1595-request-status" role="status">{r1595RequestNote}</p>}
           {rows.length>0&&<p className="r1594-quote-note" role="status">{patternBackend==='turso'
             ?'저장된 확정 일봉을 기본으로 표시합니다. 장중에는 종목별 ‘KIS 최신가 조회’를 누르면 Turso에 새 시세를 저장합니다. KIS 수신 시각은 체결 시각과 다를 수 있습니다.'

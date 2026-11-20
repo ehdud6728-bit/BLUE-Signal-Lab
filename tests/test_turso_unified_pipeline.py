@@ -61,7 +61,7 @@ class TursoUnifiedPipelineTests(unittest.TestCase):
                                  auto_indicators='true', today=date(2026, 11, 19))
         self.assertEqual(on['RUN_INDICATORS'], 'true')
 
-    def test_one_schedule_has_ordered_eod_and_research_and_no_d1_or_kis(self):
+    def test_one_schedule_has_ordered_eod_and_research_with_bounded_kis_secondary(self):
         eod = EOD.read_text(encoding='utf-8')
         research = RESEARCH.read_text(encoding='utf-8')
         self.assertIn("cron: '20 13 * * 1-5'", eod)
@@ -80,7 +80,9 @@ class TursoUnifiedPipelineTests(unittest.TestCase):
                       "env.RUN_RESEARCH == 'true' && env.MODE == 'apply' }}", eod)
         self.assertIn("if: ${{ " + krx_success + "env.MODE == 'apply' }}", eod)
         self.assertIn("id: krx_fetch\n        continue-on-error: true", eod)
-        self.assertIn("if: ${{ steps.krx_fetch.outcome == 'failure' }}", eod)
+        self.assertIn("if: ${{ always() && steps.krx_fetch.outcome == 'failure' }}", eod)
+        self.assertIn('krx-kis-fallback-collect.mjs --mode=apply --day="$TRADE_DAY"', eod)
+        self.assertIn("if: ${{ steps.krx_fetch.outcome == 'failure' && env.MODE == 'apply' }}", eod)
         self.assertIn('node tools/turso/provisional-fallback-gate.mjs --day="$TRADE_DAY"', eod)
         self.assertIn('if: ${{ steps.krx_fetch.outcome == \'success\' }}', eod)
         self.assertIn('--start "$TRADE_DAY" --end "$TRADE_DAY"', eod)
