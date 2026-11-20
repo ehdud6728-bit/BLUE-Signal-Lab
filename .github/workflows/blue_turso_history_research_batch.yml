@@ -109,11 +109,12 @@ jobs:
         run: |
           set -euo pipefail
           for DAY in $DAYS; do
+            RESEARCH_YEARS="$(python3 -c 'from datetime import date; import sys; y = date.fromisoformat(sys.argv[1]).year; print(f"{y-1},{y}")' "$DAY")"
             INDICATOR_ARGS=()
             if [[ "$INCLUDE_INDICATORS" == 'true' ]]; then
               INDICATOR_ARGS+=(--turso-indicators-out "output/history/$DAY/indicators")
             fi
-            python scripts/market_scan_r11.py --date "$DAY" --years 2 \
+            python scripts/market_scan_r11.py --date "$DAY" --years "$RESEARCH_YEARS" \
               --daily-provider auto --out "output/history/$DAY/source" "${INDICATOR_ARGS[@]}"
             python scripts/export_turso_signal_snapshot.py \
               --input-dir "output/history/$DAY/source" --out "output/history/$DAY/signals"

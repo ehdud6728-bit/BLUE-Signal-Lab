@@ -2,6 +2,14 @@
 
 새 채팅에서 프로젝트를 이어가기 위한 **결정/구현/검증 이력**입니다. 대화 전체를 저장하지 않고 실제 개발에 필요한 내용만 보존합니다. 최신 항목을 위에 추가하고, 결과가 달라지면 추측 대신 검증된 상태로 수정합니다.
 
+## 2026-11-20 (KST) — 과거 4일 묶음 `dry_run` 스캐너 연도 인자 실패 수정 (PR 준비)
+
+- **실제 실행:** [History Replay #44664203917](https://github.com/ehdud6728-bit/BLUE-Signal-Lab/actions/runs/44664203917)은 `2026-11-09`~`2026-11-12`, `dry_run`, 전 종목 지표 OFF로 실행. KRX 확정 EOD 네 날짜(2,660·2,662·2,665·2,664종목), **총 10,651건의 원천 검증과 EOD importer `dry_run`까지 통과**(`verified_days=4`, `verified_rows=10651`, `written=0`). 그 뒤 패턴 스캔 단계에서 실패하였으므로 R1.1 연구 스냅샷 검증 **미완료**. 뒤의 EOD/패턴/지표 Turso `apply` 단계 모두 실행되지 않았고 D1 접근·KIS 발급·운영 배포 없음.
+- **실패 원인:** 신규 `.github/workflows/blue_turso_history_research_batch.yml`이 스캐너 `--years 2`를 전달했으나 `market_scan_r11.py`는 연도 **개수가 아닌 `2025,2026` 형식의 실제 달력연도 목록**을 요구. `FinanceData/marcap`의 존재하지 않는 `marcap-2.parquet`를 요청하여 HTTP 404 발생. KRX EOD 공급 오류나 Turso 인증 실패 아님.
+- **수정:** 각 `DAY`에서 `YEAR-1,YEAR`를 계산해 `--years "$RESEARCH_YEARS"`로 전달. 기존 일일 통합 수집 guard와 동일한 기간 규칙으로 맞추고, 연말/연초/2026-11-09을 포함한 실제 워크플로 명령 회귀 테스트 추가. 기존 `plan`/`dry_run`/`apply` 승인 분리, 원천·원장 검증 및 데이터 보존 정책 그대로 유지.
+- **로컬 검증:** 신규 포함 Python 이력 워크플로 guard **4/4 통과**. `dry_run` 재실행·KRX 연구 스캔 실제 완료 여부/원격 GitHub CI는 PR 병합 전까지 미확인. **이 작업에서는 DB 기록 및 원격 스캐너 실행 안 함.**
+- **다음:** PR 리뷰·CI 후 사용자 병합 → 같은 4일 범위의 `dry_run` 다시 실행해 R1.1 연구 원천·manifest까지 검증 → 성공 확인 후에만 별도 승인 `apply` 여부 결정. 4일 EOD 검증 성공만으로 패턴 자료 적재를 완료했다고 판단하지 않음.
+
 ## 2026-11-20 (KST) — 과거 묶음 복구·5~500일 패턴 익절/손절 일괄 개발 (PR 준비)
 
 - **운영 기준:** PR #55 병합 `7615436cabd389fa506ae31b38b2079e1d969b48`. 같은 커밋을 사용한 [API 배포 #44655223026](https://github.com/ehdud6728-bit/BLUE-Signal-Lab/actions/runs/44655223026)와 [웹 배포 #44655290849](https://github.com/ehdud6728-bit/BLUE-Signal-Lab/actions/runs/44655290849)의 실제 Deploy 단계 성공. 기존 자료는 [읽기 전용 감사 #44652090911](https://github.com/ehdud6728-bit/BLUE-Signal-Lab/actions/runs/44652090911)에서 EOD 9일·23,957 종목·일, 연구 5일·882 종목·일, 전 종목 지표 0일. 실제 모바일 화면 표시는 미확인.
