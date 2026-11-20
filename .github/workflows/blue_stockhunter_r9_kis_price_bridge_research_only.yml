@@ -1,0 +1,86 @@
+name: BLUE to Stock-Hunter R9 KIS Historical Price Bridge (RESEARCH ONLY)
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: 'dry_run: no DB/KIS/Secrets; capture: existing Turso token SELECT + two historical KIS GETs'
+        required: true
+        type: choice
+        options: [dry_run, capture]
+        default: dry_run
+
+permissions:
+  contents: read
+
+concurrency:
+  group: blue-stockhunter-r9-historical-source-capture
+  cancel-in-progress: false
+
+jobs:
+  samsung_sdi_r9_source:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - name: Pin correct repository and main branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REPOSITORY" = 'ehdud6728-bit/BLUE-Signal-Lab'
+          test "$GITHUB_REF" = 'refs/heads/main'
+      - name: Checkout BLUE code without persistent credentials
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Set up Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install existing Turso client only
+        working-directory: tools/turso
+        run: npm install --no-audit --no-fund --ignore-scripts --no-package-lock
+      - name: Test quote scope, secret isolation, valid cached token and fail-closed paths
+        run: node --test tools/turso/stockhunter-r9-kis-bridge.test.mjs
+      - name: Default dry run - no credentials, database or network
+        if: inputs.mode == 'dry_run'
+        run: node tools/turso/stockhunter-r9-kis-bridge.mjs dry_run output/stockhunter_r9_kis_bridge
+      - name: Capture existing-token KIS daily raw and adjusted historical bars
+        if: inputs.mode == 'capture'
+        env:
+          KIS_APP_KEY: ${{ secrets.KIS_APP_KEY }}
+          KIS_APP_SECRET: ${{ secrets.KIS_APP_SECRET }}
+          TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
+          TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
+        run: node tools/turso/stockhunter-r9-kis-bridge.mjs capture output/stockhunter_r9_kis_bridge
+      - name: Checkout frozen Stock-Hunter R8 validation source (no secrets)
+        if: inputs.mode == 'capture' && success()
+        uses: actions/checkout@v4
+        with:
+          repository: ehdud6728-bit/Stock-Hunter
+          ref: 891f3ba3b2d82dec4cf052f301d685d649de106a
+          path: stockhunter_validation
+          persist-credentials: false
+      - name: Independently execute pinned Stock-Hunter R8 five-date audit
+        if: inputs.mode == 'capture' && success()
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m unittest discover \
+            -s stockhunter_validation/research_projects/trendline_price_lineage_r8_20261119 \
+            -p 'test_*.py' -v
+          p='output/stockhunter_r9_kis_bridge'
+          python stockhunter_validation/research_projects/trendline_price_lineage_r8_20261119/r8_price_lineage.py \
+            --out "$p/BLUE_R9_STOCKHUNTER_R8_COMPARISON.json" \
+            --raw-csv "$p/KIS_006400_202309_202311_raw.csv" \
+            --adjusted-csv "$p/KIS_006400_202309_202311_adjusted.csv" \
+            --raw-manifest "$p/KIS_006400_202309_202311_raw_manifest.json" \
+            --adjusted-manifest "$p/KIS_006400_202309_202311_adjusted_manifest.json"
+          python -c 'import json,sys; v=json.load(open(sys.argv[1],encoding="utf-8")); print("BLUE_R9_INDEPENDENT_STATUS="+v["independent_status"]); sys.exit(0 if v["independent_status"]=="FIVE_DATE_COMPARISON_COMPLETE_FULL_R116_REPLAY_NOT_DONE" else 2)' "$p/BLUE_R9_STOCKHUNTER_R8_COMPARISON.json"
+      - name: Upload evidence only (no KIS keys, cached tokens, or Turso data)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: BLUE_STOCKHUNTER_R9_KIS_006400_${{ github.run_id }}
+          path: output/stockhunter_r9_kis_bridge/
+          if-no-files-found: warn
+          retention-days: 14
