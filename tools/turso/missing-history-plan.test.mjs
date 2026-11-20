@@ -3,7 +3,8 @@ import assert from 'node:assert/strict';
 import {planMissingHistory,validateHistorySessions} from './missing-history-plan.mjs';
 
 const A='a'.repeat(64),B='b'.repeat(64);
-const calendar={format:'BLUE_KRX_INDEX_SESSIONS_V1',start:'2026-11-09',end:'2026-11-13',
+const calendar={format:'BLUE_KRX_DAY_PROOF_CANDIDATES_V1',source_proof:'PENDING_KRX_EXACT_DAY',
+  start:'2026-11-09',end:'2026-11-13',
   sessions:['2026-11-09','2026-11-10','2026-11-11','2026-11-12','2026-11-13']};
 function fixture({eod={},signals={},eodRows={},signalRows={},tables=true}={}){
   const statements=[];
@@ -54,6 +55,15 @@ test('batch limit avoids extra day reads; all audited days produce no selected w
   assert.equal(plan.remaining_possible,3);
   const counts=mock.statements.filter(s=>s.sql.includes('COUNT(*)'));
   assert.equal(counts.length,2);
+});
+
+test('lookahead lets later KRX-confirmed weekdays progress despite earlier unverified dates',async()=>{
+  const mock=fixture();
+  const plan=await planMissingHistory(mock.client,{calendar,batchSize:1,candidateLimit:5});
+  assert.equal(plan.selected.length,5);
+  assert.equal(plan.max_verified_days,1);
+  assert.equal(plan.source_proof,'PENDING_KRX_EXACT_DAY');
+  assert.ok(plan.selected.every(x=>x.eod==='missing'&&x.signals==='missing'));
 });
 
 test('days with existing un-audited signals are quarantined while the next date progresses',async()=>{

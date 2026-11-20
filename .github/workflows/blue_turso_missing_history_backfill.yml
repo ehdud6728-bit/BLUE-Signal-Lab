@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       mode:
-        description: 'audit: Turso SELECT and calendar only; dry_run: verify selected KRX days; apply: save missing audited days'
+        description: 'audit: Turso SELECT plus KRX exact-day proof; dry_run: also verify patterns; apply: write confirmed missing days'
         type: choice
         options: [audit, dry_run, apply]
         default: audit
@@ -65,7 +65,7 @@ jobs:
       - name: Install isolated Turso audit/import client
         working-directory: tools/turso
         run: npm install --no-audit --no-fund --ignore-scripts --no-package-lock
-      - name: Verify actual KRX sessions (holidays are not missing dates)
+      - name: List unverified weekday candidates (KRX will prove each selected day)
         env:
           START: ${{ steps.guard.outputs.start }}
           END: ${{ steps.guard.outputs.end }}
@@ -77,13 +77,14 @@ jobs:
           HISTORY_SESSIONS_FILE: output/missing/sessions.json
           HISTORY_PLAN_FILE: output/missing/selection.json
           HISTORY_BATCH: ${{ steps.guard.outputs.batch_size }}
+          HISTORY_CANDIDATE_LIMIT: '50'
           TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
           TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
         run: node tools/turso/missing-history-plan.mjs
-      - name: Verify and optionally save only selected missing dates, independently
-        if: steps.guard.outputs.mode != 'audit'
+      - name: Verify KRX exact-day proof and optionally save only true missing dates
         env:
           MODE: ${{ steps.guard.outputs.mode }}
+          BATCH_SIZE: ${{ steps.guard.outputs.batch_size }}
           KRX_AUTH_KEY: ${{ secrets.KRX_AUTH_KEY }}
           KRX_ID: ${{ secrets.KRX_DATA_ID || secrets.KRX_ID }}
           KRX_PW: ${{ secrets.KRX_DATA_PW || secrets.KRX_PW }}
@@ -98,9 +99,15 @@ jobs:
             local DIR="output/missing/$DAY" YEARS
             YEARS="$(python3 -c 'from datetime import date; import sys; y=date.fromisoformat(sys.argv[1]).year; print(f"{y-1},{y}")' "$DAY")"
             echo "BLUE_MISSING_HISTORY_DAY_START day=$DAY eod=$EOD_STATE signals=$SIGNAL_STATE mode=$MODE"
+            # No-data and holidays are NOT silently counted as trading sessions.
+            # Source outages are equally unverified and are not called holidays.
             python scripts/turso_verified_eod_range.py --start "$DAY" --end "$DAY" \
-              --provider auto --out "$DIR/eod" || return 1
+              --provider auto --out "$DIR/eod" || return 2
             node tools/turso/eod-range-import.mjs --mode=dry_run --input-dir="$DIR/eod" || return 1
+            if [[ "$MODE" == 'audit' ]]; then
+              echo "BLUE_MISSING_HISTORY_DAY_KRX_VERIFIED day=$DAY mode=audit D1_SQL=0 TURSO_WRITE=0"
+              return 0
+            fi
             python scripts/market_scan_r11.py --date "$DAY" --years "$YEARS" \
               --verified-eod-dir "$DIR/eod" --daily-provider auto --out "$DIR/source" || return 1
             python scripts/export_turso_signal_snapshot.py \
@@ -120,16 +127,33 @@ jobs:
           }
           SUCCESS=0
           FAILED=0
+          UNVERIFIED=0
+          CONSECUTIVE_UNVERIFIED=0
           while read -r DAY EOD_STATE SIGNAL_STATE; do
             if process_day "$DAY" "$EOD_STATE" "$SIGNAL_STATE"; then
               SUCCESS=$((SUCCESS + 1))
+              CONSECUTIVE_UNVERIFIED=0
             else
-              echo "BLUE_MISSING_HISTORY_DAY_FAILED day=$DAY (records preserved; next day continues)"
+              STATUS=$?
+              if (( STATUS == 2 )); then
+                echo "BLUE_MISSING_HISTORY_DAY_KRX_UNVERIFIED day=$DAY (holiday OR source pending; next candidate continues)"
+                UNVERIFIED=$((UNVERIFIED + 1))
+                CONSECUTIVE_UNVERIFIED=$((CONSECUTIVE_UNVERIFIED + 1))
+              else
+                echo "BLUE_MISSING_HISTORY_DAY_FAILED day=$DAY (records preserved; next candidate continues)"
+                FAILED=$((FAILED + 1))
+                CONSECUTIVE_UNVERIFIED=0
+              fi
+            fi
+            if (( SUCCESS >= BATCH_SIZE )); then break; fi
+            if (( CONSECUTIVE_UNVERIFIED >= 8 )); then
+              echo 'BLUE_MISSING_HISTORY_KRX_SOURCE_STALLED consecutive_unverified=8'
               FAILED=$((FAILED + 1))
+              break
             fi
           done < <(python3 -c 'import json; data=json.load(open("output/missing/selection.json")); [print(d["day"], d["eod"], d["signals"]) for d in data["selected"]]')
-          echo "BLUE_MISSING_HISTORY_BATCH_DONE successful_days=$SUCCESS failed_days=$FAILED mode=$MODE"
-          if (( FAILED > 0 )); then exit 1; fi
+          echo "BLUE_MISSING_HISTORY_BATCH_DONE verified_or_saved_days=$SUCCESS failed_days=$FAILED unverified_weekdays=$UNVERIFIED mode=$MODE"
+          if (( FAILED > 0 || (SUCCESS == 0 && UNVERIFIED > 0) )); then exit 1; fi
       - name: Keep missing-date plan and exact source audit evidence
         if: always()
         uses: actions/upload-artifact@v4
