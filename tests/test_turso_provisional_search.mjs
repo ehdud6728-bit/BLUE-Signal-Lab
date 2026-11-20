@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import {test} from 'node:test';
 import {readFileSync} from 'node:fs';
 import {DatabaseSync} from 'node:sqlite';
-import {InvalidProvisionalQuery,tursoProvisionalSearch}
+import {InvalidProvisionalQuery,provisionalCandleObservations,tursoProvisionalSearch}
   from '../worker/src/turso-provisional-search.ts';
 
 const env={TURSO_DATABASE_URL:'libsql://test.invalid',TURSO_AUTH_TOKEN:'dummy'};
@@ -11,7 +11,12 @@ function fixture({table=true}={}){
   const db=new DatabaseSync(':memory:'),sql=[];
   db.exec(`CREATE TABLE blue_eod_ingest_audit_v1
     (trade_day TEXT PRIMARY KEY,row_count INTEGER);
-    INSERT INTO blue_eod_ingest_audit_v1 VALUES('2026-11-19',2660);`);
+    INSERT INTO blue_eod_ingest_audit_v1 VALUES('2026-11-19',2660);
+    CREATE TABLE blue_eod_daily_v1(trade_day TEXT,code TEXT,high INTEGER,volume INTEGER);`);
+  const eod=db.prepare('INSERT INTO blue_eod_daily_v1 VALUES(?,?,?,?)');
+  eod.run('2026-11-19','005930',71500,50000);
+  eod.run('2026-11-19','000660',210000,12000);
+  for(let i=2;i<2660;i++)eod.run('2026-11-19',String(100000+i),100,1);
   if(table){
     db.exec(`CREATE TABLE blue_kis_provisional_daily_v1 (
       trade_day TEXT,code TEXT,market TEXT,name TEXT,open INTEGER,high INTEGER,
@@ -50,6 +55,9 @@ test('same-day saved KIS prices are fast, read-only, and explicitly partial',asy
   assert.equal(result.total,2);assert.equal(result.items.length,2);
   assert.equal(result.items[0].code,'005930');
   assert.equal(result.items[0].pattern_confirmed,false);
+  assert.equal(result.observation_preview,true);
+  assert.deepEqual(result.items[0].observations,
+    ['UP_CANDLE','NEAR_HIGH','ABOVE_REFERENCE_HIGH','DOUBLE_REFERENCE_VOLUME']);
   assert.ok(f.sql.every(sql=>!/(?:INSERT|UPDATE|DELETE|D1|GITHUB_TOKEN|tokenP)/i.test(sql)));
 });
 
@@ -75,12 +83,21 @@ test('previous dates, invalid paging, and injected query text are rejected',asyn
   }
 });
 
+test('candle previews exclude full BLUE signals and require an audited baseline',async()=>{
+  assert.deepEqual(provisionalCandleObservations({open:9,high:10,low:8,price:9,volume:200},null),[]);
+  const f=fixture();
+  const db=f.factory();
+  // Baseline completeness is checked before the provisional table is read.
+  assert.ok((await tursoProvisionalSearch(env,
+    new URLSearchParams({date:'2026-11-20'}),()=>db,now)).observation_preview);
+});
+
 test('API route and PWA label provisional data separately from verified research',()=>{
   const api=readFileSync(new URL('../worker/src/index.ts',import.meta.url),'utf8');
   const web=readFileSync(new URL('../web/src/main.tsx',import.meta.url),'utf8');
   const card=readFileSync(new URL('../web/src/TursoProvisionalToday.tsx',import.meta.url),'utf8');
   assert.match(api,/\/api\/research\/provisional/);
-  assert.match(web,/queryDate===todayKST\(\)&&!eodRequestReadyKST\(\)/);
+  assert.match(web,/queryDate===todayKST\(\)&&provisionalWindowKST\(\)/);
   assert.match(web,/TursoProvisionalToday/);
-  assert.match(card,/실시간 전체시장·오늘 발생한 기술 패턴·확정 종가가 아닙니다/);
+  assert.match(card,/KIS 미확정 관측값/);
 });

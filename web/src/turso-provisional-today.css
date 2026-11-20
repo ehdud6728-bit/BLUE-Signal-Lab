@@ -9,4 +9,5 @@
 .blue-provisional-row small{display:block;margin-top:3px}
 .blue-provisional-price{text-align:right;white-space:nowrap}
 .blue-provisional-warning{margin:10px 0 0;font-size:12px;line-height:1.6;color:#6e5670}
+.blue-provisional-observations{color:#2356a2!important;font-weight:600;white-space:normal}
 @media(max-width:480px){.blue-provisional{padding:10px}.blue-provisional-row{padding:8px}.blue-provisional-row strong{font-size:12px}.blue-provisional-price strong{font-size:13px}}

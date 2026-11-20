@@ -20,7 +20,10 @@ export default {
       ctx.waitUntil(collectTursoProvisional(env,directNow)
         .then(result=>console.log('BLUE_TURSO_PROVISIONAL status='+result.status+
           ' phase='+(result.phase||'NONE')+
-          ' saved='+(result.saved||0)+' rejected='+(result.rejected||0)))
+          ' attempted='+(result.attempted||0)+
+          ' saved='+(result.saved||0)+' rejected='+(result.rejected||0)+
+          ' reasons='+Object.entries(result.reasons||{})
+            .map(([key,value])=>key+':'+value).join(',').slice(0,240)))
         .catch(()=>console.warn('BLUE_TURSO_PROVISIONAL_FAILED')));
     }else if(tursoDirectMode(env,directNow)!=='OFF'){
       ctx.waitUntil(collectTursoDirect(env,directNow)

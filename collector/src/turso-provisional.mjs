@@ -22,6 +22,13 @@ const POST_CLOSE_END=22*3600;
 const CODE=/^[0-9A-Z]{6}$/;
 const DAY=/^20\d{2}-\d{2}-\d{2}$/;
 const sleep=ms=>new Promise(resolve=>setTimeout(resolve,ms));
+// Only bounded, code-only diagnostics. Never log provider bodies, URLs or tokens.
+const QUOTE_ERRORS=new Set(['KIS_RATE_LIMIT','KIS_DAILY_EXACT_DATE_MISSING',
+  'KIS_DAILY_RESPONSE_INVALID','KIS_DAILY_HTTP_UNAVAILABLE',
+  'KIS_RESPONSE_INVALID','QUOTE_MISSING_FIELD','QUOTE_INCONSISTENT',
+  'PROVIDER_TRADE_DAY_MISMATCH','KIS_DAILY_DATE_MISSING',
+  'INVALID_PROVISIONAL_OPEN']);
+const quoteReason=e=>QUOTE_ERRORS.has(e?.message)?e.message:'OTHER_QUOTE_REJECTED';
 
 export function tursoProvisionalMode(env,now=new Date()){
   if(String(env?.TURSO_PROVISIONAL_PAUSED||'false').toLowerCase()==='true')return 'OFF';
@@ -168,9 +175,12 @@ export async function collectTursoProvisional(env,now=new Date(),deps={}){
       await tursoDirectCachedToken(client,env,now);
     if(!found.token)return {status:found.status==='READY'?'TURSO_TOKEN_MISSING':found.status,asof:day};
     const quotes=[];let rejected=0,previous=0,rateLimited=false;
+    const reasons={};
     for(const r of selected.rows){
       const code=String(r.code||''),close=Number(r.close);
-      if(!CODE.test(code)||!Number.isSafeInteger(close)||close<=0){rejected++;continue;}
+      if(!CODE.test(code)||!Number.isSafeInteger(close)||close<=0){
+        rejected++;reasons.INVALID_REFERENCE_SYMBOL=(reasons.INVALID_REFERENCE_SYMBOL||0)+1;continue;
+      }
       if(previous&&!deps.noPacing)await (deps.sleep||sleep)(450);
       previous++;
       try{
@@ -194,7 +204,8 @@ export async function collectTursoProvisional(env,now=new Date(),deps={}){
         quotes.push(q);
       }catch(e){
         rejected++;
-        if(e instanceof Error&&e.message==='KIS_RATE_LIMIT'){
+        const reason=quoteReason(e);reasons[reason]=(reasons[reason]||0)+1;
+        if(reason==='KIS_RATE_LIMIT'){
           rateLimited=true;break; // do NOT retry a throttled provider immediately.
         }
       }
@@ -210,7 +221,7 @@ export async function collectTursoProvisional(env,now=new Date(),deps={}){
         args:[kst.date,nextCap,cooldown]});
     }
     if(!quotes.length)return {status:rateLimited?'KIS_RATE_LIMIT_BACKOFF':'NO_VALID_QUOTES',asof:day,page,
-      attempted:previous,rejected,rate_limited:rateLimited};
+      attempted:previous,rejected,rate_limited:rateLimited,reasons};
     // No confirmed EOD/research/audit table is modified by these statements.
     await client.execute(`CREATE TABLE IF NOT EXISTS blue_kis_provisional_daily_v1 (
       trade_day TEXT NOT NULL,code TEXT NOT NULL,market TEXT NOT NULL,
@@ -223,6 +234,6 @@ export async function collectTursoProvisional(env,now=new Date(),deps={}){
     return {status:rateLimited?'SAVED_WITH_KIS_COOLDOWN':'SAVED',mode,asof:day,trade_day:kst.date,
       phase:afterClose?'KRX_POST_CLOSE':'KRX_REGULAR',
       page,pages,attempted:previous,saved:quotes.length,rejected,
-      rate_limited:rateLimited,batch_cap:batchCap};
+      rate_limited:rateLimited,batch_cap:batchCap,reasons};
   }finally{client.close();}
 }

@@ -2,6 +2,15 @@
 
 새 채팅에서 프로젝트를 이어가기 위한 **결정/구현/검증 이력**입니다. 대화 전체를 저장하지 않고 실제 개발에 필요한 내용만 보존합니다. 최신 항목을 위에 추가하고, 결과가 달라지면 추측 대신 검증된 상태로 수정합니다.
 
+## 2026-11-20 (KST) — KRX 미확정 → KIS 잠정 일봉·관찰 연결 (PR 준비)
+
+- **사용자 정정:** 미확정 KRX EOD에 대해 KRX만 반복 `dry_run`할 것이 아니라 이전에 합의한 KIS 대체 자료를 사용해야 한다. KRX 전체시장 검증/확정 신호 안전 규칙은 유지.
+- **작업:** 일일 통합 워크플로의 KRX 실패를 감지, 확인된 Turso KIS 잠정 행만 읽기 전용 감사하여 `KIS_PARTIAL_PROVISIONAL` 또는 명시적 실패로 기록. 기존 EOD만 확인되어도 연구 완료는 아니므로 KIS 잠정 성공으로 위장하지 않음. KRX가 실패하면 확정 EOD·전체 종목 지표·R1.1 패턴 쓰기 모두 건너뜀. 검색 요청 상태에서도 KIS 분기 성공을 확정 `READY`/불명확한 실패와 분리(`PROVISIONAL`).
+- **KIS 0건 진단:** 기존 Collector의 09:00~22:00 KST OPT-IN 수집·기존 암호화 토큰 재사용·FULL 안전 감속은 유지하면서, `NO_VALID_QUOTES` 사유를 허용된 코드별 횟수로 기록하고 Collector 로그에 시도/저장/거절 건수 출력. 실제 0건의 운영 원인을 확인했다는 뜻은 아님. 운영 플래그 기본 OFF, 외부 토큰 발급/시세 수집을 실행하지 않음.
+- **임시 관찰 UI:** 감사 완료 기준 EOD 실물 행수 대조 후에만 잠정 단일 일봉의 양봉/고가권/기준일 고가 돌파/거래량 2배를 순수 계산해 함께 보여 줌. `pattern_analysis:false`/`pattern_confirmed:false`, 날짜·원천·실제 수집 범위 표시. PWA는 22시 전 KRX 미분석 오늘 날짜를 KIS 잠정으로 먼저 안내. 5·10일 성과/RSI·MACD·GC/AI 매수 추천을 생성하지 않음.
+- **검증:** 무비밀 Collector/KIS/Turso 보안 회귀 Node **79/79**, 웹/API/진행 상태 회귀 Node **69/69**, 웹 TypeScript·Vite 빌드, API·Collector Wrangler `--dry-run`, 통합 EOD Workflow YAML 파싱·쓰기 차단 정적 검사 및 `git diff --check` 로컬 통과. PR 원격 CI는 게시 후 별도 확인. 본 PR 코드 변경만 진행하며 GitHub Actions 운영 실행, Turso/D1 쓰기, KIS API/토큰 재발급, Cloudflare 배포·FULL 활성화는 하지 않음. [운영 안내](KIS_PROVISIONAL_FALLBACK_RUNBOOK.md).
+- **다음:** PR CI→사용자 병합→별도 승인 Worker/API/PWA 배포→Collector 플래그 읽기 전용 확인→실거래일 15/30분 파일럿 및 안전 사유 코드 확인→KIS 정상/계정 쿼터 확인 후 사용자 별도 승인으로 FULL. KRX 확정 원천이 들어오면 기존 불변 EOD 및 R1.1 전체시장 연구 적용. KIS가 0건이면 `KIS_PROVISIONAL_NOT_AVAILABLE` 그대로 남긴다.
+
 ## 2026-11-20 (KST) — KRX 정확일 검증 실패 원인 로그 복구 (PR 준비)
 
 - **실제 실행:** [하루 통합 `dry_run` #44724278090](https://github.com/ehdud6728-bit/BLUE-Signal-Lab/actions/runs/44724278090)에서 2026-11-20 20:03 KST KRX 원천 조회까지 도달. KOSPI 횡단면 **935개 중 실제 거래 912개, 무거래 23개, 영문 포함 코드 27개**를 수신했으나 정확일 독립 검증 또는 대체 KRX Open API까지 포함한 단계에서 `SourcePending` 중단. 병렬 패턴 스캔·Turso EOD/신호 쓰기는 **시작 전 미실행**. KOSDAQ·시장 합산·정확일 확인은 통과했다고 주장하지 않음.

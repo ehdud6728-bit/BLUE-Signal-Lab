@@ -88,6 +88,8 @@ async function githubResearchStage(env:Env,runId:number,fetcher:Fetcher){
     const steps=payload.jobs?.find(job=>job.name==='daily_eod')?.steps;
     if(!steps?.length)return 'RUNNING';
     const finished=(name:string)=>steps.some(step=>step.name===name&&step.conclusion==='success');
+    if(finished('On KRX failure audit already saved KIS observations without writing EOD'))
+      return 'KIS_PROVISIONAL';
     if(finished('Save research only after Turso EOD audit and exact close match'))return 'VERIFYING';
     if(finished('Scan full market patterns for the SAME verified KST date'))return 'SAVING';
     if(finished('Write verified KRX EOD into Turso only and audit read-back'))return 'RESEARCH';
@@ -160,6 +162,11 @@ export async function tursoResearchRequestStatus(env:Env,day:string,{
       gh.html_url:null;
     if(gh?.status==='completed'&&gh.conclusion!=='success')return {
       status:'FAILED',day,reason:'GitHub Actions 분석 실행이 실패했습니다.',actions_url};
+    if(gh?.status==='completed'&&gh.conclusion==='success'&&
+      await githubResearchStage(env,gh.id||0,fetcher)==='KIS_PROVISIONAL')return {
+      status:'PROVISIONAL',day,
+      reason:'KRX 확정 검증은 보류됐습니다. KIS 잠정 시세만 별도 저장·조회되며 확정 BLUE 패턴은 아직 없습니다.',
+      actions_url};
     if(gh?.status==='completed'&&gh.conclusion==='success'&&
       now.getTime()-Date.parse(gh.updated_at||'')>120000)return {
       status:'FAILED',day,reason:'Actions 완료 후 Turso 패턴 기록이 확인되지 않습니다.',actions_url};

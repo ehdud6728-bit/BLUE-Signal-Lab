@@ -214,8 +214,18 @@ test('post-close rejects missing or stale business dates and never fabricates to
         quoteDaily:async()=>quote({stck_bsop_date:businessDate})}));
     assert.equal(result.status,'NO_VALID_QUOTES');
     assert.equal(result.rejected,2);
+    assert.equal(result.reasons.KIS_DAILY_DATE_MISSING??result.reasons.PROVIDER_TRADE_DAY_MISMATCH,2);
     assert.equal(state.batches.length,0);
   }
+});
+
+test('zero valid KIS quotes expose sanitized reason counts, never raw provider text',async()=>{
+  const {db}=mockDb();
+  const result=await collectTursoProvisional(env({TURSO_PROVISIONAL_QUOTES_ENABLED:'true'}),
+    POST_CLOSE,deps(db,{quoteDaily:async()=>{throw Error('KIS_DAILY_EXACT_DATE_MISSING');}}));
+  assert.equal(result.status,'NO_VALID_QUOTES');
+  assert.equal(result.attempted,2);
+  assert.deepEqual(result.reasons,{KIS_DAILY_EXACT_DATE_MISSING:2});
 });
 
 test('incomplete EOD audit or stale reference fails closed before any provider request',async()=>{
