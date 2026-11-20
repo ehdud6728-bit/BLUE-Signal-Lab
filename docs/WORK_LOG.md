@@ -2,6 +2,14 @@
 
 새 채팅에서 프로젝트를 이어가기 위한 **결정/구현/검증 이력**입니다. 대화 전체를 저장하지 않고 실제 개발에 필요한 내용만 보존합니다. 최신 항목을 위에 추가하고, 결과가 달라지면 추측 대신 검증된 상태로 수정합니다.
 
+## 2026-11-20 (KST) — 감사 원장 기준 미수집 KRX 거래일 자동 탐색·순차 저장 PR 준비
+
+- **요청/문제:** 수동 11/11~11/12 `apply` [#44696224417](https://github.com/ehdud6728-bit/BLUE-Signal-Lab/actions/runs/44696224417)은 `confirm_write` 빈값으로 가드에서 중단되어 저장 0건. 이전 4일 적용 [#44683473485](https://github.com/ehdud6728-bit/BLUE-Signal-Lab/actions/runs/44683473485)은 11/10 불변 연구 감사 해시 충돌로 뒤 날짜 연구 저장을 진행하지 못했음. 사용자는 일일이 날짜 선택하지 않고 **미수집 날짜만 차례대로 저장**하는 운영을 선호.
+- **개발:** `scripts/turso_missing_history_guard.py`(main/최대5일/2년 범위/쓰기 승인), `scripts/turso_history_sessions.py`(KRX 지수 실제 세션으로 휴장일 제외), `tools/turso/missing-history-plan.mjs`(Turso SELECT 0쓰기, EOD/패턴 감사 별도 비교, 충돌/부분 기록 격리), `.github/workflows/blue_turso_missing_history_backfill.yml`(원장 기반 오래된 미수집 거래일 5개 한정, 기존 불변 importer로 날짜별 독립 재생/오류 시 다음 날짜 진행) 및 단위 테스트. 기존 과거 워크플로·저장 레코드·D1/KIS·전체 종목 지표 옵션은 변경하지 않음.
+- **운영 권한:** 수동 `apply`는 `blue-turso-missing-history-apply`, 매일 05:00 KST 스케줄은 저장소 변수 2개 모두 일치해야 허용. 기본 OFF. 로컬 테스트 외 GitHub Actions 실행/운영 DB 연결·쓰기/변수 활성화 미실행. [실행 방법](TURSO_MISSING_HISTORY_BACKFILL_RUNBOOK.md).
+- **검증:** 신규 Node 단위 테스트 **4/4**, Python 단위 테스트 **5/5** 로컬 통과. CI·실제 KRX 세션 대량 조회·실 Turso 감사 결과는 병합 후 확인할 단계이며 원격 저장 성공이라고 기록하지 않음.
+- **다음:** PR CI → 사용자 병합 → 첫 `audit`에서 실제 미수집·충돌 목록 조회 → 수동 `apply` 1회 확인 → Turso 저장 용량 및 경고 확인 후 별도 사용자 결정으로 자동 예약 변수 활성화 → 장기 표본 기반 익절·손절 후속 연구.
+
 ## 2026-11-20 (KST) — 과거 분석 KRX EOD/패턴 원천 불일치 제거 (PR 준비)
 
 - **실행 근거:** PR #57 병합 커밋 `239c2418390fe7275a255a9582afdcebb4279b6a`, [History Replay `dry_run` #44667107812](https://github.com/ehdud6728-bit/BLUE-Signal-Lab/actions/runs/44667107812) 전체 job 성공. 정확한 KRX EOD 11/09~12 각 2,660·2,662·2,665·2,664건(**10,651종목·일**), 기존 R1.1 패턴은 각 155·238·283·122건(**798종목·일**); 모두 `written=0`. EOD/패턴/지표 원격 쓰기 단계 skipped. 로그 아티팩트 업로드 성공.
