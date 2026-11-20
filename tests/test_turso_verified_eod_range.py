@@ -8,7 +8,8 @@ import unittest
 import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
-from turso_verified_eod_range import build_range, canonical_day, target_dates, openapi_full_day
+from turso_verified_eod_range import (build_range, canonical_day, target_dates,
+                                      openapi_full_day, safe_block_reason, SourcePending)
 
 
 NOW = datetime(2026, 11, 18, 9, 0, tzinfo=timezone.utc)
@@ -26,6 +27,27 @@ def fake_day(day):
 
 
 class VerifiedEodRangeTests(unittest.TestCase):
+    def test_combined_provider_failure_reports_both_reasons_safely(self):
+        blocked = SourcePending(
+            'KRX_BOTH_PROVIDERS_PENDING: 2026-11-20 '
+            'primary=KRX_EXACT_DAY_UNVERIFIED: KOSPI; '
+            'alternate=KRX_DATE_NOT_AVAILABLE: 2026-11-20 KOSDAQ')
+        self.assertEqual(safe_block_reason(blocked),
+                         'KRX_BOTH_PROVIDERS_PENDING DAY=2026-11-20 '
+                         'PRIMARY=KRX_EXACT_DAY_UNVERIFIED:KOSPI '
+                         'ALTERNATE=KRX_DATE_NOT_AVAILABLE:KOSDAQ')
+
+    def test_failure_reason_hides_untrusted_provider_body_and_secrets(self):
+        message = 'KRX_OPENAPI_UNAVAILABLE: KOSPI sensitive_token=secret_value'
+        self.assertEqual(safe_block_reason(SourcePending(message)),
+                         'KRX_OPENAPI_UNAVAILABLE:KOSPI')
+        self.assertEqual(safe_block_reason(ValueError('INCOMPLETE_KRX_DAILY')),
+                         'INCOMPLETE_KRX_DAILY')
+        self.assertEqual(safe_block_reason(OSError('Request with credential secret_value')),
+                         'OSError')
+        self.assertEqual(safe_block_reason(ValueError('https://provider/?key=secret')),
+                         'UNCLASSIFIED_SOURCE_FAILURE')
+
     def test_requested_window_has_eight_weekdays(self):
         result = target_dates(date(2026, 11, 9), date(2026, 11, 18), NOW)
         self.assertEqual(len(result), 8)

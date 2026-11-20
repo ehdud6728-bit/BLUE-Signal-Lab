@@ -31,6 +31,37 @@ MAX_CALENDAR_DAYS = 10
 MIN_DAY_ROWS = 1700
 MAX_DAY_ROWS = 10000
 LIMIT = (1 << 63) - 1
+PENDING_CODE = re.compile(r"\A([A-Z][A-Z0-9_]+)(?::|\Z)")
+PROVIDER_PAIR = re.compile(
+    r"\AKRX_BOTH_PROVIDERS_PENDING: (?P<day>\d{4}-\d{2}-\d{2}) "
+    r"primary=(?P<primary>.+); alternate=(?P<alternate>.+)\Z"
+)
+
+
+def safe_block_reason(exc: Exception) -> str:
+    """Print only in-repository error codes, never vendor response bodies/keys.
+
+    The former uppercase-only output filter silently hid the actual combined
+    KRX error because its labels were lowercase `primary=` and `alternate=`.
+    The code-only projection retains both failing providers without leaking
+    raw exception arguments, transport URLs or account information.
+    """
+    def code(raw: str) -> str:
+        match = PENDING_CODE.match(raw)
+        if not match:
+            return "UNCLASSIFIED_SOURCE_FAILURE"
+        market = re.search(r"\b(KOSPI|KOSDAQ|KOSPI_INDEX)\b", raw)
+        return match.group(1) + (":" + market.group(1) if market else "")
+
+    if not isinstance(exc, (SourcePending, ValueError)):
+        return type(exc).__name__
+    message = str(exc)
+    both = PROVIDER_PAIR.fullmatch(message)
+    if both:
+        return (f"KRX_BOTH_PROVIDERS_PENDING DAY={both.group('day')} "
+                f"PRIMARY={code(both.group('primary'))} "
+                f"ALTERNATE={code(both.group('alternate'))}")
+    return code(message)
 
 
 def target_dates(start: date, end: date, now: datetime) -> list[date]:
@@ -210,9 +241,6 @@ if __name__ == "__main__":
     try:
         main()
     except (SourcePending, ValueError, OSError) as exc:
-        # No account identifiers or untrusted provider response bodies.
-        message = str(exc)
-        if not re.fullmatch(r"[A-Z0-9_:\s;=.,-]+", message):
-            message = type(exc).__name__
-        print("BLUE_TURSO_EOD_RANGE_BLOCKED", message)
+        # Report precise classified provider reasons without untrusted text.
+        print("BLUE_TURSO_EOD_RANGE_BLOCKED", safe_block_reason(exc))
         raise SystemExit(1) from None
