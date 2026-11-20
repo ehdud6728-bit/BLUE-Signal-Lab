@@ -22,6 +22,8 @@ on:
       - 'web/src/TursoAiReadiness.tsx'
       - 'web/src/TursoPatternPulse.tsx'
       - 'web/src/turso-pattern-pulse.css'
+      - 'web/src/TursoExitStudy.tsx'
+      - 'web/src/turso-exit-study.css'
       - 'web/src/turso-ai-readiness.css'
       - 'web/src/TursoResearchProgress.tsx'
       - 'web/src/turso-research-progress.ts'

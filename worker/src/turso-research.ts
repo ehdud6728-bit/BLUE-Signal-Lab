@@ -156,6 +156,40 @@ export async function tursoPatternPulse(env:ResearchEnv,factory?:Factory){
   },factory);
 }
 
+/** Latest opt-in published exploratory backtest summary; never query D1 or
+ * compute a historical million-bar simulation during a browser request. */
+export async function tursoExitStudyReport(env:ResearchEnv,factory?:Factory){
+  return withClient(env,async client=>{
+    const tables=await client.execute(`SELECT name FROM sqlite_master WHERE type='table'
+      AND name='blue_pattern_exit_reports_v1' LIMIT 1`);
+    const empty={storage:'TURSO',status:'NOT_PUBLISHED',report:null,
+      note:'과거 데이터·기업행동·거래일 연속성 검증 후 연구 결과를 수동 게시할 수 있습니다.'};
+    if(!tables.rows.length)return empty;
+    const records=await client.execute(`SELECT asof_day,report_json,report_sha256
+      FROM blue_pattern_exit_reports_v1 ORDER BY asof_day DESC LIMIT 1`);
+    if(!records.rows.length)return empty;
+    const row=records.rows[0],raw=String(row.report_json);
+    if(raw.length>1500000||!/^[a-f0-9]{64}$/.test(String(row.report_sha256)))
+      throw Error('INVALID_TURSO_EXIT_REPORT');
+    const report=JSON.parse(raw);
+    if(report.schema!=='BLUE_TURSO_PATTERN_EXIT_REPORT_V1'||report.storage!=='TURSO'||
+      report.asof_day!==String(row.asof_day)||!dayValid(report.asof_day)||
+      !Number.isSafeInteger(report.eod_audited_days)||
+      !Number.isSafeInteger(report.research_audited_days)||
+      !Array.isArray(report.short_and_long_windows)||
+      report.short_and_long_windows.map((r:{sessions:number})=>r.sessions).join(',')!==
+        '5,10,20,60,120,250,500'||
+      report.investment_recommendation_enabled!==false||
+      !Array.isArray(report.candidate_stocks)||report.candidate_stocks.length!==0||
+      report.trading_calendar_verified!==false||
+      report.corporate_actions_verified!==false||
+      report.market_and_sector_benchmark_verified!==false)
+      throw Error('INVALID_TURSO_EXIT_REPORT');
+    return {storage:'TURSO',status:'EXPLORATORY_ONLY',report,
+      note:'독립 검증 전 탐색 연구입니다. 매매 추천과 달리 출현·성숙 표본·익절·손절 관측 결과만 표시합니다.'};
+  },factory);
+}
+
 export async function tursoResearchSearch(env:ResearchEnv,p:URLSearchParams,factory?:Factory){
   const mode=p.get('mode')||'single';if(!['single','range'].includes(mode))bad();
   const start=mode==='single'?(p.get('date')||''):(p.get('start')||'');

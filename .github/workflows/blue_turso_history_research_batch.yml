@@ -1,0 +1,168 @@
+name: BLUE Turso Bounded History + Pattern Replay (MANUAL)
+
+on:
+  workflow_dispatch:
+    inputs:
+      start_day:
+        description: 'First exact KST historical day YYYY-MM-DD (at most 7 calendar days)'
+        type: string
+        required: true
+      end_day:
+        description: 'Last exact KST historical day YYYY-MM-DD (past dates only)'
+        type: string
+        required: true
+      mode:
+        description: 'plan: offline, dry_run: KRX verification, apply: explicitly write audited EOD + research'
+        type: choice
+        options: [plan, dry_run, apply]
+        default: plan
+        required: true
+      confirm_write:
+        description: 'For apply: blue-turso-history-YYYY-MM-DD-YYYY-MM-DD (exact selected dates)'
+        type: string
+        default: ''
+        required: false
+      include_indicators:
+        description: 'Independently opt in to FULL market indicators; potentially large storage impact'
+        type: boolean
+        default: false
+        required: true
+      confirm_indicators:
+        description: 'For apply + include_indicators: blue-turso-all-indicators'
+        type: string
+        default: ''
+        required: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: blue-turso-eod-research-writer
+  cancel-in-progress: false
+
+jobs:
+  history:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+      - name: Guard main branch, historical range and explicit permission
+        id: guard
+        env:
+          HISTORY_START: ${{ inputs.start_day }}
+          HISTORY_END: ${{ inputs.end_day }}
+          HISTORY_MODE: ${{ inputs.mode }}
+          HISTORY_CONFIRM: ${{ inputs.confirm_write }}
+          HISTORY_INDICATORS: ${{ inputs.include_indicators }}
+          HISTORY_INDICATORS_CONFIRM: ${{ inputs.confirm_indicators }}
+        run: python3 scripts/turso_history_batch_guard.py
+      - name: Test bounded manual guard
+        run: python3 -m unittest discover -s tests -p 'test_turso_history_batch_guard.py' -v
+      - uses: actions/setup-python@v5
+        if: inputs.mode != 'plan'
+        with:
+          python-version: '3.11'
+      - name: Install exact-day price and pattern research dependencies
+        if: inputs.mode != 'plan'
+        run: python -m pip install pandas numpy pyarrow requests 'cryptography>=43,<48' 'pykrx==1.2.9'
+      - uses: actions/setup-node@v4
+        if: inputs.mode != 'plan'
+        with:
+          node-version: '22'
+      - name: Install Turso importer without lifecycle scripts
+        if: inputs.mode != 'plan'
+        working-directory: tools/turso
+        run: npm install --no-audit --no-fund --ignore-scripts --no-package-lock
+      - name: Test exact-date source and immutable Turso writers once per batch
+        if: inputs.mode != 'plan'
+        run: |
+          python -m unittest discover -s tests -p 'test_turso_verified_eod_range.py' -v
+          python -m unittest discover -s tests -p 'test_turso_signal_snapshot_export.py' -v
+          node --test tools/turso/eod-range-import.test.mjs \
+            tools/turso/signal-snapshot-import.test.mjs \
+            tools/turso/indicator-snapshot-import.test.mjs
+      - name: Preflight all exact-day EOD sources (no DB writes)
+        if: inputs.mode != 'plan'
+        env:
+          START: ${{ inputs.start_day }}
+          END: ${{ inputs.end_day }}
+          KRX_AUTH_KEY: ${{ secrets.KRX_AUTH_KEY }}
+          KRX_ID: ${{ secrets.KRX_DATA_ID || secrets.KRX_ID }}
+          KRX_PW: ${{ secrets.KRX_DATA_PW || secrets.KRX_PW }}
+          KRX_DATA_ID: ${{ secrets.KRX_DATA_ID || secrets.KRX_ID }}
+          KRX_DATA_PW: ${{ secrets.KRX_DATA_PW || secrets.KRX_PW }}
+        run: |
+          set -euo pipefail
+          python scripts/turso_verified_eod_range.py --start "$START" --end "$END" \
+            --provider auto --out output/history/eod
+          node tools/turso/eod-range-import.mjs --mode=dry_run --input-dir=output/history/eod
+      - name: Preflight every SAME-day market scan and immutable research snapshot
+        if: inputs.mode != 'plan'
+        env:
+          DAYS: ${{ steps.guard.outputs.days }}
+          INCLUDE_INDICATORS: ${{ inputs.include_indicators }}
+          KRX_AUTH_KEY: ${{ secrets.KRX_AUTH_KEY }}
+          KRX_ID: ${{ secrets.KRX_DATA_ID || secrets.KRX_ID }}
+          KRX_PW: ${{ secrets.KRX_DATA_PW || secrets.KRX_PW }}
+          KRX_DATA_ID: ${{ secrets.KRX_DATA_ID || secrets.KRX_ID }}
+          KRX_DATA_PW: ${{ secrets.KRX_DATA_PW || secrets.KRX_PW }}
+        run: |
+          set -euo pipefail
+          for DAY in $DAYS; do
+            INDICATOR_ARGS=()
+            if [[ "$INCLUDE_INDICATORS" == 'true' ]]; then
+              INDICATOR_ARGS+=(--turso-indicators-out "output/history/$DAY/indicators")
+            fi
+            python scripts/market_scan_r11.py --date "$DAY" --years 2 \
+              --daily-provider auto --out "output/history/$DAY/source" "${INDICATOR_ARGS[@]}"
+            python scripts/export_turso_signal_snapshot.py \
+              --input-dir "output/history/$DAY/source" --out "output/history/$DAY/signals"
+            node tools/turso/signal-snapshot-import.mjs --mode=dry_run \
+              --input-dir="output/history/$DAY/signals"
+            if [[ "$INCLUDE_INDICATORS" == 'true' ]]; then
+              node tools/turso/indicator-snapshot-import.mjs --mode=dry_run \
+                --input-dir="output/history/$DAY/indicators"
+            fi
+          done
+      - name: Persist EOD only after every selected day passed source verification
+        if: inputs.mode == 'apply'
+        env:
+          TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
+          TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
+        run: node tools/turso/eod-range-import.mjs --mode=apply --input-dir=output/history/eod
+      - name: Persist strictly verified research snapshots without D1
+        if: inputs.mode == 'apply'
+        env:
+          DAYS: ${{ steps.guard.outputs.days }}
+          TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
+          TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
+        run: |
+          set -euo pipefail
+          for DAY in $DAYS; do
+            node tools/turso/signal-snapshot-import.mjs --mode=apply \
+              --input-dir="output/history/$DAY/signals"
+          done
+      - name: Persist ALL market indicators only with separate operator opt-in
+        if: inputs.mode == 'apply' && inputs.include_indicators
+        env:
+          DAYS: ${{ steps.guard.outputs.days }}
+          TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
+          TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
+        run: |
+          set -euo pipefail
+          for DAY in $DAYS; do
+            node tools/turso/indicator-snapshot-import.mjs --mode=apply \
+              --input-dir="output/history/$DAY/indicators"
+          done
+      - name: Preserve bounded date/source proof
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: BLUE_TURSO_HISTORY_${{ github.run_id }}
+          path: |
+            output/history/eod/manifest.json
+            output/history/*/source/AUDIT.json
+            output/history/*/signals/manifest.json
+            output/history/*/indicators/manifest.json
+          retention-days: 14
+          if-no-files-found: ignore
