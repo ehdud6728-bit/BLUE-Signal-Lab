@@ -10,7 +10,7 @@ import {lookupSymbolAnalysis,lookupSymbolDirectory,validAnalysisCode} from './sy
 import {lookupSymbolLive,requestSymbolLive,validLiveCode} from './symbol-live';
 import {runEodCloudflareCron} from './eod-cron';
 import {InvalidEodQuery,tursoEodDates,tursoEodSearch,tursoEodCompare} from './turso-eod';
-import {InvalidResearchQuery,tursoResearchDates,tursoResearchSearch,tursoResearchChart} from './turso-research';
+import {InvalidResearchQuery,tursoResearchDates,tursoResearchSearch,tursoResearchChart,tursoResearchCoverage} from './turso-research';
 import {InvalidTursoResearchRequest,requestTursoResearch,tursoResearchRequestStatus} from './turso-research-request';
 interface Env {
   DB: D1Database;
@@ -124,6 +124,10 @@ export default {
       if(p==='/api/research/dates'&&request.method==='GET'){
         try{return respond(await tursoResearchDates(env));}
         catch{return respond({error:'TURSO_RESEARCH_UNAVAILABLE',fallback:'D1'},503);}
+      }
+      if(p==='/api/research/coverage'&&request.method==='GET'){
+        try{return respond(await tursoResearchCoverage(env));}
+        catch{return respond({error:'TURSO_RESEARCH_COVERAGE_UNAVAILABLE'},503);}
       }
       if(p==='/api/research/search'&&request.method==='GET'){
         try{return respond(await tursoResearchSearch(env,u.searchParams));}

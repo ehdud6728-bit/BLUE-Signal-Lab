@@ -49,6 +49,37 @@ export async function tursoResearchDates(env:ResearchEnv,factory?:Factory){
   },factory);
 }
 
+/** A cheap, read-only coverage inventory for the AI research workbench.
+ * These are audit-ledger counts, NOT proof of contiguous bars, mature outcomes,
+ * sector coverage, or an investable backtest. Never query D1 here.
+ */
+export async function tursoResearchCoverage(env:ResearchEnv,factory?:Factory){
+  return withClient(env,async client=>{
+    const eod=await client.execute(`SELECT COUNT(*) AS days,MIN(trade_day) AS first_day,
+      MAX(trade_day) AS last_day,COALESCE(SUM(row_count),0) AS declared_rows
+      FROM blue_eod_ingest_audit_v1 WHERE row_count>=1700 AND row_count<=10000`);
+    const research=await client.execute(`SELECT COUNT(*) AS days,MIN(trade_day) AS first_day,
+      MAX(trade_day) AS last_day,COALESCE(SUM(row_count),0) AS declared_rows
+      FROM blue_research_signal_audit_v1 WHERE observed_stocks>=1700 AND row_count>=0`);
+    const toStats=(r:typeof eod.rows[number])=>({
+      audited_days:Number(r.days),first_day:r.first_day==null?null:String(r.first_day),
+      last_day:r.last_day==null?null:String(r.last_day),declared_rows:Number(r.declared_rows)});
+    const a=toStats(eod.rows[0]),b=toStats(research.rows[0]);
+    if([a,b].some(x=>!Number.isSafeInteger(x.audited_days)||x.audited_days<0||
+      !Number.isSafeInteger(x.declared_rows)||x.declared_rows<0||
+      (x.first_day!==null&&!dayValid(x.first_day))||
+      (x.last_day!==null&&!dayValid(x.last_day))||
+      (x.first_day!==null&&x.last_day!==null&&x.first_day>x.last_day)))
+      throw Error('TURSO_COVERAGE_INVALID_AUDIT');
+    return {storage:'TURSO',status:'AUDIT_COUNTS_ONLY',eod:a,research:b,
+      readiness:a.audited_days<140||b.audited_days<120?'INSUFFICIENT_FOR_RECENT_EXIT_RESEARCH':
+        'GAP_AND_OUTCOME_VALIDATION_REQUIRED',
+      goals:{rolling_windows:[20,60,120],eod_audited_days_min:140,
+        research_audited_days_min:120,history_target_days:250},
+      note:'감사 원장 집계만 확인했습니다. 거래일 연속성·실제 행수·수정주가·지수/업종·완성된 미래 성과·독립 검증은 별도 확인이 필요합니다.'};
+  },factory);
+}
+
 export async function tursoResearchSearch(env:ResearchEnv,p:URLSearchParams,factory?:Factory){
   const mode=p.get('mode')||'single';if(!['single','range'].includes(mode))bad();
   const start=mode==='single'?(p.get('date')||''):(p.get('start')||'');
