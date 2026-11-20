@@ -1,7 +1,12 @@
 import unittest
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
+from pathlib import Path
+import re
+import subprocess
+import sys
 
 from scripts.turso_history_batch_guard import guard
+from scripts.turso_unified_day_guard import select_pipeline_day
 
 
 NOW = datetime(2026, 11, 20, 3, 0, tzinfo=timezone.utc)
@@ -9,6 +14,27 @@ BASE = ('ehdud6728-bit/BLUE-Signal-Lab', 'refs/heads/main', NOW)
 
 
 class HistoryGuardTest(unittest.TestCase):
+    def test_history_scanner_uses_exact_calendar_years_not_year_count(self):
+        workflow = (Path(__file__).resolve().parents[1] / '.github/workflows'
+                    / 'blue_turso_history_research_batch.yml').read_text(encoding='utf-8')
+        self.assertNotIn('--years 2', workflow)
+        self.assertIn('--date "$DAY" --years "$RESEARCH_YEARS"', workflow)
+        command = re.search(r'RESEARCH_YEARS="\$\(python3 -c \'([^\']+)\' "\$DAY"\)"', workflow)
+        self.assertIsNotNone(command, 'Historical scan must derive years for every selected day')
+        for day, expected in (
+            ('2025-12-31', '2024,2025'),
+            ('2026-01-02', '2025,2026'),
+            ('2026-11-09', '2025,2026'),
+            ('2027-01-04', '2026,2027'),
+        ):
+            with self.subTest(day=day):
+                actual = subprocess.check_output(
+                    [sys.executable, '-c', command.group(1), day], text=True).strip()
+                daily = select_pipeline_day(day, 'dry_run', 'workflow_dispatch', '',
+                                            today=date(2027, 1, 10))['RESEARCH_YEARS']
+                self.assertEqual(actual, expected)
+                self.assertEqual(actual, daily)
+
     def test_plan_and_dry_run_no_writes(self):
         for mode in ('plan', 'dry_run'):
             result = guard('2026-11-09', '2026-11-13', mode, '', *BASE)
