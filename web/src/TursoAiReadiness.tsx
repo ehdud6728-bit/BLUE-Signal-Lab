@@ -44,7 +44,7 @@ export default function TursoAiReadiness({api,active}:{api:string;active:boolean
       </div>
       <p className="turso-ai-sufficiency" role="status">
         {coverage.readiness==='INSUFFICIENT_FOR_RECENT_EXIT_RESEARCH'?
-          '최근 패턴·익절·손절 비교를 위한 연구 이력이 아직 부족합니다. 관찰 후보 순위를 확정하지 않습니다.':
+          '초단기 5·10일 변화 관찰과 장기 성과 검증은 구분합니다. 익절·손절 추천을 확정할 만큼의 장기·성숙 표본은 아직 부족합니다.':
           '일별 감사 건수의 1차 기준을 충족했습니다. 누락 거래일·미완성 후속 성과·표본 편향을 검증해야 합니다.'}
       </p>
       <p className="turso-ai-coverage-note">{coverage.note}</p>
@@ -52,9 +52,9 @@ export default function TursoAiReadiness({api,active}:{api:string;active:boolean
     <h3>다음 분석 범위</h3>
     <ol className="turso-ai-next">
       <li>과거 1~2년 전체 종목 확정 일봉을 누락·원천·기업행동 기준으로 검증</li>
-      <li>최근 20·60·120거래일 패턴 성과 및 코스피·코스닥·업종 국면별 차이 분석</li>
+      <li>초단기 5·10일, 단기 20·60일과 장기 120·250·500일 패턴 효과 비교</li>
       <li>다음 거래일 시가 진입, 익절·손절·최대 보유기간 중 첫 도달 검증</li>
-      <li>실전 미관측 사례·소표본·비용을 구분한 뒤 AI 분석과 관찰 후보 제공</li>
+      <li>최근 발생 신호와 이미 성과가 확정된 사례를 분리하고, 시장·업종 국면 및 비용을 검증한 뒤 AI 관찰 후보 제공</li>
     </ol>
     <p className="turso-ai-coverage-note">현재 화면은 준비 상태 확인용입니다. 추천 점수·예상 수익·AI 시장 전망을 생성하지 않습니다. D1의 기존 AI 결과를 대신 가져오지 않습니다.</p>
   </section>;
