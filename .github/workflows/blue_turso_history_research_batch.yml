@@ -77,6 +77,7 @@ jobs:
         if: inputs.mode != 'plan'
         run: |
           python -m unittest discover -s tests -p 'test_turso_verified_eod_range.py' -v
+          python -m unittest discover -s tests -p 'test_turso_history_replay_source.py' -v
           python -m unittest discover -s tests -p 'test_turso_signal_snapshot_export.py' -v
           node --test tools/turso/eod-range-import.test.mjs \
             tools/turso/signal-snapshot-import.test.mjs \
@@ -96,7 +97,7 @@ jobs:
           python scripts/turso_verified_eod_range.py --start "$START" --end "$END" \
             --provider auto --out output/history/eod
           node tools/turso/eod-range-import.mjs --mode=dry_run --input-dir=output/history/eod
-      - name: Preflight every SAME-day market scan and immutable research snapshot
+      - name: Preflight every KRX-aligned historical market scan and research snapshot
         if: inputs.mode != 'plan'
         env:
           DAYS: ${{ steps.guard.outputs.days }}
@@ -115,6 +116,7 @@ jobs:
               INDICATOR_ARGS+=(--turso-indicators-out "output/history/$DAY/indicators")
             fi
             python scripts/market_scan_r11.py --date "$DAY" --years "$RESEARCH_YEARS" \
+              --verified-eod-dir output/history/eod \
               --daily-provider auto --out "output/history/$DAY/source" "${INDICATOR_ARGS[@]}"
             python scripts/export_turso_signal_snapshot.py \
               --input-dir "output/history/$DAY/source" --out "output/history/$DAY/signals"

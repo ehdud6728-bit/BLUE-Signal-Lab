@@ -18,8 +18,11 @@ on:
       - 'scripts/market_scan_r06.py'
       - 'scripts/market_scan_r08_diagnostics.py'
       - 'scripts/market_scan_r11.py'
+      - 'scripts/turso_history_replay_source.py'
       - 'tests/test_market_scan.py'
       - 'tests/test_market_scan_r11.py'
+      - 'tests/test_turso_history_replay_source.py'
+      - '.github/workflows/blue_turso_history_research_batch.yml'
       - 'scripts/export_turso_indicator_snapshot.py'
       - 'tests/test_turso_all_indicators_export.py'
       - 'scripts/exit_policy_research.py'
@@ -52,6 +55,7 @@ jobs:
           python -m pip install --disable-pip-version-check --quiet numpy pandas requests
           python -m unittest discover -s tests -p 'test_market_scan.py' -v
           python -m unittest discover -s tests -p 'test_market_scan_r11.py' -v
+          python -m unittest discover -s tests -p 'test_turso_history_replay_source.py' -v
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
