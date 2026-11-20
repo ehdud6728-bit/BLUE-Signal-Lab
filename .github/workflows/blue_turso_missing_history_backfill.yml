@@ -1,0 +1,145 @@
+name: BLUE Turso Missing History Backfill (BOUNDED)
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: 'audit: Turso SELECT and calendar only; dry_run: verify selected KRX days; apply: save missing audited days'
+        type: choice
+        options: [audit, dry_run, apply]
+        default: audit
+        required: true
+      lookback_days:
+        description: 'Calendar lookback, 30..760 days (default ~2 years)'
+        type: string
+        default: '760'
+        required: true
+      batch_size:
+        description: 'Maximum missing trading days to process this run, 1..5'
+        type: string
+        default: '5'
+        required: true
+      confirm_write:
+        description: 'For apply only: blue-turso-missing-history-apply'
+        type: string
+        default: ''
+        required: false
+  # Opt-in only: two separate repository variables are required for scheduled writes.
+  schedule:
+    - cron: '0 20 * * *'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: blue-turso-eod-research-writer
+  cancel-in-progress: false
+
+jobs:
+  missing_history:
+    if: >-
+      github.ref == 'refs/heads/main' &&
+      (github.event_name == 'workflow_dispatch' ||
+       (github.event_name == 'schedule' && vars.BLUE_TURSO_MISSING_HISTORY_AUTO_ENABLED == 'true'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+      - name: Require explicit manual or separately opted-in scheduled write permission
+        id: guard
+        env:
+          HISTORY_MODE: ${{ github.event_name == 'schedule' && 'apply' || inputs.mode }}
+          HISTORY_LOOKBACK: ${{ github.event_name == 'schedule' && '760' || inputs.lookback_days }}
+          HISTORY_BATCH: ${{ github.event_name == 'schedule' && '5' || inputs.batch_size }}
+          HISTORY_CONFIRM: ${{ github.event_name == 'schedule' && vars.BLUE_TURSO_MISSING_HISTORY_AUTO_CONFIRM || inputs.confirm_write }}
+          HISTORY_AUTO_ENABLED: ${{ vars.BLUE_TURSO_MISSING_HISTORY_AUTO_ENABLED }}
+        run: python3 scripts/turso_missing_history_guard.py
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install KRX index calendar and exact-day research dependencies
+        run: python -m pip install pandas numpy pyarrow requests 'cryptography>=43,<48' 'pykrx==1.2.9'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install isolated Turso audit/import client
+        working-directory: tools/turso
+        run: npm install --no-audit --no-fund --ignore-scripts --no-package-lock
+      - name: Verify actual KRX sessions (holidays are not missing dates)
+        env:
+          START: ${{ steps.guard.outputs.start }}
+          END: ${{ steps.guard.outputs.end }}
+        run: |
+          python scripts/turso_history_sessions.py --start "$START" --end "$END" \
+            --out output/missing/sessions.json
+      - name: Find earliest genuinely missing audited sessions (Turso SELECT only)
+        env:
+          HISTORY_SESSIONS_FILE: output/missing/sessions.json
+          HISTORY_PLAN_FILE: output/missing/selection.json
+          HISTORY_BATCH: ${{ steps.guard.outputs.batch_size }}
+          TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
+          TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
+        run: node tools/turso/missing-history-plan.mjs
+      - name: Verify and optionally save only selected missing dates, independently
+        if: steps.guard.outputs.mode != 'audit'
+        env:
+          MODE: ${{ steps.guard.outputs.mode }}
+          KRX_AUTH_KEY: ${{ secrets.KRX_AUTH_KEY }}
+          KRX_ID: ${{ secrets.KRX_DATA_ID || secrets.KRX_ID }}
+          KRX_PW: ${{ secrets.KRX_DATA_PW || secrets.KRX_PW }}
+          KRX_DATA_ID: ${{ secrets.KRX_DATA_ID || secrets.KRX_ID }}
+          KRX_DATA_PW: ${{ secrets.KRX_DATA_PW || secrets.KRX_PW }}
+          TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
+          TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
+        run: |
+          set -euo pipefail
+          process_day() {
+            local DAY="$1" EOD_STATE="$2" SIGNAL_STATE="$3"
+            local DIR="output/missing/$DAY" YEARS
+            YEARS="$(python3 -c 'from datetime import date; import sys; y=date.fromisoformat(sys.argv[1]).year; print(f"{y-1},{y}")' "$DAY")"
+            echo "BLUE_MISSING_HISTORY_DAY_START day=$DAY eod=$EOD_STATE signals=$SIGNAL_STATE mode=$MODE"
+            python scripts/turso_verified_eod_range.py --start "$DAY" --end "$DAY" \
+              --provider auto --out "$DIR/eod" || return 1
+            node tools/turso/eod-range-import.mjs --mode=dry_run --input-dir="$DIR/eod" || return 1
+            python scripts/market_scan_r11.py --date "$DAY" --years "$YEARS" \
+              --verified-eod-dir "$DIR/eod" --daily-provider auto --out "$DIR/source" || return 1
+            python scripts/export_turso_signal_snapshot.py \
+              --input-dir "$DIR/source" --out "$DIR/signals" || return 1
+            node tools/turso/signal-snapshot-import.mjs --mode=dry_run \
+              --input-dir="$DIR/signals" || return 1
+            if [[ "$MODE" == 'apply' ]]; then
+              if [[ "$EOD_STATE" == 'missing' ]]; then
+                node tools/turso/eod-range-import.mjs --mode=apply --input-dir="$DIR/eod" || return 1
+              fi
+              if [[ "$SIGNAL_STATE" == 'missing' ]]; then
+                node tools/turso/signal-snapshot-import.mjs --mode=apply \
+                  --input-dir="$DIR/signals" || return 1
+              fi
+            fi
+            echo "BLUE_MISSING_HISTORY_DAY_OK day=$DAY mode=$MODE"
+          }
+          SUCCESS=0
+          FAILED=0
+          while read -r DAY EOD_STATE SIGNAL_STATE; do
+            if process_day "$DAY" "$EOD_STATE" "$SIGNAL_STATE"; then
+              SUCCESS=$((SUCCESS + 1))
+            else
+              echo "BLUE_MISSING_HISTORY_DAY_FAILED day=$DAY (records preserved; next day continues)"
+              FAILED=$((FAILED + 1))
+            fi
+          done < <(python3 -c 'import json; data=json.load(open("output/missing/selection.json")); [print(d["day"], d["eod"], d["signals"]) for d in data["selected"]]')
+          echo "BLUE_MISSING_HISTORY_BATCH_DONE successful_days=$SUCCESS failed_days=$FAILED mode=$MODE"
+          if (( FAILED > 0 )); then exit 1; fi
+      - name: Keep missing-date plan and exact source audit evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: BLUE_TURSO_MISSING_HISTORY_${{ github.run_id }}
+          path: |
+            output/missing/sessions.json
+            output/missing/selection.json
+            output/missing/*/eod/manifest.json
+            output/missing/*/source/AUDIT.json
+            output/missing/*/signals/manifest.json
+          retention-days: 14
+          if-no-files-found: ignore
