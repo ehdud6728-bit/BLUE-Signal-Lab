@@ -38,7 +38,7 @@ test('search, basket capture, exact-day legacy upgrade and rendering share the s
  const main=readFileSync(new URL('../web/src/main.tsx',import.meta.url),'utf8');
  const basket=readFileSync(new URL('../web/src/SmartBasket.tsx',import.meta.url),'utf8');
  assert.match(main,/techBadges=\(r:Signal\)=>discoveryTechnicalBadges\(r\.extras\)/);
- assert.match(main,/item:\{\.\.\.r,name:displayName\(r\)\}/);
+ assert.match(main,/enqueueBasket\(\{\.\.\.r,name:displayName\(r\)\}\)/);
  assert.match(basket,/technicalBadges=source==='MANUAL'/);
  assert.match(basket,/technicalBadges,\s*\.\.\.\(source==='MANUAL'/);
  assert.match(basket,/const badges=discoveryTechnicalBadges\(found\.extras\)/);

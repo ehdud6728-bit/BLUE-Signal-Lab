@@ -190,8 +190,14 @@ function App(){
       return Array.isArray(x)?x.filter((i:unknown)=>Boolean(i&&typeof i==='object'&&'id' in i)).map((i:any)=>String(i.id)):[];
     }catch{return [];}
   });
+  const [basketRegularCount,setBasketRegularCount]=useState(0);
+  const onBasketItemsChange=useCallback((ids:string[],regularCount:number)=>{
+    setBasketIds(ids);setBasketRegularCount(regularCount);
+  },[]);
   const basketSequence=useRef(0);
-  const [basketRequest,setBasketRequest]=useState<BasketQuickAddRequest|null>(null);
+  // Preserve rapid taps even before the user opens the basket tab.
+  const [basketRequests,setBasketRequests]=useState<BasketQuickAddRequest[]>([]);
+  const [basketNotice,setBasketNotice]=useState('');
   const [status,setStatus]=useState('');
   const [dataStatus,setDataStatus]=useState<ScanStatus>('');
   const [requestBusy,setRequestBusy]=useState(false);
@@ -742,10 +748,20 @@ function App(){
   };
   const flip=(t:string)=>setSignals(a=>a.includes(t)?a.filter(s=>s!==t):[...a,t]);
   const inBasket=(r:Signal)=>basketIds.includes(`MANUAL:${r.code}:${r.day}`);
-  const canBasket=(r:Signal)=>/^\d{6}$/.test(r.code)&&typeof r.close_price==='number'&&r.close_price>0;
+  const canBasket=(r:Signal)=>/^\d{6}$/.test(r.code)&&typeof r.close_price==='number'&&Number.isFinite(r.close_price)&&r.close_price>0;
+  const basketBlocked=(r:Signal)=>!/^\d{6}$/.test(r.code)?'현재 장바구니는 숫자 6자리 종목코드만 지원합니다.':
+    typeof r.close_price!=='number'||!Number.isFinite(r.close_price)||r.close_price<=0?'검색일 확정 종가가 없어 담을 수 없습니다.':
+    basketRegularCount>=100?'장바구니 일반 관찰 100건 한도에 도달했습니다.':'장바구니에 담기';
+  const basketLabel=(r:Signal)=>inBasket(r)?'담김':!/^\d{6}$/.test(r.code)?'코드 제한':
+    !canBasket(r)?'가격 없음':basketRegularCount>=100?'한도 초과':'담기';
+  const enqueueBasket=(item:BasketQuickAddRequest['item'],other?:Pick<BasketQuickAddRequest,'selectionOrigin'|'analysisMatched'>)=>{
+    setBasketNotice(`${item.name||item.code} · 장바구니에 저장 중…`);
+    const request:BasketQuickAddRequest={serial:++basketSequence.current,item,...other};
+    setBasketRequests(prev=>[...prev,request]);
+  };
   const quickBasket=(r:Signal)=>{
-    if(!canBasket(r)||inBasket(r)||basketIds.length>=100)return;
-    setBasketRequest({serial:++basketSequence.current,item:{...r,name:displayName(r)}});
+    if(!canBasket(r)||inBasket(r)||basketRegularCount>=100)return;
+    enqueueBasket({...r,name:displayName(r)});
   };
   const nav=(target:'search'|'results'|'summary'|'ai'|'basket'|'tracking'|'analysis')=>{
     if(target==='basket'||target==='tracking'||target==='ai'||target==='analysis'){
@@ -955,12 +971,17 @@ function App(){
           {(storageMode==='d1'||(storageMode==='turso'&&activeView==='analysis'))&&<SymbolAnalysisPanel key={analysisRefresh} defaultDate={date}
             isInBasket={(code,day)=>basketIds.includes(`MANUAL:${code}:${day}`)}
             onAddToBasket={(item,analysisMatched)=>{
-              setBasketRequest({serial:++basketSequence.current,item,selectionOrigin:'ANALYSIS',analysisMatched});
+              enqueueBasket(item,{selectionOrigin:'ANALYSIS',analysisMatched});
               nav('basket');
             }}/>}
         </div>
         <div className={'r151-basket-content '+(activeView==='basket'?'':'r151-hidden')}>
-          {(storageMode==='d1'||(storageMode==='turso'&&activeView==='basket'))&&<SmartBasket quickAddRequest={basketRequest} onItemsChange={setBasketIds} active={activeView==='basket'} refreshKey={r1594BasketRefresh} patternHighlightMin={highlightMin} patternSampleMin={patternSampleMin}/>}
+          {(storageMode==='d1'||storageMode==='turso')&&<SmartBasket quickAddRequests={basketRequests}
+            onItemsChange={onBasketItemsChange} onAddFeedback={setBasketNotice}
+            onQuickAddsHandled={serial=>setBasketRequests(prev=>prev.filter(x=>x.serial>serial))}
+            active={activeView==='basket'}
+            refreshKey={r1594BasketRefresh} patternHighlightMin={highlightMin} patternSampleMin={patternSampleMin}/>
+          }
         </div>
         <div className={'r152-tracking-content '+(activeView==='tracking'?'':'r151-hidden')}>
           {(storageMode==='d1'||(storageMode==='turso'&&activeView==='tracking'))&&<LiveMarket active={activeView==='tracking'} refreshKey={r1594TrackingRefresh}/>}
@@ -1014,6 +1035,7 @@ function App(){
           <p className="result-hint">{patternBackend==='turso'
             ?'검색일 Turso 검증 종가와 이후 저장된 확정 일봉 관측가를 구분합니다. 현재 후속 관측 기간은 불완전할 수 있습니다.'
             :'검색일 확정 종가와 이후 D1 저장 시세·기간 고가를 구분해 표시합니다. 가격이 없으면 미수집으로 표시합니다.'}</p>
+          {basketNotice&&<p className="r1595-request-status" role="status">{basketNotice}</p>}
           {total===0&&(appliedAmountEok??amountEok)>0&&<p className="r15125-result-scope" role="status">현재 거래대금 최소 {(appliedAmountEok??amountEok).toLocaleString('ko-KR')}억원 조건으로는 검색 대상이 없습니다. 저거래대금 하단 터치 종목도 찾으려면 거래대금을 ‘전체(0억원)’로 바꾸고 검색해 보세요.</p>}
           {r1593Error&&<p className="r1593-comparison-status" role="status">가격 비교: {r1593Error}</p>}
           {r1593AutoStatus&&patternBackend==='turso'&&<p className="r1593-comparison-status" role="status">{r1593AutoStatus}</p>}
@@ -1135,9 +1157,9 @@ function App(){
                  {patternEvidenceBlock(r)}
                  {patternDays(r).length>0&&<div className="r1599-pattern-dates" title={patternDays(r).join(' · ')}>과거 신호일 {patternDays(r).slice(-3).join(' · ')}{patternDays(r).length>3?' 외':''}</div>}</div>
                  <button type="button" className={'r151-quick-add '+(inBasket(r)?'saved':'')}
-                   title={inBasket(r)?'이미 담긴 종목':'장바구니에 담기'}
-                   aria-label={`${displayName(r)} ${inBasket(r)?'장바구니에 담김':'장바구니에 담기'}`}
-                   disabled={inBasket(r)||!canBasket(r)||basketIds.length>=100}
+                   title={inBasket(r)?'이미 담긴 종목':basketBlocked(r)}
+                   aria-label={`${displayName(r)} ${inBasket(r)?'장바구니에 담김':basketBlocked(r)}`}
+                   disabled={inBasket(r)||!canBasket(r)||basketRegularCount>=100}
                    onClick={e=>{e.stopPropagation();quickBasket(r);}}
                    onKeyDown={e=>e.stopPropagation()}>
                    {inBasket(r)?<CheckCircle2 size={16}/>:<ShoppingBasket size={16}/>}
@@ -1172,12 +1194,12 @@ function App(){
                <div className="stock-quick"><div><small>RSI</small><strong>{fmt(r,'rsi',1)}</strong></div><div><small>Slow GC</small><strong className={flag(r,'slow_14_3_3_gc')?'positive':''}>{crossed(r,'slow_14_3_3_gc')}</strong></div><div><small>MACD GC</small><strong className={flag(r,'macd_gc')?'positive':''}>{crossed(r,'macd_gc')}</strong></div><div><small>매물대 기준가</small><strong>{supplyGrade(r)==='미확인'?'미확인':money(num(r,'supply_reference_price'))+'원'}</strong></div></div>
             </div>
               <button type="button" className={'r151-mobile-add '+(inBasket(r)?'saved':'')}
-                title={inBasket(r)?'장바구니에 담김':'장바구니에 담기'}
-                aria-label={`${displayName(r)} ${inBasket(r)?'장바구니에 담김':'장바구니에 담기'}`}
-                disabled={inBasket(r)||!canBasket(r)||basketIds.length>=100}
+                title={inBasket(r)?'장바구니에 담김':basketBlocked(r)}
+                aria-label={`${displayName(r)} ${inBasket(r)?'장바구니에 담김':basketBlocked(r)}`}
+                disabled={inBasket(r)||!canBasket(r)||basketRegularCount>=100}
                 onClick={()=>quickBasket(r)}>
                 {inBasket(r)?<CheckCircle2 size={19}/>:<ShoppingBasket size={19}/>}
-                <span>{inBasket(r)?'담김':'담기'}</span>
+                <span>{basketLabel(r)}</span>
               </button>
               {/* Quote refresh is now visible directly beside the saved quote above. */}
               </div>):<div className="mobile-empty"><Search size={30}/><strong>{appliedNameQuery?'전체 검색 결과에서 일치하는 종목이 없습니다.':total===0?'해당 조건의 종목이 없습니다.':'검색 조건을 선택해 주세요.'}</strong><p>{onlyPattern?'토마토 조건은 10거래일 패턴·최소 표본 수에 더해 선택한 골든크로스와 거래대금 조건도 모두 충족해야 합니다. GC 전체 종목 및 거래대금 전체로 비교해 보세요.':gcFields.length?'선택한 골든크로스 조건을 만족하는 종목이 없습니다.':'과거 거래일을 선택한 다음 검색 버튼을 누르세요.'}</p><button onClick={()=>nav('search')}>검색 조건 열기</button></div>}

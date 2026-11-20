@@ -17,6 +17,7 @@ import BasketSupplyRecordRow from './BasketSupplyRecordRow';
 import {readSupplyAtDiscovery,supplyFromSearchExtras,validSupplyRecord,type BasketSupplyRecord} from './basket-supply-record';
 import {fetchResearchEvidenceTursoFirst} from './turso-research-reader';
 import {discoveryTechnicalBadges,validDiscoveryTechnicalBadges,type DiscoveryTechBadge} from './discovery-technical';
+import {appendBasketRecord,pendingBasketQuickAdds} from './basket-quick-queue';
 
 // R153_PERFORMANCE_MONITOR: KIS results are server-verified; never fabricate missing candles.
 type Performance={code:string;day:string;status:string;baseline?:number;
@@ -128,9 +129,11 @@ function selectedObservation(item:BasketItem,comp:PriceCompare|undefined,pr:Perf
  return choices[0]||null;
 }
 // R151_QUICK_ADD: controlled one-tap requests from the search results list.
-export default function SmartBasket({quickAddRequest,onItemsChange,active=true,refreshKey=0,patternHighlightMin=70,patternSampleMin=8}: {
- quickAddRequest?:BasketQuickAddRequest|null;
- onItemsChange?:(ids:string[])=>void;
+export default function SmartBasket({quickAddRequests,onItemsChange,onAddFeedback,onQuickAddsHandled,active=true,refreshKey=0,patternHighlightMin=70,patternSampleMin=8}: {
+ quickAddRequests?:BasketQuickAddRequest[];
+ onItemsChange?:(ids:string[],regularCount:number)=>void;
+ onAddFeedback?:(message:string)=>void;
+ onQuickAddsHandled?:(serial:number)=>void;
  active?:boolean;
  refreshKey?:number;
  patternHighlightMin?:number|null;
@@ -139,6 +142,7 @@ export default function SmartBasket({quickAddRequest,onItemsChange,active=true,r
  const [items,setItems]=useState<BasketItem[]>(readItems);
  const [supplyBusy,setSupplyBusy]=useState<string[]>([]);
  const supplyLoading=useRef<Set<string>>(new Set());
+ const handledQuickAdd=useRef(0);
  const isHot=(x:BasketItem)=>hotPattern(x,patternHighlightMin,patternSampleMin);
  const evidenceAttempted=useRef<Set<string>>(new Set());
  const [filter,setFilter]=useState<'ALL'|'MANUAL'|'AI'|'PROTECTED'>('ALL');
@@ -176,9 +180,9 @@ export default function SmartBasket({quickAddRequest,onItemsChange,active=true,r
   document.addEventListener('visibilitychange',wake);
   return ()=>{ctrl.abort();window.clearInterval(timer);document.removeEventListener('visibilitychange',wake);};
  },[active,idsKey,refreshKey]);
- // Register immediately after any new item (including quick-add from hidden search tab).
+ // Do not register an unchanged watch list to D1 while its tab is hidden.
  useEffect(()=>{
-   if(!idsKey)return;
+   if(!active||!idsKey)return;
    let disposed=false;
    const register=async()=>{
     const entries=idsKey.split(',').map(x=>{const pos=x.indexOf(':');return {code:x.slice(0,pos),day:x.slice(pos+1)};});
@@ -192,7 +196,7 @@ export default function SmartBasket({quickAddRequest,onItemsChange,active=true,r
     }
    };
    void register();return()=>{disposed=true;};
- },[idsKey]);
+ },[active,idsKey]);
  // The UI checks frequently; server collection itself occurs via separate Cron.
  useEffect(()=>{
    if(!active||!idsKey)return;
@@ -248,13 +252,23 @@ export default function SmartBasket({quickAddRequest,onItemsChange,active=true,r
   void Promise.all([worker(),worker(),worker()]);
   return()=>{disposed=true};
  },[active,idsKey,patternSampleMin]);
- useEffect(()=>{onItemsChange?.(items.map(x=>x.id));},[items,onItemsChange]);
+ useEffect(()=>{onItemsChange?.(items.map(x=>x.id),items.filter(x=>!x.protected).length);},[items,onItemsChange]);
  useEffect(()=>{
-  if(quickAddRequest)add(quickAddRequest.item,'MANUAL',quickAddRequest.selectionOrigin||'SEARCH',quickAddRequest.analysisMatched);
-  // Only react to new requests, not unrelated changes to basket items.
- },[quickAddRequest]);
- useEffect(()=>{try{localStorage.setItem(STORE,JSON.stringify(items));}catch{setError('이 기기 저장 공간이 부족합니다. JSON 백업을 내려받아 주세요.');}},[items]);
+  // Process every tap once, even if several searches were added before a tab
+  // switch. The parent keeps an ordered queue rather than replacing one slot.
+  const pending=pendingBasketQuickAdds(quickAddRequests||[],handledQuickAdd.current);
+  for(const request of pending){
+   handledQuickAdd.current=request.serial;
+   add(request.item,'MANUAL',request.selectionOrigin||'SEARCH',request.analysisMatched);
+  }
+  if(pending.length)onQuickAddsHandled?.(handledQuickAdd.current);
+ },[quickAddRequests]);
+ useEffect(()=>{try{localStorage.setItem(STORE,JSON.stringify(items));}catch{
+  const msg='이 기기 저장 공간이 부족합니다. JSON 백업을 내려받아 주세요.';
+  setError(msg);onAddFeedback?.(msg);
+ }},[items]);
  useEffect(()=>{
+  if(!active)return;
   let mounted=true;
   const fetchAi=async()=>{try{
    const r=await fetch(API+'/api/basket/ai',{credentials:'include',cache:'no-store'});
@@ -262,8 +276,9 @@ export default function SmartBasket({quickAddRequest,onItemsChange,active=true,r
    const data=await r.json() as AiResult;if(mounted)setAi(data);
   }catch{/* optional candidate cache */}};
   void fetchAi();return()=>{mounted=false;};
- },[]);
+ },[active]);
  useEffect(()=>{
+  if(!active)return;
   let mounted=true;
   const load=async()=>{if(document.visibilityState==='hidden')return;
    try{const r=await fetch(API+'/api/live/quotes',{credentials:'include',cache:'no-store'});
@@ -272,7 +287,7 @@ export default function SmartBasket({quickAddRequest,onItemsChange,active=true,r
   };
   void load();const id=window.setInterval(()=>void load(),60000);
   return()=>{mounted=false;window.clearInterval(id);};
- },[refreshKey]);
+ },[active,refreshKey]);
  // As-of snapshot is captured once on adding. A successful record is never silently replaced.
  async function captureSupply(id:string,code:string,day:string,baseline:number){
   if(supplyLoading.current.has(id))return;
@@ -285,24 +300,26 @@ export default function SmartBasket({quickAddRequest,onItemsChange,active=true,r
  }
  function add(data:SearchRow|AiPick,source:'MANUAL'|'AI',selectionOrigin:BasketSelectionOrigin='SEARCH',analysisMatched?:boolean){
   if(!validCode(data.code)||!validDay(data.day)||!Number.isFinite(data.close_price)||!data.close_price||data.close_price<=0){
-   setError('확정 종가와 거래일이 있는 종목만 담을 수 있습니다.');return;
+   const msg='확정 종가와 거래일이 있는 종목만 담을 수 있습니다.';
+   setError(msg);onAddFeedback?.(msg);return;
   }
   const id=`${source}:${data.code}:${data.day}`;
-  if(items.some(it=>it.id===id)){setMessage('이미 담긴 종목입니다.');return;}
-  if(items.filter(x=>!x.protected).length>=MAX_REGULAR){setError('일반 관찰함은 100건까지 가능합니다. 오래 보려는 종목은 장기 관찰로 보호하세요.');return;}
+  if(items.some(it=>it.id===id)){setMessage('이미 담긴 종목입니다.');onAddFeedback?.(`${data.name||data.code} · 이미 담긴 종목입니다.`);return;}
+  if(items.filter(x=>!x.protected).length>=MAX_REGULAR){const msg='일반 관찰함은 100건까지 가능합니다. 오래 보려는 종목은 장기 관찰로 보호하세요.';setError(msg);onAddFeedback?.(msg);return;}
   const p=source==='AI'?data as AiPick:null;
   const initialSupply=source==='MANUAL'?supplyFromSearchExtras((data as SearchRow).extras,data.day):undefined;
   const technicalBadges=source==='MANUAL'?
     (validDiscoveryTechnicalBadges((data as SearchRow).technicalBadges)?(data as SearchRow).technicalBadges!:
       discoveryTechnicalBadges((data as SearchRow).extras)):[];
-  setItems(prev=>[{id,source,code:data.code,name:data.name||data.code,day:data.day,
+  setItems(prev=>appendBasketRecord(prev,{id,source,code:data.code,name:data.name||data.code,day:data.day,
     baseline:data.close_price as number,added_at:new Date().toISOString(),signals:data.signals||[],memo:'',
     technicalBadges,
     ...(source==='MANUAL'?{selectionOrigin,...(selectionOrigin==='ANALYSIS'&&typeof analysisMatched==='boolean'?{analysisMatched}:{})}:{}),
     reason:p?.reason,risk:p?.risk,watch:p?.watch,...patternEvidence(data),
-    ...(initialSupply?{supplyRecord:initialSupply}:{}),supplyMemo:''},...prev]);
+    ...(initialSupply?{supplyRecord:initialSupply}:{}),supplyMemo:''},MAX_REGULAR));
   void captureSupply(id,data.code,data.day,data.close_price as number);
   setError('');setMessage(`${data.name||data.code} 관찰함에 추가했습니다.`);
+  onAddFeedback?.(`${data.name||data.code} · 장바구니에 저장했습니다.`);
  }
  async function generateAi(){if(aiBusy)return;setAiBusy(true);setError('');setMessage('');
   try{const r=await fetch(API+'/api/basket/ai',{method:'POST',credentials:'include',
