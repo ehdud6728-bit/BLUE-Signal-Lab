@@ -5,6 +5,9 @@ on:
     paths:
       - 'web/src/turso-research-reader.ts'
       - 'web/src/SmartBasket.tsx'
+      - 'web/src/basket-rank.ts'
+      - 'web/src/r157-ui.css'
+      - 'web/src/r15116-basket-priority.css'
       - 'web/src/StopLossRow.tsx'
       - 'web/src/basket-supply-record.ts'
       - 'web/src/price-compare.ts'
@@ -24,6 +27,8 @@ on:
       - 'tests/test_turso_research_request.mjs'
       - 'tests/test_turso_research_request_route.mjs'
       - 'tests/test_turso_basket_browser.mjs'
+      - 'tests/test_basket_top_basis.mjs'
+      - 'tests/test_basket_observed_low.mjs'
       - 'web/src/main.tsx'
       - 'web/src/TursoAiReadiness.tsx'
       - 'web/src/TursoPatternPulse.tsx'
@@ -54,7 +59,7 @@ jobs:
         working-directory: worker
         run: npm install --no-package-lock --no-audit --no-fund
       - name: Verify Turso-first browser API read contracts (no credentials)
-        run: node --test tests/test_turso_research_reader.mjs tests/test_turso_research_api.mjs tests/test_turso_research_request.mjs tests/test_turso_research_request_route.mjs tests/test_turso_research_progress.mjs tests/test_turso_basket_browser.mjs tests/test_turso_basket_prices.mjs tests/test_turso_provisional_search.mjs
+        run: node --test tests/test_turso_research_reader.mjs tests/test_turso_research_api.mjs tests/test_turso_research_request.mjs tests/test_turso_research_request_route.mjs tests/test_turso_research_progress.mjs tests/test_turso_basket_browser.mjs tests/test_turso_basket_prices.mjs tests/test_turso_provisional_search.mjs tests/test_basket_top_basis.mjs tests/test_basket_observed_low.mjs
       - name: Install browser build dependencies
         working-directory: web
         run: npm install --no-package-lock --no-audit --no-fund

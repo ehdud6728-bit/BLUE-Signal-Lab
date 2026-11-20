@@ -7,7 +7,7 @@ import {InvalidResearchQuery,tursoResearchDates,tursoResearchSearch,tursoResearc
 const env={TURSO_DATABASE_URL:'libsql://unit.invalid',TURSO_AUTH_TOKEN:'dummy'};
 const day='2026-11-18';
 function setup({partial=false,backendError=false,wrongSource=false,additionalDays=false,
-  publishedReport=false,unsafeReport=false}={}){
+  publishedReport=false,unsafeReport=false,pathReport=false,invalidPath=false}={}){
   const db=new DatabaseSync(':memory:');
   db.exec(`CREATE TABLE blue_research_signal_audit_v1 (
     trade_day TEXT,row_count INT,observed_stocks INT,signal_events INT,source_payload_sha256 TEXT);
@@ -58,7 +58,14 @@ function setup({partial=false,backendError=false,wrongSource=false,additionalDay
       short_and_long_windows:[5,10,20,60,120,250,500].map(sessions=>({sessions})),
       trading_calendar_verified:false,corporate_actions_verified:false,
       market_and_sector_benchmark_verified:false,
-      investment_recommendation_enabled:unsafeReport,candidate_stocks:[]};
+      investment_recommendation_enabled:unsafeReport,candidate_stocks:[],
+      ...(pathReport?{observed_path_windows:[5,10,20,60].map(holding_sessions=>({
+        holding_sessions,mature_signal_stock_days:3,pending_recent:2,
+        excluded_missing_price_path:0,investment_recommendation_enabled:false,
+        same_session_order_knowable:false,
+        patterns:[{pattern:'BB20',n:3,median_max_gain_pct:7,
+          median_max_loss_pct:-3,low_first_count:1,high_first_count:1,
+          same_session_unresolved_count:invalidPath?10:1}]}))}:{}),};
     db.prepare('INSERT INTO blue_pattern_exit_reports_v1 VALUES (?,?,?)')
       .run('2026-11-19',JSON.stringify(report),'a'.repeat(64));
   }
@@ -163,6 +170,17 @@ test('published exploratory study is served without D1 and cannot contain active
   await assert.rejects(()=>tursoExitStudyReport(env,unsafe.factory),
     /INVALID_TURSO_EXIT_REPORT/);
   assert.equal(unsafe.closed,1);
+});
+
+test('old report remains readable; bounded new observed path report validates extrema ordering counts',async()=>{
+ const okay=setup({publishedReport:true,pathReport:true});
+ const out=await tursoExitStudyReport(env,okay.factory);
+ assert.equal(out.report.observed_path_windows.length,4);
+ assert.equal(out.report.observed_path_windows[0].patterns[0].low_first_count,1);
+ assert.equal(okay.closed,1);
+ const invalid=setup({publishedReport:true,pathReport:true,invalidPath:true});
+ await assert.rejects(()=>tursoExitStudyReport(env,invalid.factory),/INVALID_TURSO_EXIT_REPORT/);
+ assert.equal(invalid.closed,1);
 });
 
 test('all filters are evaluated before paging with exact historical chart setups',async()=>{

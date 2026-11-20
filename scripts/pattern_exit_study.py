@@ -17,12 +17,13 @@ import re
 from statistics import mean, median
 
 try:
-    from scripts.exit_policy_research import ExitPolicy, VerifiedBar, simulate_exit, describe_exits
+    from scripts.exit_policy_research import ExitPolicy, VerifiedBar, simulate_exit, describe_exits, observe_path
 except ModuleNotFoundError:  # direct `python scripts/pattern_exit_study.py` execution
-    from exit_policy_research import ExitPolicy, VerifiedBar, simulate_exit, describe_exits
+    from exit_policy_research import ExitPolicy, VerifiedBar, simulate_exit, describe_exits, observe_path
 
 
 WINDOWS = (5, 10, 20, 60, 120, 250, 500)
+PATH_HORIZONS = (5, 10, 20, 60)  # holding sessions after signal, NOT signal recency
 # Fixed BEFORE observing returns. No post hoc expansion of the policy search.
 POLICIES = (
     ExitPolicy(3, 2, 5), ExitPolicy(5, 3, 5), ExitPolicy(5, 3, 10),
@@ -170,17 +171,62 @@ def analyze(snapshot: dict) -> dict:
             'exploratory_examples': exploratory[:5],
             'research_only_best_policies': selected[:15],
             'watchlist_allowed': False})
+    # Fixed holding horizons: unlike WINDOWS, these measure D+5/10/20/60
+    # observed post-signal range from the NEXT audited session's open.
+    observed_paths = []
+    for horizon in PATH_HORIZONS:
+        grouped = defaultdict(list)
+        pending_recent = 0
+        missing_path = 0
+        matured = 0
+        for i, _, code, names in events:
+            if i + horizon >= len(dates):
+                pending_recent += 1
+                continue
+            segment = [per_code[code].get(d) for d in dates[i:i+horizon+1]]
+            if any(bar is None for bar in segment):
+                missing_path += 1
+                continue
+            outcome = observe_path(segment, 0, horizon)
+            if outcome is None:
+                raise ValueError('UNEXPECTED_PENDING_PATH_HORIZON')
+            matured += 1
+            for tag in names:
+                grouped[tag].append(outcome)
+        summaries = []
+        for pattern, cases in grouped.items():
+            if len(cases) < 3:
+                continue  # never turn one anecdotal candle into a pattern verdict
+            summaries.append({'pattern': pattern, 'n': len(cases),
+                'median_max_gain_pct': round(median(o.max_gain_pct for o in cases), 2),
+                'median_max_loss_pct': round(median(o.max_loss_pct for o in cases), 2),
+                'low_first_count': sum(o.extrema_order == 'LOW_FIRST' for o in cases),
+                'high_first_count': sum(o.extrema_order == 'HIGH_FIRST' for o in cases),
+                'same_session_unresolved_count': sum(
+                    o.extrema_order == 'SAME_SESSION_UNRESOLVED' for o in cases),
+                'research_only': True})
+        summaries.sort(key=lambda x: (-x['n'], x['pattern']))
+        observed_paths.append({'holding_sessions': horizon,
+            'audited_date_count_sufficient': len(dates) > horizon,
+            'mature_signal_stock_days': matured,
+            'pending_recent': pending_recent,
+            'excluded_missing_price_path': missing_path,
+            'pattern_count_with_3_or_more': len(summaries),
+            'patterns': summaries[:12],
+            'same_session_order_knowable': False,
+            'investment_recommendation_enabled': False})
     # Never output a stock buy list: issuer/survivorship/market benchmark and
     # an independent approval are missing even if individual policy tests pass.
     return {'schema': 'BLUE_TURSO_PATTERN_EXIT_REPORT_V1', 'storage': 'TURSO',
         'asof_day': dates[-1], 'eod_audited_days': len(dates),
         'research_audited_days': _count(snapshot.get('research_audited_days'), 0, 520),
         'signal_stock_days': len(signals), 'short_and_long_windows': windows,
+        'observed_path_windows': observed_paths,
         'trading_calendar_verified': calendar_ok,
         'corporate_actions_verified': corporate_ok,
         'market_and_sector_benchmark_verified': False,
         'candidate_stocks': [], 'investment_recommendation_enabled': False,
-        'note': '정확한 미래 거래일/기업행동/시장 기준선 독립 검증 전 탐색 통계입니다. 신호일 다음 거래일 시가 진입, 보수적 일봉 첫 도달, 비용 0.3% 가정. 확률 예측이나 종목 추천이 아닙니다.'}
+        'note': '정확한 미래 거래일/기업행동/시장 기준선 독립 검증 전 탐색 통계입니다. 신호일 다음 거래일 시가 진입, 보수적 일봉 첫 도달·비용 0.3% 가정. 별도 D+5/10/20/60 고저가 관측은 체결 수익이 아니며 같은 날 고저가 발생 순서는 알 수 없습니다. 확률 예측이나 종목 추천이 아닙니다.'}
 
 
 def main():

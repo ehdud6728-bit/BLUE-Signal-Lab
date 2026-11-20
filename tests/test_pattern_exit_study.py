@@ -37,6 +37,17 @@ class PatternExitStudyTest(unittest.TestCase):
         self.assertEqual(twenty['sessions'], 20)
         self.assertGreater(twenty['candidate_policies'], 0)
         self.assertFalse(twenty['watchlist_allowed'])
+        path = report['observed_path_windows']
+        self.assertEqual([w['holding_sessions'] for w in path], [5, 10, 20, 60])
+        self.assertGreater(path[0]['mature_signal_stock_days'], 0)
+        self.assertGreater(path[0]['pending_recent'], 0)
+        self.assertEqual(path[0]['excluded_missing_price_path'], 0)
+        self.assertFalse(path[0]['investment_recommendation_enabled'])
+        stock = next(p for p in path[0]['patterns'] if p['pattern'] == 'BB20')
+        self.assertEqual(stock['median_max_gain_pct'], 7)
+        self.assertEqual(stock['median_max_loss_pct'], -1)
+        self.assertEqual(stock['same_session_unresolved_count'], stock['n'])
+        self.assertEqual(stock['low_first_count'] + stock['high_first_count'], 0)
 
     def test_even_opted_in_independent_proofs_do_not_fabricate_recommendations(self):
         result = analyze(fixture(65, corporate=True, calendar=True))
@@ -63,6 +74,16 @@ class PatternExitStudyTest(unittest.TestCase):
         report = analyze(snap)
         self.assertEqual(report['candidate_stocks'], [])
         self.assertFalse(report['short_and_long_windows'][2]['watchlist_allowed'])
+        self.assertGreater(report['observed_path_windows'][0]['excluded_missing_price_path'], 0)
+        self.assertEqual(report['observed_path_windows'][0]['investment_recommendation_enabled'], False)
+
+    def test_short_history_does_not_claim_a_mature_60_session_path(self):
+        snap = fixture(10)
+        report = analyze(snap)
+        sixty = report['observed_path_windows'][3]
+        self.assertEqual(sixty['mature_signal_stock_days'], 0)
+        self.assertGreater(sixty['pending_recent'], 0)
+        self.assertEqual(sixty['patterns'], [])
 
 
 if __name__ == '__main__':
