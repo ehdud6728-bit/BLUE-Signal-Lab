@@ -14,11 +14,26 @@ on:
         type: string
         default: '760'
         required: true
+      start_day:
+        description: 'Optional manual priority range start YYYY-MM-DD; use with end_day (max 31 calendar days)'
+        type: string
+        default: ''
+        required: false
+      end_day:
+        description: 'Optional manual priority range end YYYY-MM-DD; KST yesterday or earlier'
+        type: string
+        default: ''
+        required: false
       batch_size:
         description: 'Maximum missing trading days to process this run, 1..5'
         type: string
         default: '5'
         required: true
+      study_after:
+        description: 'After successful manual apply, make read-only D+5/D+10/20/60 report artifact (no publication)'
+        type: boolean
+        default: false
+        required: false
       confirm_write:
         description: 'For apply only: blue-turso-missing-history-apply'
         type: string
@@ -53,6 +68,8 @@ jobs:
           HISTORY_BATCH: ${{ github.event_name == 'schedule' && '5' || inputs.batch_size }}
           HISTORY_CONFIRM: ${{ github.event_name == 'schedule' && vars.BLUE_TURSO_MISSING_HISTORY_AUTO_CONFIRM || inputs.confirm_write }}
           HISTORY_AUTO_ENABLED: ${{ vars.BLUE_TURSO_MISSING_HISTORY_AUTO_ENABLED }}
+          HISTORY_START_DAY: ${{ github.event_name == 'workflow_dispatch' && inputs.start_day || '' }}
+          HISTORY_END_DAY: ${{ github.event_name == 'workflow_dispatch' && inputs.end_day || '' }}
         run: python3 scripts/turso_missing_history_guard.py
       - uses: actions/setup-python@v5
         with:
@@ -155,6 +172,17 @@ jobs:
           done < <(python3 -c 'import json; data=json.load(open("output/missing/selection.json")); [print(d["day"], d["eod"], d["signals"]) for d in data["selected"]]')
           echo "BLUE_MISSING_HISTORY_BATCH_DONE verified_or_saved_days=$SUCCESS failed_days=$FAILED unverified_weekdays=$UNVERIFIED mode=$MODE"
           if (( FAILED > 0 || (SUCCESS == 0 && UNVERIFIED > 0) )); then exit 1; fi
+      - name: Produce one read-only multi-horizon exit study after successful manual batch
+        if: github.event_name == 'workflow_dispatch' && inputs.study_after == true && steps.guard.outputs.mode == 'apply'
+        env:
+          TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
+          TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
+        run: |
+          node tools/turso/pattern-exit-export.mjs --mode=study --sessions=60 \
+            --out=output/missing/exit-study/source.json
+          python3 scripts/pattern_exit_study.py \
+            --input output/missing/exit-study/source.json \
+            --out output/missing/exit-study/report.json
       - name: Keep missing-date plan and exact source audit evidence
         if: always()
         uses: actions/upload-artifact@v4
@@ -166,5 +194,13 @@ jobs:
             output/missing/*/eod/manifest.json
             output/missing/*/source/AUDIT.json
             output/missing/*/signals/manifest.json
+          retention-days: 14
+          if-no-files-found: ignore
+      - name: Keep only optional research summary (never raw stock-price export)
+        if: always() && github.event_name == 'workflow_dispatch' && inputs.study_after == true && steps.guard.outputs.mode == 'apply'
+        uses: actions/upload-artifact@v4
+        with:
+          name: BLUE_TURSO_MISSING_HISTORY_EXIT_STUDY_${{ github.run_id }}
+          path: output/missing/exit-study/report.json
           retention-days: 14
           if-no-files-found: ignore

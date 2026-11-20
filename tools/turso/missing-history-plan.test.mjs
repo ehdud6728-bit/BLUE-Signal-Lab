@@ -57,6 +57,21 @@ test('batch limit avoids extra day reads; all audited days produce no selected w
   assert.equal(counts.length,2);
 });
 
+test('explicit November priority range selects missing Nov 2-6 ahead of existing Nov 9-20',async()=>{
+  const sessions=['2026-11-02','2026-11-03','2026-11-04','2026-11-05','2026-11-06',
+    '2026-11-09','2026-11-10','2026-11-11','2026-11-12','2026-11-13',
+    '2026-11-16','2026-11-17','2026-11-18','2026-11-19','2026-11-20'];
+  const prior=sessions.slice(5);
+  const mock=fixture({eod:Object.fromEntries(prior.map(d=>[d,eodRow(2662)])),
+    signals:Object.fromEntries(prior.map(d=>[d,signalRow(100,2662)]))});
+  const plan=await planMissingHistory(mock.client,{calendar:{...calendar,
+    start:'2026-11-02',end:'2026-11-20',sessions},batchSize:5});
+  assert.deepEqual(plan.selected.map(item=>item.day),sessions.slice(0,5));
+  assert.ok(plan.selected.every(item=>item.eod==='missing'&&item.signals==='missing'));
+  assert.equal(plan.already_audited,10);
+  assert.ok(mock.statements.every(item=>item.sql.startsWith('SELECT')));
+});
+
 test('lookahead lets later KRX-confirmed weekdays progress despite earlier unverified dates',async()=>{
   const mock=fixture();
   const plan=await planMissingHistory(mock.client,{calendar,batchSize:1,candidateLimit:5});

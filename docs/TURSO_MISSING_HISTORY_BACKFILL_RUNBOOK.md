@@ -37,13 +37,42 @@ GitHub Actions > `BLUE Turso Missing History Backfill (BOUNDED)` > Run workflow.
 | Branch | `main` | 보호된 기본 브랜치만 허용 |
 | `mode` | `audit` | Turso **SELECT + KRX 실제 날짜별 검증**, 저장 0건 |
 | `lookback_days` | `760` | KST 어제까지 약 2년(30~760일) |
+| `start_day` | 빈값 | 선택사항: 특정 기간 첫날, `YYYY-MM-DD` |
+| `end_day` | 빈값 | 선택사항: 특정 기간 마지막 날, `YYYY-MM-DD` |
 | `batch_size` | `5` | 한 번에 처리할 미수집 거래일 1~5 |
+| `study_after` | `false` | 성공한 수동 작업 뒤 **읽기 전용** 5·10·20·60거래일 보유 연구 보고서를 한 번 생성 |
 | `confirm_write` | 빈값 | `audit` 및 `dry_run`은 필요 없음 |
 
 `audit`에서 선택 날짜·충돌 목록을 확인하고 `apply`로 바꾸어 실행할 때만
 `confirm_write=blue-turso-missing-history-apply`를 정확히 입력합니다.
 이후 다음 실행에서는 이미 성공한 날짜가 자동 제외되어 **다음 미수집 날짜**가 선택됩니다.
 기존 감사가 있는 11/10은 자동으로 재저장하지 않습니다.
+
+### 2026년 11월 2~20일을 먼저 연구할 때
+
+오래된 2년치 자료를 먼저 수집하지 않고 **11월 2~20일을 우선** 채우려면
+`start_day=2026-11-02`, `end_day=2026-11-20`, `lookback_days=760`,
+`batch_size=5`를 설정합니다. 두 날짜는 **함께** 입력해야 하며,
+선택 범위는 최대 31달력일·한국 시간 어제까지·lookback 이내여야 합니다.
+평일 후보는 15일이지만 실제로 저장할 날은 감사 원장 확인 후 고릅니다.
+완료 감사가 있는 EOD/연구일은 건너뛰고, 11/10 같은 원장 충돌일은
+`blocked`로 격리하며 기존 원천 데이터를 바꾸지 않습니다.
+
+1. `mode=audit`, `study_after=false`: Turso SELECT와 최대 5일 KRX 정확일 검증.
+   실제 누락·충돌 날짜를 보고 EOD/연구가 얼마나 남았는지 확인합니다.
+2. 자료가 검증되고 사용자 승인을 받은 뒤에만 `mode=apply`,
+   `confirm_write=blue-turso-missing-history-apply`, `study_after=true`를 사용합니다.
+   5일 단위로 다음 미수집일을 반복 채우고, 각 성공한 실행 말미에 **D+5·D+10을
+   포함한 단일 탐색 연구 보고서**를 작성합니다. 이 보고서는 Actions 요약
+   아티팩트에만 저장되며 앱 Turso 보고서 테이블에 게시되지 않습니다.
+3. 11월 2~20일의 **실제 거래일 연속 일봉과 발생일 패턴 감사**가 충분해야
+   11/2~6의 D+10 성숙 사례를 관측할 수 있습니다. `study` 완료 표본 수는
+   보고서 `observed_path_windows`로 확인하고, 누락 데이터·거래일 캘린더·수정주가
+   미검증을 숨기지 않습니다. 기존 게시 불변 보고서는 덮어쓰지 않습니다.
+
+`study_after`를 선택하더라도 KIS 토큰 신규 발급, D1, API/웹 배포,
+AI 추천 및 보고서 `publish`는 일어나지 않습니다. 예약 실행은 위 날짜
+선택이나 후속 연구 없이 기존 2년 lookback 동작을 그대로 유지합니다.
 
 ## 사용자 승인 후에만 예약 활성화
 
