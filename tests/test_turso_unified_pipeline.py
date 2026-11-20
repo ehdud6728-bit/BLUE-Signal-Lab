@@ -72,10 +72,17 @@ class TursoUnifiedPipelineTests(unittest.TestCase):
         self.assertIn('vars.BLUE_TURSO_RESEARCH_AUTO_ENABLED', eod)
         self.assertIn('vars.BLUE_TURSO_ALL_INDICATORS_AUTO_ENABLED', eod)
         self.assertIn('default: false', eod)
-        self.assertIn("if: ${{ env.RUN_INDICATORS == 'true' && env.MODE == 'apply' }}", eod)
+        krx_success = "steps.krx_fetch.outcome == 'success' && "
+        self.assertIn("if: ${{ " + krx_success +
+                      "env.RUN_INDICATORS == 'true' && env.MODE == 'apply' }}", eod)
         self.assertIn('--turso-indicators-out', eod)
-        self.assertIn('if: ${{ env.RUN_RESEARCH == \'true\' && env.MODE == \'apply\' }}', eod)
-        self.assertIn('if: ${{ env.MODE == \'apply\' }}', eod)
+        self.assertIn("if: ${{ " + krx_success +
+                      "env.RUN_RESEARCH == 'true' && env.MODE == 'apply' }}", eod)
+        self.assertIn("if: ${{ " + krx_success + "env.MODE == 'apply' }}", eod)
+        self.assertIn("id: krx_fetch\n        continue-on-error: true", eod)
+        self.assertIn("if: ${{ steps.krx_fetch.outcome == 'failure' }}", eod)
+        self.assertIn('node tools/turso/provisional-fallback-gate.mjs --day="$TRADE_DAY"', eod)
+        self.assertIn('if: ${{ steps.krx_fetch.outcome == \'success\' }}', eod)
         self.assertIn('--start "$TRADE_DAY" --end "$TRADE_DAY"', eod)
         self.assertIn('--date "$TRADE_DAY" --years "$RESEARCH_YEARS"', eod)
         self.assertIn('--reuse-target-eod-dir output/turso_daily_eod', eod)
@@ -89,6 +96,13 @@ class TursoUnifiedPipelineTests(unittest.TestCase):
                                   eod.index('python scripts/market_scan_r11.py')))
         self.assertIn('source_payload_sha256',
                       (ROOT / 'tools/turso/signal-snapshot-import.mjs').read_text())
+        gate = (ROOT / 'tools/turso/provisional-fallback-gate.mjs').read_text()
+        for required in ('blue_kis_provisional_daily_v1', 'blue_eod_ingest_audit_v1',
+                         'KIS_PROVISIONAL_NOT_AVAILABLE'):
+            self.assertIn(required, gate)
+        for forbidden in ('tokenP(', 'getKisDailyQuote(', 'client.batch(',
+                          'INSERT INTO', 'UPDATE blue_eod'):
+            self.assertNotIn(forbidden, gate)
         for forbidden in ('wrangler d1', 'env.DB', '--mode=issue', 'tokenP(',
                           'CLOUDFLARE_API_TOKEN', 'FULL_MIRROR'):
             self.assertNotIn(forbidden, eod)

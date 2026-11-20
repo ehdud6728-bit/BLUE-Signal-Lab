@@ -2,6 +2,12 @@
 
 새 채팅에서 프로젝트를 이어가기 위한 **결정/구현/검증 이력**입니다. 대화 전체를 저장하지 않고 실제 개발에 필요한 내용만 보존합니다. 최신 항목을 위에 추가하고, 결과가 달라지면 추측 대신 검증된 상태로 수정합니다.
 
+## 2026-11-20 (KST) — PR #64 병합 후 통합 안전 CI 구문 검사 보완 (PR 준비)
+
+- **병합 확인:** PR #64 [병합 커밋 `0b03afc`](https://github.com/ehdud6728-bit/BLUE-Signal-Lab/pull/64) 로컬 `origin/main` 계보 확인. 무비밀 [KIS 안전 CI #44730835529](https://github.com/ehdud6728-bit/BLUE-Signal-Lab/actions/runs/44730835529), [웹/API 안전 CI #44730835495](https://github.com/ehdud6728-bit/BLUE-Signal-Lab/actions/runs/44730835495)는 성공. [통합 연구 안전 CI #44730835563](https://github.com/ehdud6728-bit/BLUE-Signal-Lab/actions/runs/44730835563)만 신규 `steps.krx_fetch.outcome == 'success'` 조건을 알지 못하는 **기존 테스트의 고정 문자열 검사**에서 실패했고, 실 KIS/DB/파이프라인은 시작되지 않음.
+- **수정:** `tests/test_turso_unified_pipeline.py`의 3개 기존 쓰기 조건 문자열을 **KRX 성공을 추가로 요구하는 새 계약**으로 업데이트. KRX 실패 시 읽기 전용 KIS gate, 전체 확정 쓰기 차단 조건 및 gate 코드의 tokenP/DB 쓰기 금지까지 검사. 통합 수집·분석·데이터 모델 및 Worker 배포 코드는 변경하지 않음.
+- **다음:** 로컬 테스트/PR CI 후 사용자 병합. 운영 KIS 0건 실제 원인 감사·Collector 플래그 확인·승인 배포는 여전히 별개이며 이번 수정에서 하지 않음.
+
 ## 2026-11-20 (KST) — KRX 미확정 → KIS 잠정 일봉·관찰 연결 (PR 준비)
 
 - **사용자 정정:** 미확정 KRX EOD에 대해 KRX만 반복 `dry_run`할 것이 아니라 이전에 합의한 KIS 대체 자료를 사용해야 한다. KRX 전체시장 검증/확정 신호 안전 규칙은 유지.
