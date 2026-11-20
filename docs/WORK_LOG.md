@@ -2,6 +2,13 @@
 
 새 채팅에서 프로젝트를 이어가기 위한 **결정/구현/검증 이력**입니다. 대화 전체를 저장하지 않고 실제 개발에 필요한 내용만 보존합니다. 최신 항목을 위에 추가하고, 결과가 달라지면 추측 대신 검증된 상태로 수정합니다.
 
+## 2026-11-20 (KST) — BLUE KIS 기존 유효 토큰으로 Stock-Hunter R9 연구 원천 수집 준비
+
+- **사용자 결정:** 삼성SDI 2023-11-02 고정 추세선/11-06 돌파의 원주가·수정주가를 검증할 때 별도 Stock-Hunter KIS 키 발급·복사 대신, 기존 KIS Secrets가 등록된 BLUE에서 과거 시세를 수집하고 Stock-Hunter의 원천 검증을 사용한다.
+- **구현:** 신규 수동 `.github/workflows/blue_stockhunter_r9_kis_price_bridge_research_only.yml`, `tools/turso/stockhunter-r9-kis-bridge.mjs`, 무비밀 테스트, [운영 안내](STOCKHUNTER_R9_KIS_BRIDGE.md). 기존 Turso 암호화 토큰을 **SELECT 1회만** 조회·복호화, KIS 날짜 지정 일봉 `006400`의 2023-09-01~11-06 **GET 2회만** 사용(원주가 flag=1, 수정주가 flag=0). 외부 `tokenP` 금지, D1/Turso 쓰기·주문/매매 호출 0. 고정 Stock-Hunter R8 커밋 `891f3ba3b2d82dec4cf052f301d685d649de106a`을 checkout하여 같은 Actions에서 CSV+매니페스트의 5개 날짜 일치 검사 실행. 기존 BLUE 시세 수집·검색·DB·발급기·Worker/PWA 불변.
+- **로컬 검증:** 신규 Node 무비밀 테스트 **11/11 PASS**(기본 dry-run, 토큰 만료 차단, SELECT 전용, 날짜/가격/응답 검증, 원주가·수정주가 플래그, 기밀 미노출). 워크플로 YAML은 `workflow_dispatch` 전용/`contents:read`로 파싱 통과, `git diff --check` 성공. Stock-Hunter 기존 R8 단위 테스트 **9/9 PASS**. 다만 실제 BLUE GitHub Actions에서 pinned R8 checkout과 원천 CSV 인터페이스 연동은 병합 후 실행해 검증해야 함. 실제 KIS 호출/Turso SELECT/토큰 발급·데이터 쓰기·Worker 배포는 **수행하지 않음**.
+- **남은 확인/다음:** PR CI 확인·사용자 병합 → `mode=dry_run` → 기존 Shared KIS Token Steward `mode=check`의 유효 토큰 확인 → `mode=capture` 수동 한 번 → Actions 아티팩트의 R8 `independent_status`를 감사. 5개 날짜 비교 통과도 전체 R116 수정주가 재현·55일 전략 성공 판단을 뜻하지 않는다. Stock-Hunter [R9 PR #13](https://github.com/ehdud6728-bit/Stock-Hunter/pull/13)은 대체 수집 경로로 유지하며 별도 Secret 불필요.
+
 ## 2026-11-20 (KST) — Turso 전체 종목 기술지표 opt-in 및 과거 날짜 검색 자동 분석 연결
 
 - **사용자 문제/결정:** 패턴에 해당한 약 243종목만 저장하는 기존 연구 스냅샷과 별개로, 전체 종목의 매일 일봉·계산 지표를 누적하는 방향에 동의. 이후 다른 날짜를 검색해도 새로운 분석이 시작되지 않고 상태 표시도 보이지 않는 문제를 보고했으며, Turso 중심 날짜별 분석 실행·진행 표시 개발을 승인.

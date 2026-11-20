@@ -2,6 +2,12 @@
 
 > 업데이트: 2026-11-20 (한국 시간). 이 파일은 개발 인계용 요약이며, 서버의 실시간 상태를 자동으로 반영하지 않습니다.
 
+## 2026-11-20 (KST) — Stock-Hunter 원천 연구에 BLUE 기존 KIS 키 재사용 (별도 수동 액션)
+
+- 사용자 결정: 별도 연구용 KIS 앱키를 재발급·Stock-Hunter로 복사하지 않고, KIS Secrets를 보유한 BLUE에서 삼성SDI 2023년 원주가·수정주가를 조회한다. BLUE는 **읽기 전용 원천 수집**, Stock-Hunter R8 고정 커밋은 **독립 5일 추세선 검증**을 맡는다.
+- 수동 전용 `blue_stockhunter_r9_kis_price_bridge_research_only.yml`은 `dry_run` 기본, `capture`에서 기존 **유효한** Turso 암호화 접근토큰을 SELECT 한 번으로 읽어 KIS 날짜 지정 시세 GET 두 번만 호출한다. `tokenP`, 주문·D1 SQL·Turso 쓰기·Worker/PWA 배포·기존 운영 스케줄 변경 없음. 토큰 만료 시 새로 발급하지 않고 중단; 기존 단일 토큰 관리자 컷오버 보호 유지.
+- 결과 CSV·메타데이터·R8 5일 감사는 GitHub Actions 아티팩트만 생성한다. 5일 원천 대조는 전체 R116 연구 재실행/실전 수익성 인증과 별개. 실제 KIS 조회는 병합 후 사용자 수동 실행 전까지 미검증. [상세 실행 지침](STOCKHUNTER_R9_KIS_BRIDGE.md).
+
 ## 2026-11-20 (KST) — 전체 종목 지표 보존과 미분석 날짜의 Turso 검색 실행 (코드 준비)
 
 - **저장 구분:** 감사된 KRX `blue_eod_daily_v1`는 전 거래 종목의 OHLCV와 금액을 기록합니다. 기존 `blue_research_signals_v1`는 패턴에 일치한 종목만 보존합니다. 추가 `blue_indicators_daily_v1`는 전체 종목의 일별 이평·BB/ENV·RSI·MACD·Stochastic·거래대금 비율과 미계산 상태를 보존하도록 코드 준비. 현재 기본 OFF, `BLUE_TURSO_RESEARCH_AUTO_ENABLED=true`와 별개 `BLUE_TURSO_ALL_INDICATORS_AUTO_ENABLED=true`를 모두 켜거나 수동 `include_indicators=true`를 선택해야 쓰기를 시도합니다. 원천 일봉의 전체 종목·종가와 정확히 일치하지 않으면 지표를 저장하지 않습니다. **과거 1~2년 일봉 전체 백필과 지표 조회 API/UI는 아직 미구현**입니다.
