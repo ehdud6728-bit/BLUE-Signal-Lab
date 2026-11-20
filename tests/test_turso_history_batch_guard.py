@@ -19,6 +19,9 @@ class HistoryGuardTest(unittest.TestCase):
                     / 'blue_turso_history_research_batch.yml').read_text(encoding='utf-8')
         self.assertNotIn('--years 2', workflow)
         self.assertIn('--date "$DAY" --years "$RESEARCH_YEARS"', workflow)
+        self.assertIn('--verified-eod-dir output/history/eod', workflow)
+        self.assertLess(workflow.index('eod-range-import.mjs --mode=dry_run'),
+                        workflow.index('python scripts/market_scan_r11.py --date "$DAY"'))
         command = re.search(r'RESEARCH_YEARS="\$\(python3 -c \'([^\']+)\' "\$DAY"\)"', workflow)
         self.assertIsNotNone(command, 'Historical scan must derive years for every selected day')
         for day, expected in (

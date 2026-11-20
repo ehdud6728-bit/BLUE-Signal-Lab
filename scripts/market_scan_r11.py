@@ -35,6 +35,7 @@ from zone_reaction_r15111 import analyze_zone_reactions
 from market_scan_r08_diagnostics import macd_metrics
 from corporate_actions import (adjust_verified_actions, ADJUSTED, ALREADY_ADJUSTED,
                                REVIEW, VERIFIED_ACTIONS)
+from turso_history_replay_source import load_verified_day
 
 KST = timezone(timedelta(hours=9))
 EOD_MIN_TIME_KST = time(15, 40)
@@ -200,6 +201,32 @@ def selected_provider(provider: str, key: str, has_account: bool) -> str:
     return provider
 
 
+def merge_verified_days(raw: pd.DataFrame, target: date, additions: list[pd.DataFrame],
+                        added_days: list[str]) -> pd.DataFrame:
+    """Replace only proved EOD dates; preserve marcap as-of historical bars."""
+    base = raw.reset_index() if "Date" not in raw.columns and raw.index.name == "Date" else raw.copy()
+    if "Date" not in base.columns or "Code" not in base.columns:
+        raise SourcePending("MARCAP_DATE_CODE_MISSING")
+    dates_to_replace = {date.fromisoformat(v) for v in added_days}
+    base = base.loc[~pd.to_datetime(base.Date).dt.date.isin(dates_to_replace)].copy()
+    incoming = pd.concat(additions, ignore_index=True)
+    # Preserve known names when the independently audited KRX provider has none.
+    if "Name" in raw.columns:
+        named = raw.copy()
+        if "Date" not in named.columns and named.index.name == "Date":
+            named = named.reset_index()
+        named = named.loc[pd.to_datetime(named.Date).dt.date.lt(target)]
+        if not named.empty:
+            named["Code"] = named.Code.astype(str).str.replace(r"\.0$", "", regex=True).str.zfill(6)
+            names = named.sort_values("Date").drop_duplicates("Code", keep="last").set_index("Code")["Name"]
+            empty = incoming["Name"].astype(str).eq("")
+            incoming.loc[empty, "Name"] = incoming.loc[empty, "Code"].map(names).fillna("")
+    for col in base.columns:
+        if col not in incoming.columns:
+            incoming[col] = None
+    return pd.concat([base, incoming[base.columns]], ignore_index=True)
+
+
 def upgraded_history(raw: pd.DataFrame, target: date, today: bool, provider: str,
                      key: str, stock_module=None, session=requests, max_days: int = 45,
                      allow_verified_fallback: bool = False, force_exact_day: bool = False):
@@ -259,27 +286,7 @@ def upgraded_history(raw: pd.DataFrame, target: date, today: bool, provider: str
         added_days.append(d.isoformat())
     if target.isoformat() not in added_days:
         raise SourcePending("KRX_TARGET_DATE_NOT_PROVEN")
-    base = raw.reset_index() if "Date" not in raw.columns and raw.index.name == "Date" else raw.copy()
-    if "Date" not in base.columns or "Code" not in base.columns:
-        raise SourcePending("MARCAP_DATE_CODE_MISSING")
-    dates_to_replace = {date.fromisoformat(v) for v in added_days}
-    base = base.loc[~pd.to_datetime(base.Date).dt.date.isin(dates_to_replace)].copy()
-    incoming = pd.concat(additions, ignore_index=True)
-    # Preserve known stock names from historical marcap where pykrx only supplies code.
-    if "Name" in raw.columns:
-        named = raw.copy()
-        if "Date" not in named.columns and named.index.name == "Date":
-            named = named.reset_index()
-        named = named.loc[pd.to_datetime(named.Date).dt.date.lt(target)]
-        if not named.empty:
-            named["Code"] = named.Code.astype(str).str.replace(r"\.0$", "", regex=True).str.zfill(6)
-            names = named.sort_values("Date").drop_duplicates("Code", keep="last").set_index("Code")["Name"]
-            empty = incoming["Name"].astype(str).eq("")
-            incoming.loc[empty, "Name"] = incoming.loc[empty, "Code"].map(names).fillna("")
-    for col in base.columns:
-        if col not in incoming.columns:
-            incoming[col] = None
-    combined = pd.concat([base, incoming[base.columns]], ignore_index=True)
+    combined = merge_verified_days(raw, target, additions, added_days)
     source = ("KRX Open API exact-date verified fallback"
               if used_openapi_fallback else
               "KRX pykrx verified account daily" if provider == "pykrx"
@@ -480,6 +487,8 @@ def main():
     p.add_argument("--years", default="2025,2026")
     p.add_argument("--out", default="output")
     p.add_argument("--local-data-dir")
+    p.add_argument("--verified-eod-dir", default="",
+                   help="Use the already audited KRX EOD range for the selected historical day")
     p.add_argument("--daily-provider", choices=["auto", "openapi", "pykrx"], default="auto")
     p.add_argument("--turso-indicators-out", default="",
                    help="Optional full-market indicator snapshot files; never writes databases")
@@ -494,7 +503,13 @@ def main():
                        (os.getenv("KRX_DATA_PW") or os.getenv("KRX_PW")))
     prices = normalise(raw)
     requires_fetch = bool(args.turso_indicators_out) or today or target > prices.date.max().date() or len(prices.loc[prices.date.dt.date.eq(target)]) < 1700
-    if requires_fetch:
+    verified_count = None
+    if args.verified_eod_dir:
+        verified_day, target_source = load_verified_day(args.verified_eod_dir, target)
+        verified_count = len(verified_day)
+        upgraded = merge_verified_days(raw, target, [verified_day], [target.isoformat()])
+        days = [target.isoformat()]
+    elif requires_fetch:
         provider = selected_provider(args.daily_provider, key, has_account)
         upgraded, days, target_source = upgraded_history(
             raw, target, today, provider, key,
@@ -507,6 +522,8 @@ def main():
     analysis_raw, corporate_actions_audit = adjust_verified_actions(upgraded, target)
     all_indicators = [] if args.turso_indicators_out else None
     rows, audit = scan_r08(analysis_raw, target.isoformat(), indicator_sink=all_indicators)
+    if verified_count is not None and audit['observed_stocks'] != verified_count:
+        raise ValueError('HISTORY_KRX_RESEARCH_UNIVERSE_MISMATCH')
     for row in rows:
         row["source"] = target_source
         row["data_frequency"] = "EOD_DAILY"

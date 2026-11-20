@@ -13,10 +13,12 @@
 워크플로: [BLUE Turso Bounded History + Pattern Replay](../.github/workflows/blue_turso_history_research_batch.yml)
 
 1. **`main`에서 `plan`:** 지정 시작·끝 날짜를 검사합니다. DB/KRX/KIS/Gemini 접근 **0회**. 현재로부터 760일 이내, 마지막 날짜는 한국 시간 어제 이전, 최대 **7달력일/5평일**. 자동 예약 없음.
-2. **`dry_run`:** 정확한 날짜별 KRX KOSPI·KOSDAQ EOD 원천을 요청하고 모든 범위의 EOD·과거 R1.1 연구 출처/일자/원장·해시를 검증합니다. **Turso 연결/쓰기 없음**. `include_indicators=true`일 경우 2,600여 종목 전부의 지표도 미리 검증하되 저장하지 않습니다.
+2. **`dry_run`:** 정확한 날짜별 KRX KOSPI·KOSDAQ EOD 원천을 요청하고 모든 범위의 EOD·과거 R1.1 연구 출처/일자/원장·해시를 검증합니다. 이때 **동일한 해시 검증 EOD 파일을 R1.1 스캐너의 목표일에 재사용**하고 marcap 과거 봉은 지표에 필요한 이전 이력에만 사용합니다. `observed_stocks`가 해당 KRX 목표일 건수와 다르면 거부하며, 공급자를 다시 호출하지 않습니다. **Turso 연결/쓰기 없음**. `include_indicators=true`일 경우 2,600여 종목 전부의 지표도 미리 검증하되 저장하지 않습니다.
 3. **`apply`:** 각 날짜의 자료 **전부** 사전 검증에 성공한 뒤에만 기존 엄격·멱등 Turso EOD writer→패턴 스냅샷 writer를 순차 사용합니다. 승인 문자열은 `blue-turso-history-시작일-끝일` (예 `blue-turso-history-2026-11-09-2026-11-12`)과 정확히 일치해야 합니다. `include_indicators` 저장은 별도 `confirm_indicators=blue-turso-all-indicators` 승인까지 필요합니다. D1 SQL 0회, KIS tokenP 0회.
 
 **중요:** 휴장일이 범위에 포함되면 거래소 공식 캘린더를 추정해 자동 건너뛰지 않습니다. 소스 검증이 실패하면 그 범위를 중단하고 휴장 여부를 확인한 뒤 범위를 다시 선택합니다. 기존 날짜의 원천·가격·감사 해시가 달라졌을 경우 기존 자료를 변경하거나 삭제하지 않고 실패시킵니다. 일부 날짜만 성공한 후 네트워크 오류가 발생하면 기존 멱등 writer로 원장을 확인하고 재실행해야 합니다. **1~2년 전체 저장은 복수의 제한된 날짜 범위 작업**이 필요하고, KRX 공급자 보유 기간·호출량/용량·GitHub Actions 시간을 별도 검증해야 합니다. 현재 코드가 한 번의 실행으로 2년을 끝낸다는 뜻은 아닙니다.
+
+**2026-11-20 실행 주의:** [과거 4일 `dry_run` #44667107812](https://github.com/ehdud6728-bit/BLUE-Signal-Lab/actions/runs/44667107812)는 이전 버전에서 성공했으나, EOD 10,651건과 과거 marcap 기반 패턴 분석 관측 10,451건이 달랐습니다. 그때의 패턴 798건은 정합성 확인 전 수치입니다. 같은 KRX 데이터에 정렬되도록 개선한 버전을 병합한 후 **먼저 해당 4일 `dry_run`을 다시 실행**하고, 이후 `apply` 여부를 별도로 결정해야 합니다. 기존 D1 및 Turso 값은 덮어쓰지 않습니다.
 
 ## B. 단기·장기 패턴 첫 익절/손절 연구 및 선택적 게시
 
