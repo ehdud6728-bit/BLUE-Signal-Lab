@@ -2,6 +2,15 @@
 
 새 채팅에서 프로젝트를 이어가기 위한 **결정/구현/검증 이력**입니다. 대화 전체를 저장하지 않고 실제 개발에 필요한 내용만 보존합니다. 최신 항목을 위에 추가하고, 결과가 달라지면 추측 대신 검증된 상태로 수정합니다.
 
+## 2026-11-20 (KST) — Turso AI 패턴·익절·손절 데이터 준비 1단계 (PR 준비)
+
+- **운영 기준:** PR #51 병합 `3ada75f89c7b9d5037e66b799b7388366f97094e`, [API #44644472568](https://github.com/ehdud6728-bit/BLUE-Signal-Lab/actions/runs/44644472568)와 [웹 #44644643775](https://github.com/ehdud6728-bit/BLUE-Signal-Lab/actions/runs/44644643775) 실제 배포 성공. 모바일 화면 렌더링 자체는 미확인.
+- **추가 요구:** 단순 D+10 성과나 일반적 AI 시황보다 **최근 잘 작동하는 패턴·종목별 후보·시장 국면별 성능·언제 익절하고 언제 손절/시간 청산할지**를 우선. 과거 1~2년 전체 종목 EOD 백필이 아직 없어 충분한 과거 데이터가 있다고 간주하지 않음.
+- **구현:** Turso 감사 원장 EOD/패턴 일자·행수 **읽기 전용** `/api/research/coverage`, Turso UI `AI 패턴` 데이터 준비 카드. 동일 Worker의 구 D1 AI 시장 리포트를 Turso 모드에서 호출하지 않음. `scripts/exit_policy_research.py` 오프라인 first-touch 익절/손절/시간청산·갭·모호한 일봉 판정. 실제 투자 후보/AI 모델 출력/패턴 백필/DB 쓰기/발급/주문 미시행.
+- **기준:** 미래 일봉을 미리 아는 방식으로 신호일 종가 진입 금지(다음 거래일 시가 사용), 양방향 터치 모호함은 손절 우선, 갭 손절 미화 금지, 미완성 보유기간은 `PENDING`, 샘플 1~11건은 탐색적 소표본.
+- **로컬 검증:** Turso UI/API/브라우저 안전 Node **54/54**, 오프라인 익절·손절 Python **8/8**, Turso 연구 guard/export Python 각각 통과, 원장 import Node **9/9**, 웹 TypeScript/Vite 빌드·API Wrangler `--dry-run`·워크플로 YAML 구문·`git diff --check` 통과. 기존 `test_market_scan_r11.py` 재실행은 현재 로컬 Python에 `requests`가 없어 **시작 전 실패**했으며 CI는 `requests`/`numpy`/`pandas`를 설치한 뒤 실행하도록 설정. 해당 기존 테스트의 성공을 주장하지 않음.
+- **다음:** PR CI/웹·API 빌드 검사 → 사용자 병합/수동 API+웹 배포 → Turso 실제 감사 원장 커버리지 확인 → 사용자 승인 하에 범위 제한 historical dry-run/백필 → 최근 20·60·120거래일 이벤트/시장 국면/익절·손절 walk-forward 통계 → Gemini 모델 설명 연결. [상세 계획](TURSO_AI_PATTERN_EXIT_PLAN.md).
+
 ## 2026-11-20 (KST) — 과거 날짜 자동 분석 진행 카드·실제 단계 표시 (PR 준비)
 
 - **운영 증거:** PR #50 병합 `012107165d1fad7d5e8bbcd7782c7c2506c6f99a`. [API #44636946023](https://github.com/ehdud6728-bit/BLUE-Signal-Lab/actions/runs/44636946023)와 [웹 #44637083823](https://github.com/ehdud6728-bit/BLUE-Signal-Lab/actions/runs/44637083823) 실제 배포 성공. 사용자 2026-11-16 검색 후 [자동 Turso 통합 EOD·연구 #44637541535](https://github.com/ehdud6728-bit/BLUE-Signal-Lab/actions/runs/44637541535)가 2026-11-20 08:25:32~08:29:41 KST(4분 9초) 성공; 전체시장 일봉·연구 단계 성공, 지표 opt-in 단계는 의도대로 skipped.

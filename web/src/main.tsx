@@ -5,6 +5,7 @@ import PriceCompareMini from './PriceCompareMini';
 import SymbolAnalysisPanel from './SymbolAnalysisPanel';
 import TursoEodRecovery, {type TursoDay} from './TursoEodRecovery';
 import TursoResearchProgress from './TursoResearchProgress';
+import TursoAiReadiness from './TursoAiReadiness';
 import {type TursoProgressStage} from './turso-research-progress';
 import {requestSearchPriority} from './search-priority';
 import {comparisonKey,fetchCompared,fetchComparedTursoFirst,fetchComparedTursoOnly,
@@ -777,7 +778,8 @@ function App(){
       </div>
     </header>
     <div className="r1594-view-toolbar" role="group" aria-label="현재 화면 데이터 새로고침">
-      <span>{({research:'종목 검색',analysis:'종목 정밀분석',tracking:'종목 추적',ai:'AI 시황',basket:'장바구니'} as const)[activeView]}</span>
+      <span>{activeView==='ai'&&storageMode==='turso'?'AI 패턴':
+        ({research:'종목 검색',analysis:'종목 정밀분석',tracking:'종목 추적',ai:'AI 시황',basket:'장바구니'} as const)[activeView]}</span>
       <button type="button" disabled={activeView==='research'&&(busy||requestBusy)}
         onClick={refreshCurrentView}><RefreshCw size={16}/> 새로고침</button>
     </div>
@@ -897,8 +899,11 @@ function App(){
           {(storageMode==='d1'||(storageMode==='turso'&&activeView==='tracking'))&&<LiveMarket active={activeView==='tracking'} refreshKey={r1594TrackingRefresh}/>}
         </div>
         <div className={'r152-ai-content '+(activeView==='ai'?'':'r151-hidden')}>
-          {mode==='single'&&latest&&date>latest&&<p className="r159-data-note">{date}에는 저장된 확정 일봉이 없어, AI 시황은 최근 저장일 {latest} 기준으로 조회합니다.</p>}
-          {(storageMode==='d1'||(storageMode==='turso'&&activeView==='ai'))&&<section ref={aiRef} id="ai-panel" className="r152-ai-section">
+          {storageMode==='d1'&&mode==='single'&&latest&&date>latest&&<p className="r159-data-note">{date}에는 저장된 확정 일봉이 없어, AI 시황은 최근 저장일 {latest} 기준으로 조회합니다.</p>}
+          {storageMode==='turso'&&activeView==='ai'&&<section ref={aiRef} id="ai-panel" className="r152-ai-section">
+            <TursoAiReadiness key={r1594AiRefresh} api={API} active={true}/>
+          </section>}
+          {storageMode==='d1'&&<section ref={aiRef} id="ai-panel" className="r152-ai-section">
             <AiWidget key={'market-'+aiReportDay+'-'+r1594AiRefresh} kind="market"
               date={aiReportDay}
               observed={mode==='single'?days.find(d=>d.day===aiReportDay)?.observed_stocks:null}
@@ -1118,7 +1123,7 @@ function App(){
       <button className={activeView==='research'?'dock-primary':''} onClick={()=>nav('search')}><BarChart3 size={20}/><span>검색</span></button>
       <button className={activeView==='analysis'?'dock-primary':''} onClick={()=>nav('analysis')}><ScanSearch size={20}/><span>정밀분석</span></button>
       <button className={activeView==='tracking'?'dock-primary':''} onClick={()=>nav('tracking')}><Radar size={20}/><span>추적</span></button>
-      <button className={activeView==='ai'?'dock-primary':''} onClick={()=>nav('ai')}><Activity size={20}/><span>AI 시황</span></button>
+      <button className={activeView==='ai'?'dock-primary':''} onClick={()=>nav('ai')}><Activity size={20}/><span>{storageMode==='turso'?'AI 패턴':'AI 시황'}</span></button>
       <button className={activeView==='basket'?'dock-primary':''} onClick={()=>nav('basket')}><ShoppingBasket size={20}/><span>장바구니</span></button>
     </nav>
     {selected&&<div className="detail-overlay" role="presentation" onMouseDown={e=>{if(e.target===e.currentTarget)closeDetail();}}>

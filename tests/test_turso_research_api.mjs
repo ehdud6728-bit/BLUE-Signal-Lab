@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict';
 import {test} from 'node:test';
 import {DatabaseSync} from 'node:sqlite';
-import {InvalidResearchQuery,tursoResearchDates,tursoResearchSearch,tursoResearchChart} from '../worker/src/turso-research.ts';
+import {InvalidResearchQuery,tursoResearchDates,tursoResearchSearch,tursoResearchChart,
+  tursoResearchCoverage} from '../worker/src/turso-research.ts';
 
 const env={TURSO_DATABASE_URL:'libsql://unit.invalid',TURSO_AUTH_TOKEN:'dummy'};
 const day='2026-11-18';
@@ -52,6 +53,19 @@ test('dates are independently audited and require no D1',async()=>{
   assert.deepEqual(out.items[0],{day,matched_stocks:2,observed_stocks:2660,signal_events:3});
   assert.equal(db.closed,1);
   assert.equal(db.calls.length,1);
+});
+
+test('AI readiness is audit-ledger coverage only and does not invent history',async()=>{
+  const db=setup(),out=await tursoResearchCoverage(env,db.factory);
+  assert.equal(out.storage,'TURSO');
+  assert.equal(out.status,'AUDIT_COUNTS_ONLY');
+  assert.deepEqual(out.eod,{audited_days:1,first_day:'2026-11-19',
+    last_day:'2026-11-19',declared_rows:2660});
+  assert.equal(out.research.audited_days,1);
+  assert.equal(out.readiness,'INSUFFICIENT_FOR_RECENT_EXIT_RESEARCH');
+  assert.equal(db.calls.length,2);
+  assert.ok(db.calls.every(x=>!x.sql.includes('D1')&&!x.sql.includes('scan_requests')));
+  assert.equal(db.closed,1);
 });
 
 test('all filters are evaluated before paging with exact historical chart setups',async()=>{
