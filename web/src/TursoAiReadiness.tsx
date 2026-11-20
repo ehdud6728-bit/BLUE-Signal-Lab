@@ -1,5 +1,6 @@
 import {useEffect,useState} from 'react';
 import {Database,ShieldCheck,Activity,AlertCircle} from 'lucide-react';
+import TursoPatternPulse from './TursoPatternPulse';
 import './turso-ai-readiness.css';
 
 type AuditCount={audited_days:number;first_day:string|null;last_day:string|null;declared_rows:number};
@@ -49,6 +50,7 @@ export default function TursoAiReadiness({api,active}:{api:string;active:boolean
       </p>
       <p className="turso-ai-coverage-note">{coverage.note}</p>
     </>}
+    <TursoPatternPulse api={api} active={active}/>
     <h3>다음 분석 범위</h3>
     <ol className="turso-ai-next">
       <li>과거 1~2년 전체 종목 확정 일봉을 누락·원천·기업행동 기준으로 검증</li>
