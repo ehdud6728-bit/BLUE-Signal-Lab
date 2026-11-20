@@ -2,11 +2,11 @@ import assert from 'node:assert/strict';
 import {test} from 'node:test';
 import {DatabaseSync} from 'node:sqlite';
 import {InvalidResearchQuery,tursoResearchDates,tursoResearchSearch,tursoResearchChart,
-  tursoResearchCoverage} from '../worker/src/turso-research.ts';
+  tursoResearchCoverage,tursoPatternPulse} from '../worker/src/turso-research.ts';
 
 const env={TURSO_DATABASE_URL:'libsql://unit.invalid',TURSO_AUTH_TOKEN:'dummy'};
 const day='2026-11-18';
-function setup({partial=false,backendError=false}={}){
+function setup({partial=false,backendError=false,wrongSource=false,additionalDays=false}={}){
   const db=new DatabaseSync(':memory:');
   db.exec(`CREATE TABLE blue_research_signal_audit_v1 (
     trade_day TEXT,row_count INT,observed_stocks INT,signal_events INT,source_payload_sha256 TEXT);
@@ -31,7 +31,21 @@ function setup({partial=false,backendError=false}={}){
     .run(day,2,2660,3,'abc');
   for(const [code,close,names,extras,up] of rows.slice(0,partial?1:2)){
     db.prepare(`INSERT INTO blue_research_signals_v1 VALUES (?,?,?,?,?,?,?,?)`)
-      .run(day,code,'blue_market_20261118',names,close,'hash','abc',make(code,close,names,extras,up));
+      .run(day,code,'blue_market_20261118',names,close,'hash',wrongSource&&code==='000660'?'wrong':'abc',
+        make(code,close,names,extras,up));
+  }
+  if(additionalDays){
+    const dates=['2026-11-17','2026-11-16','2026-11-13','2026-11-12',
+      '2026-11-11','2026-11-10','2026-11-09','2026-11-06','2026-11-05'];
+    for(const [i,tradeDay] of dates.entries()){
+      const recent=i<4,names=recent?'BB20,BB30':'BB30';
+      db.prepare('INSERT INTO blue_research_signal_audit_v1 VALUES (?,?,?,?,?)')
+        .run(tradeDay,2,2660,recent?4:3,'abc');
+      db.prepare('INSERT INTO blue_research_signals_v1 VALUES (?,?,?,?,?,?,?,?)')
+        .run(tradeDay,'005930','blue_market_test','BB20,ENV20_LOWER_TOUCH',10000,'hash','abc','{}');
+      db.prepare('INSERT INTO blue_research_signals_v1 VALUES (?,?,?,?,?,?,?,?)')
+        .run(tradeDay,'000660','blue_market_test',names,20000,'hash','abc','{}');
+    }
   }
   db.prepare('INSERT INTO blue_eod_ingest_audit_v1 VALUES (?,?)').run('2026-11-19',2660);
   db.prepare('INSERT INTO blue_eod_daily_v1 VALUES (?,?,?,?)').run('2026-11-19','005930',11100,9000);
@@ -66,6 +80,52 @@ test('AI readiness is audit-ledger coverage only and does not invent history',as
   assert.deepEqual(out.goals.rolling_windows,[5,10,20,60,120,250,500]);
   assert.equal(db.calls.length,2);
   assert.ok(db.calls.every(x=>!x.sql.includes('D1')&&!x.sql.includes('scan_requests')));
+  assert.equal(db.closed,1);
+});
+
+test('recent five-day pulse reports audited pattern activity only, never profitability',async()=>{
+  const db=setup(),out=await tursoPatternPulse(env,db.factory);
+  assert.equal(out.storage,'TURSO');
+  assert.equal(out.status,'PARTIAL_PATTERN_ACTIVITY');
+  assert.equal(out.recent_days.length,1);
+  assert.equal(out.prior_days.length,0);
+  assert.equal(out.baseline_complete,false);
+  assert.equal(out.outcomes_verified,false);
+  assert.equal(out.patterns.length,3);
+  assert.deepEqual(out.patterns.map(x=>x.name).sort(),['BB20','BB30','ENV20_LOWER_TOUCH']);
+  assert.ok(out.patterns.every(x=>x.recent_occurrences===1&&x.relative_change_pct===null));
+  assert.equal(db.calls.length,3);
+  assert.ok(db.calls.every(x=>!x.sql.includes('ai_analysis_cache')));
+  assert.equal(db.closed,1);
+});
+
+test('incomplete research rows are rejected before any pulse trend is returned',async()=>{
+  const db=setup({partial:true});
+  await assert.rejects(()=>tursoPatternPulse(env,db.factory),
+    /TURSO_PULSE_INCOMPLETE_AUDITED_DAY/);
+  assert.equal(db.closed,1);
+});
+
+test('five audited days compare to five previous audited days on normalized counts',async()=>{
+  const db=setup({additionalDays:true}),out=await tursoPatternPulse(env,db.factory);
+  assert.equal(out.status,'AUDITED_PATTERN_ACTIVITY');
+  assert.equal(out.recent_days.length,5);
+  assert.equal(out.prior_days.length,5);
+  assert.equal(out.baseline_complete,true);
+  assert.equal(out.session_continuity_verified,false);
+  const bb20=out.patterns.find(p=>p.name==='BB20');
+  assert.equal(bb20?.recent_occurrences,9);
+  assert.equal(bb20?.previous_occurrences,5);
+  assert.equal(bb20?.relative_change_pct,80);
+  assert.equal(out.patterns[0].name,'BB20');
+  assert.equal(db.calls.length,3);
+  assert.equal(db.closed,1);
+});
+
+test('even with matching row counts a wrong audit source hash rejects the pulse',async()=>{
+  const db=setup({wrongSource:true});
+  await assert.rejects(()=>tursoPatternPulse(env,db.factory),
+    /TURSO_PULSE_INCOMPLETE_AUDITED_DAY/);
   assert.equal(db.closed,1);
 });
 

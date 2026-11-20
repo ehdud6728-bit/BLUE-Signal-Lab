@@ -80,6 +80,82 @@ export async function tursoResearchCoverage(env:ResearchEnv,factory?:Factory){
   },factory);
 }
 
+/** Descriptive pattern activity from the latest 5 audited research days.
+ * Previous five audit days are a baseline only when available. Never interpret
+ * this as trade performance, profitability, contiguous sessions or advice.
+ */
+export async function tursoPatternPulse(env:ResearchEnv,factory?:Factory){
+  return withClient(env,async client=>{
+    const audit=await client.execute(`SELECT trade_day,row_count,observed_stocks,signal_events
+      FROM blue_research_signal_audit_v1 ORDER BY trade_day DESC LIMIT 10`);
+    const days=audit.rows.map(r=>({day:String(r.trade_day),matched:Number(r.row_count),
+      observed:Number(r.observed_stocks),events:Number(r.signal_events)}));
+    if(days.some((r,i)=>!dayValid(r.day)||(i>0&&r.day>=days[i-1].day)||
+      ![r.matched,r.observed,r.events].every(Number.isSafeInteger)||
+      r.observed<1700||r.observed>10000||r.matched<0||r.matched>r.observed||
+      r.events<r.matched||r.events>r.matched*30))
+      throw Error('TURSO_PULSE_INVALID_AUDIT');
+    const recent=days.slice(0,5),previous=days.slice(5,10);
+    if(!days.length)return {storage:'TURSO',status:'NO_AUDITED_RESEARCH',recent_days:[],
+      prior_days:[],patterns:[],baseline_complete:false,outcomes_verified:false,
+      note:'감사된 패턴 연구 날짜가 없습니다. 패턴 출현·성숙 수익률을 표시하지 않습니다.'};
+    const placeholders=days.map(()=>'?').join(','),args=days.map(r=>r.day);
+    const counts=await client.execute({sql:`SELECT s.trade_day,COUNT(*) AS n,
+      SUM(CASE WHEN a.source_payload_sha256=s.source_payload_sha256 THEN 1 ELSE 0 END) AS verified,
+      COALESCE(SUM(1+LENGTH(s.signal_names)-LENGTH(REPLACE(s.signal_names,',',''))),0) AS events
+      FROM blue_research_signals_v1 s JOIN blue_research_signal_audit_v1 a
+      ON a.trade_day=s.trade_day
+      WHERE s.trade_day IN (${placeholders}) GROUP BY s.trade_day`,args});
+    const actual=new Map(counts.rows.map(r=>[String(r.trade_day),
+      {matched:Number(r.n),verified:Number(r.verified),events:Number(r.events)}]));
+    if(counts.rows.length>days.length||days.some(d=>{
+      const got=actual.get(d.day)||{matched:0,verified:0,events:0};
+      return ![got.matched,got.verified,got.events].every(Number.isSafeInteger)||
+        got.matched!==d.matched||got.verified!==d.matched||got.events!==d.events;
+    }))throw Error('TURSO_PULSE_INCOMPLETE_AUDITED_DAY');
+    const tokens=await client.execute({sql:`SELECT s.trade_day,CAST(tag.value AS TEXT) AS label,
+      COUNT(*) AS n FROM blue_research_signals_v1 s
+      JOIN blue_research_signal_audit_v1 a ON a.trade_day=s.trade_day
+        AND a.source_payload_sha256=s.source_payload_sha256
+      JOIN json_each('["'||REPLACE(s.signal_names,',','","')||'"]') tag
+      WHERE s.trade_day IN (${placeholders})
+      GROUP BY s.trade_day,tag.value`,args});
+    const dayMap=new Map(days.map(d=>[d.day,d]));
+    const recentMap=new Map<string,number>(),priorMap=new Map<string,number>();
+    const dailyEvents=new Map<string,number>();
+    for(const token of tokens.rows){
+      const day=String(token.trade_day),name=String(token.label),n=Number(token.n);
+      const d=dayMap.get(day);
+      if(!d||!/^[A-Z0-9_]{2,60}$/.test(name)||!Number.isSafeInteger(n)||
+        n<1||n>d.matched)throw Error('TURSO_PULSE_INVALID_SIGNAL');
+      const group=recent.some(r=>r.day===day)?recentMap:priorMap;
+      group.set(name,(group.get(name)||0)+n);
+      dailyEvents.set(day,(dailyEvents.get(day)||0)+n);
+    }
+    if(days.some(d=>(dailyEvents.get(d.day)||0)!==d.events))
+      throw Error('TURSO_PULSE_EVENT_COUNT_MISMATCH');
+    const recentObserved=recent.reduce((sum,r)=>sum+r.observed,0);
+    const priorObserved=previous.reduce((sum,r)=>sum+r.observed,0);
+    const baselineComplete=previous.length===5;
+    const patterns=[...recentMap].map(([name,occurrences])=>{
+      const prior=priorMap.get(name)||0;
+      return {name,recent_occurrences:occurrences,
+        recent_per_1000_stock_days:Math.round(10000*occurrences/recentObserved)/10,
+        previous_occurrences:baselineComplete?prior:null,
+        previous_per_1000_stock_days:baselineComplete&&priorObserved?
+          Math.round(10000*prior/priorObserved)/10:null,
+        relative_change_pct:baselineComplete&&prior>=3&&occurrences>=3&&priorObserved?
+          Math.round(100*(occurrences/recentObserved/(prior/priorObserved)-1)*10)/10:null};
+    }).sort((a,b)=>b.recent_occurrences-a.recent_occurrences||a.name.localeCompare(b.name));
+    return {storage:'TURSO',status:recent.length===5?'AUDITED_PATTERN_ACTIVITY':'PARTIAL_PATTERN_ACTIVITY',
+      recent_days:recent.map(({day,matched,observed,events})=>({day,matched,observed,events})),
+      prior_days:previous.map(({day,matched,observed,events})=>({day,matched,observed,events})),
+      patterns,baseline_complete:baselineComplete,outcomes_verified:false,
+      session_continuity_verified:false,
+      note:'최근 감사 완료 연구일의 기술신호 발생 횟수입니다. 출현 변화는 매매 수익률·성공 확률·종목 추천이 아니며 실제 거래일 연속성·성숙한 청산 성과는 검증 전입니다.'};
+  },factory);
+}
+
 export async function tursoResearchSearch(env:ResearchEnv,p:URLSearchParams,factory?:Factory){
   const mode=p.get('mode')||'single';if(!['single','range'].includes(mode))bad();
   const start=mode==='single'?(p.get('date')||''):(p.get('start')||'');
