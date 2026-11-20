@@ -8,8 +8,8 @@
 - **앱/API:** 감사된 최신 Turso 패턴 날짜보다 새 날짜를 검색하면 불필요한 미수집 SQL 조회를 생략하고 즉시 미완성 안내(15:40 전) 또는 기존 GitHub Actions 분석 요청/진행 카드(15:40 후) 표시. 새 GET `/api/research/provisional`은 저장된 `blue_kis_provisional_daily_v1`를 Turso SELECT로만 검색하고 실제 수집 종목 수, 전일 감사 시장 수, KIS 잠정 수신시각·가격을 별도 카드에 표시. **오늘 신규 기술신호/전체종목 패턴이 아니라 잠정 수집 부분 집합**임을 명시.
 - **KIS 제한/우선순위:** 기존 time-box PILOT은 10종목/분 유지. 별도 승인 FULL에서만 처음 20→성공 시 25/30/35/최대 40종목/분. KIS `EGW00201` 또는 HTTP 429면 나머지 호출 즉시 중단·Turso에 3분 cooldown 저장·다음 배치 예산 절반; 5분마다 최근 감사 완료된 패턴 종목 최대 8개를 일반 종목보다 먼저 관측. 장바구니와 종목추적은 별도 기존 Collector 경로를 유지하고, 실제 동시 사용 가능한 KIS 쿼터는 아직 미측정. 새 토큰 발급/tokenP/D1 수정 없음.
 - **장마감 확정:** 기존 평일 22:20 KST `blue_turso_daily_verified_eod_auto.yml` KRX EOD 예약을 재사용. 같은 워크플로의 R1.1 패턴 자동 분석은 독립 `BLUE_TURSO_RESEARCH_AUTO_ENABLED=true`가 필요하며 이번 코드 변경으로 이 변수를 켜지 않음.
-- **로컬 검증:** 신규/기존 KIS/Turso 조회·수집 회귀 Node **54/54**(HTTP 429/EGW00201 포함), 분석 요청/API 회귀 Node **51/51**, 웹 TypeScript/Vite 빌드·API 및 Collector Wrangler `--dry-run` 성공. 실제 KIS 운영 호출·신규 DB 테이블 생성·API/Collector/PWA 배포 없음. PR CI는 별도 확인.
-- **다음:** PR CI→사용자 병합→API/PWA/Collector 개별 배포→기존 15/30분 파일럿과 조회 시각 확인→FULL 및 마감 연구 자동화는 사용자 별도 승인 후 활성화.
+- **검증과 PR:** 신규/기존 KIS/Turso 조회·수집 회귀 Node **54/54**(HTTP 429/EGW00201 포함), 분석 요청/API 회귀 Node **51/51**, 웹 TypeScript/Vite 빌드·API 및 Collector Wrangler `--dry-run` 성공. [PR #61](https://github.com/ehdud6728-bit/BLUE-Signal-Lab/pull/61)에서 [KIS 안전 CI #44711199998](https://github.com/ehdud6728-bit/BLUE-Signal-Lab/actions/runs/44711199998), [웹 읽기 안전 CI #44711200039](https://github.com/ehdud6728-bit/BLUE-Signal-Lab/actions/runs/44711200039) **모두 성공**. 실제 KIS 운영 호출·신규 DB 테이블 생성·API/Collector/PWA 배포 없음.
+- **다음:** 사용자 병합→API/PWA/Collector 개별 배포→기존 15/30분 파일럿과 조회 시각 확인→FULL 및 마감 연구 자동화는 사용자 별도 승인 후 활성화.
 
 ## 2026-11-20 (KST) — BLUE KIS 기존 유효 토큰으로 Stock-Hunter R9 연구 원천 수집 준비
 
