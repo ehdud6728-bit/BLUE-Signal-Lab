@@ -2,6 +2,14 @@
 
 새 채팅에서 프로젝트를 이어가기 위한 **결정/구현/검증 이력**입니다. 대화 전체를 저장하지 않고 실제 개발에 필요한 내용만 보존합니다. 최신 항목을 위에 추가하고, 결과가 달라지면 추측 대신 검증된 상태로 수정합니다.
 
+## 2026-11-22 (KST) — BLUE 기존 KIS 토큰 활용 Stock-Hunter R16 신규 30종목 2020~2025 원주가 수집 (PR 준비)
+
+- **사용자 결정:** 별도 KRX 키 발급/Stock-Hunter로 비밀정보 복사 대신, 이미 KIS 인증이 있는 **BLUE-Signal-Lab**에서 연구용 원천 데이터만 수집. Stock-Hunter R16 사전 고정 30코드·기간(2020-01-01~2025-12-31) 유지, 실패 종목 교체 금지.
+- **구현:** `tools/turso/stockhunter-r16-kis-history.mjs`는 구 R9 연구 브리지의 `obtainExistingToken()`으로 암호화 Turso 토큰을 읽기 전용 SELECT 1회로 가져온다. KIS 공식 기간별 일봉 `FHKST03010100` 원주가 `FID_ORG_ADJ_PRC=1`만 종료일 역진행 100봉 페이지로 최대 22회/종목·660 GET. 페이지/종목 간 1.75초 간격, 429·권한 거부 즉시 전체 중단. 가격·거래량·거래대금·중복·날짜 검증, 종목별 280봉/35% 갭 사전검사, KIS 각 응답 SHA256·CSV SHA256 기록.
+- 새 `.github/workflows/blue_stockhunter_r16_kis_history_research_only.yml`은 PR 오프라인 검증 및 수동 `dry_run`/명시 확인 `capture`만 제공. 기존 4개 BLUE Secrets 재사용, 신규 tokenP 발급/주문/운영 LIVE·SEARCH·WATCH/D1·Turso 쓰기/웹 배포·예약 실행 **없음**. 원천 CSV와 출처 감사는 GitHub 아티팩트로만 보관. `docs/STOCKHUNTER_R16_KIS_30_HISTORY.md`에서 실행 방법과 부정적 결론 방지 조건 설명.
+- **로컬 검증:** Node 22 코드 단위/모의 HTTP/인증 격리/페이지 역진행/429 중단/원본 SHA 테스트 10/10 성공. 실 KIS 종목 30개 조회·2020~2025 실제 데이터 확보·R116/R14/R15 재실행·독립 기업행동 검증·최종 P&L **미실행/미확인**. CI는 PR 이후 확인 예정. 실제 수집 모드는 사용자 병합 후 `confirm_fixed_scope=true` 수동 선택을 요함.
+- **다음:** PR CI→사용자 병합→기존 토큰 유효 기간 확인→KIS 수동 `capture` 1회→코드별 2020년 최초봉/중단·상장 공백·원주가 기업행동/독립 KRX 일자 대조→Stock-Hunter R16 수입 및 동일 코드 R116/R14/R15 재실행. 유효 20개 이벤트 조건 및 독립 OOS 제한을 통과하기 전 실전 추천 금지.
+
 ## 2026-11-21 (KST) — 현재 종목검색 패턴 11개 동등 비교 보고서 (PR 준비)
 
 - 사용자 요청: Stock-Hunter 55일 돌파/20일 저가 전략이 아니라 **BLUE Signal Lab 현재 Turso 종목검색 화면**에 나오는 패턴을 연구한다. 웹 `tags`와 일치하는 BB20/30/40·ENV20/40·하단/재돌파/ENV20_LOWER_TOUCH의 11개 기본 선택 신호를 고정 목록으로 사용한다.

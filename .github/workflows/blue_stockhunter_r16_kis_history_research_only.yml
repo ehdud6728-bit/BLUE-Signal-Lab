@@ -1,0 +1,96 @@
+name: BLUE to Stock-Hunter R16 KIS 30 Tickers History (RESEARCH ONLY)
+
+on:
+  pull_request:
+    paths:
+      - 'tools/turso/stockhunter-r16-kis-history.mjs'
+      - 'tools/turso/stockhunter-r16-kis-history.test.mjs'
+      - '.github/workflows/blue_stockhunter_r16_kis_history_research_only.yml'
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: 'dry_run is offline; capture reads existing BLUE Turso KIS token and GETs fixed R16 daily history'
+        type: choice
+        required: true
+        default: dry_run
+        options: [dry_run, capture]
+      confirm_fixed_scope:
+        description: 'Set true to explicitly allow 30 tickers x 2020-2025, up to 660 KIS historical GETs'
+        type: boolean
+        default: false
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: blue-stockhunter-r16-kis-history-research
+  cancel-in-progress: false
+
+jobs:
+  offline_safety:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout research code without persistent credentials
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Set up Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Test source validation, date pagination, fail-closed and secret isolation
+        run: node --test tools/turso/stockhunter-r16-kis-history.test.mjs
+      - name: Default dry run without secrets, Turso or KIS
+        run: node tools/turso/stockhunter-r16-kis-history.mjs dry_run output/stockhunter_r16_kis_history
+      - name: Upload no-network safety report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: BLUE_R16_KIS_OFFLINE_${{ github.run_id }}
+          path: output/stockhunter_r16_kis_history/
+          if-no-files-found: warn
+          retention-days: 14
+
+  manual_capture:
+    if: github.event_name == 'workflow_dispatch' && inputs.mode == 'capture'
+    needs: offline_safety
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Guard authorized repository, main branch and explicit scope
+        shell: bash
+        env:
+          CONFIRMED: ${{ inputs.confirm_fixed_scope }}
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REPOSITORY" = 'ehdud6728-bit/BLUE-Signal-Lab'
+          test "$GITHUB_REF" = 'refs/heads/main'
+          test "$CONFIRMED" = 'true'
+      - name: Checkout BLUE without stored git credentials
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Set up Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install existing encrypted Turso token reader dependency only
+        working-directory: tools/turso
+        run: npm install --no-audit --no-fund --ignore-scripts --no-package-lock
+      - name: Capture KIS original daily history using existing cached token
+        env:
+          KIS_APP_KEY: ${{ secrets.KIS_APP_KEY }}
+          KIS_APP_SECRET: ${{ secrets.KIS_APP_SECRET }}
+          TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
+          TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
+        run: node tools/turso/stockhunter-r16-kis-history.mjs capture output/stockhunter_r16_kis_history
+      - name: Upload research prices and provenance, never credentials or cached tokens
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: BLUE_STOCKHUNTER_R16_KIS_30_${{ github.run_id }}
+          path: output/stockhunter_r16_kis_history/
+          if-no-files-found: warn
+          retention-days: 14
