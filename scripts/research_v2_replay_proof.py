@@ -51,6 +51,13 @@ def replay_proof(audit: dict, eod: dict, snapshot: dict, coverage: dict) -> dict
             not HASH.fullmatch(str(snapshot.get('payload_sha256', ''))) or
             not HASH.fullmatch(str(snapshot.get('source_audit_sha256', '')))):
         raise ValueError('V2_REPLAY_MARKET_OR_PROVENANCE_MISMATCH')
+    historical_sha = audit.get('targeted_history_sha256')
+    if historical_sha is not None and (
+            not HASH.fullmatch(str(historical_sha)) or
+            coverage.get('targeted_history_sha256') != historical_sha or
+            audit.get('historical_source_policy') != 'UNADJUSTED_TICKER_KRX_FIRST_KIS_SECONDARY_RESEARCH_ONLY' or
+            coverage.get('prior_exact_eod_sha256_by_day') != audit.get('prior_exact_eod_sha256_by_day')):
+        raise ValueError('V2_REPLAY_TARGETED_HISTORY_PROVENANCE_MISMATCH')
     stable = {key: value for key, value in audit.items()
               if key != 'source_verified_at_kst'}
     audit_hash = sha(json.dumps(stable, ensure_ascii=False, sort_keys=True,
@@ -84,6 +91,7 @@ def replay_proof(audit: dict, eod: dict, snapshot: dict, coverage: dict) -> dict
         'source_marcap_sha256_2025': years['2025'],
         'source_marcap_sha256_2026': years['2026'],
         'history_50_coverage_sha256': coverage_hash,
+        'targeted_history_sha256': historical_sha,
         'all_50_histories_ready': True,
         'v1_original_unchanged': True,
         'source': 'IMMUTABLE_KRX_EOD_HASH_MATCH_RESCAN',

@@ -2,6 +2,13 @@
 
 새 채팅에서 프로젝트를 이어가기 위한 **결정/구현/검증 이력**입니다. 대화 전체를 저장하지 않고 실제 개발에 필요한 내용만 보존합니다. 최신 항목을 위에 추가하고, 결과가 달라지면 추측 대신 검증된 상태로 수정합니다.
 
+## 2026-11-21 (KST) — 36종목 표적 과거 일봉 KRX→KIS 2차 복구 및 통합 검증 (PR 준비)
+
+- **실측:** PR #75 병합 커밋 `c814e8d`; [Actions #44899355187](https://github.com/ehdud6728-bit/BLUE-Signal-Lab/actions/runs/44899355187) job 완료 후 아티팩트 실물 확인. 4개 일자 동일하게 50종목 중 1봉 30개, 107봉 5개, 244봉 1개, 349봉 1개, 350봉 13개. **36 미달/14 통과**, 4일 패턴 재스캔 및 v2 DB 쓰기는 **0건**. 4일 KRX EOD 원본 SHA 재구성은 성공. 실제 4개 JSON을 새 planner에 입력해 **36코드** 정확하게 산출함.
+- **변경:** `research_v2_targeted_history.py`(36코드·기존 봉 수·4개 KRX 및 2개 MARCAP 해시 고정, KRX 과거 일봉 원주가→미달 KIS 2차조회, KIS 11/10 감사 KRX OHLCVA 6필드 일치 검사, 이력 JSONL+manifest SHA), `research-v2-history-runner.mjs`(Turso 캐시 KIS 토큰 SELECT·복호화만, 신규 발급/쓰기는 없음), 기존 coverage/scanner/proof 및 `blue_turso_research_v2_replay.yml` `recover` 통합. KRX 원본 확정일을 별도 연구 이력으로만 재활용, MARCAP 가격 충돌/출처 변조/미래봉 차단. 36종목 모두 250봉이면 4일 연구 및 Turso SELECT 대조까지 같은 수동 Actions에서 실행, 아니라면 이유별 보고서만 남기고 중단.
+- **테스트:** 실제 #44899355187 JSON 기반 `--mode=plan` 성공, 신규 Python 테스트와 기존 v2 연구 테스트, Node 역사 수집기/원본 해시/Importer 회귀 통과. GitHub PR CI 및 `recover` 실제 시세 호출·원격 DB 대조는 미실행; KIS 캐시 토큰·과거 거래대금·완전한 250봉 확보 여부는 아직 미확정.
+- **권한 및 다음:** 기본 `plan`/`check` 변경 없음, `recover`는 병합 후 사용자 **수동 선택**, 코드만 병합해도 조회·저장 시작 안 됨. `recover` 실행은 36종목 KRX/KIS **시세 호출은 있음**, D1/Turso 쓰기·토큰 발급·클라우드 배포 없음. 실행 결과에 따라 실제 이력 부족/상장 전/원천 차이를 구분하고, 연구 v2 승격과 5/10/20/60일 익절·손절 추천은 별도 승인·검증 뒤 진행.
+
 ## 2026-11-21 (KST) — 동일 코스닥 50종목 격차 확인, KRX 원본 해시 일치 기반 v2 재분석 준비 (PR 준비)
 
 - **실제 자료 확인:** PR #74 병합(`9b578bd`), [Actions #44894825971](https://github.com/ehdud6728-bit/BLUE-Signal-Lab/actions/runs/44894825971) `inspect` 성공/보고서 아티팩트 `BLUE_RESEARCH_UNIVERSE_GAP_44894825971`. 11/10·13·16·17 네 날짜의 KRX EOD보다 **정확히 동일한 KOSDAQ 50코드**가 최신 MARCAP 자료에 없음. 현재 MARCAP 하루 종목 수는 구 R1.1 감사의 관측 수와 모두 동일, 역방향(MARCAP-only)은 0건. 50코드 전체는 해당 아티팩트에서 확인 가능; KRX EOD의 `name` 열은 공백이어서 이름을 증빙 없이 채우지 않음. 당시 MARCAP 원본 parquet 해시가 없으므로 `historical_missing_codes_proven=false` 유지.

@@ -490,6 +490,10 @@ def main():
     p.add_argument("--local-data-dir")
     p.add_argument("--verified-eod-dir", default="",
                    help="Use the already audited KRX EOD range for the selected historical day")
+    p.add_argument("--targeted-history-dir", default="",
+                   help="Byte-verified historical bars for only 36 missing v2 symbols (research only)")
+    p.add_argument("--prior-eod-root", default="",
+                   help="Reuse original byte-verified previous v2 KRX days, no new provider calls")
     p.add_argument("--reuse-target-eod-dir", default="",
                    help="Reuse the already verified daily KRX target if history needs no other missing weekdays")
     p.add_argument("--daily-provider", choices=["auto", "openapi", "pykrx"], default="auto")
@@ -502,6 +506,18 @@ def main():
     p.add_argument("--diagnose-code", default="", help="optional six-character ticker; research-only as-of signal audit")
     args = p.parse_args()
     raw, hashes = load_marcap([int(x) for x in args.years.split(",")], args.local_data_dir)
+    targeted_history_sha = None
+    if args.targeted_history_dir:
+        if not args.verified_eod_dir or args.date not in ('2026-11-10','2026-11-13','2026-11-16','2026-11-17'):
+            raise ValueError('TARGETED_HISTORY_ONLY_VERIFIED_V2_REPLAY')
+        from research_v2_targeted_history import load_and_merge
+        raw, targeted_history_sha = load_and_merge(raw,args.targeted_history_dir,date.fromisoformat(args.date))
+    prior_eod_sha={}
+    if args.prior_eod_root:
+        if not args.targeted_history_dir:
+            raise ValueError('TARGETED_HISTORY_PRIOR_EOD_REQUIRES_TARGETED_HISTORY')
+        from research_v2_targeted_history import reuse_prior_exact_eod
+        raw,prior_eod_sha=reuse_prior_exact_eod(raw,args.prior_eod_root,date.fromisoformat(args.date))
     latest = normalise(raw).date.max().date()
     target = latest if args.date == "latest" else date.fromisoformat(args.date)
     today = ensure_eod_request(target, datetime.now(timezone.utc))
@@ -557,6 +573,10 @@ def main():
         "source_verified_at_kst": datetime.now(KST).isoformat(timespec="seconds"),
         "corporate_actions": corporate_actions_audit,
     })
+    if targeted_history_sha:
+        audit['targeted_history_sha256']=targeted_history_sha
+        audit['historical_source_policy']='UNADJUSTED_TICKER_KRX_FIRST_KIS_SECONDARY_RESEARCH_ONLY'
+        audit['prior_exact_eod_sha256_by_day']=prior_eod_sha
     if days:
         supplement = upgraded.loc[pd.to_datetime(upgraded.Date).dt.date.isin(
             {date.fromisoformat(d) for d in days})].sort_values(["Date", "Code"])
