@@ -18,6 +18,8 @@ def example():
            'signal_events':111,'supplemental_rows':2662,
            'target_day_source':SOURCE,'supplemental_dates':[DAY],
            'data_phase':'HISTORICAL_EOD','intraday_verified':False,
+           'research_market_scope':'RESEARCH_V2_PINNED_KOSDAQ_GLOBAL_50',
+           'market_scope_code_count':50,'market_scope_reclassified_rows':15000,
            'source_verified_at_kst':'2026-11-21T08:00:00+09:00',
            'source_sha256_by_year':{'2025':SHA,'2026':SHA}}
     data=json.dumps({k:v for k,v in audit.items() if k!='source_verified_at_kst'},
@@ -32,6 +34,8 @@ def example():
     coverage={'format':'BLUE_RESEARCH_V2_HISTORY_COVERAGE_V1','day':DAY,
               'status':'PASS','all_50_have_250_valid_bars':True,
               'candidate_count':50,'min_candidate_bars':250,
+              'research_market_scope':'RESEARCH_V2_PINNED_KOSDAQ_GLOBAL_50',
+              'market_scope_code_count':50,'market_scope_reclassified_rows':15000,
               'eod_day_sha256':SHA,'verified_source':SOURCE,
               'eod_count':2662,'source_sha256_by_year':{'2025':SHA,'2026':SHA},
               'missing_candidates':[{'code':f'{i:06d}','history_bars':250,
@@ -73,6 +77,16 @@ class ReplayProofTest(unittest.TestCase):
         audit,eod,snapshot,coverage=example()
         coverage['min_candidate_bars']=249
         coverage['all_50_have_250_valid_bars']=False
+        with self.assertRaisesRegex(ValueError,'50_HISTORY_INCOMPLETE'):
+            replay_proof(audit,eod,snapshot,coverage)
+
+    def test_rejects_absent_or_inconsistent_kosdaq_global_scope(self):
+        audit,eod,snapshot,coverage=example()
+        coverage.pop('research_market_scope')
+        with self.assertRaisesRegex(ValueError,'50_HISTORY_INCOMPLETE'):
+            replay_proof(audit,eod,snapshot,coverage)
+        audit,eod,snapshot,coverage=example()
+        coverage['market_scope_reclassified_rows']+=1
         with self.assertRaisesRegex(ValueError,'50_HISTORY_INCOMPLETE'):
             replay_proof(audit,eod,snapshot,coverage)
 
