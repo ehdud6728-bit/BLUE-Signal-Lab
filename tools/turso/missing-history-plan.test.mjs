@@ -6,10 +6,12 @@ const A='a'.repeat(64),B='b'.repeat(64);
 const calendar={format:'BLUE_KRX_DAY_PROOF_CANDIDATES_V1',source_proof:'PENDING_KRX_EXACT_DAY',
   start:'2026-11-09',end:'2026-11-13',
   sessions:['2026-11-09','2026-11-10','2026-11-11','2026-11-12','2026-11-13']};
-function fixture({eod={},signals={},eodRows={},signalRows={},tables=true}={}){
+function fixture({eod={},signals={},eodRows={},signalRows={},kisRows={},
+  tables=true,kisTable=false}={}){
   const statements=[];
   const names=tables?['blue_eod_ingest_audit_v1','blue_research_signal_audit_v1',
-    'blue_eod_daily_v1','blue_research_signals_v1']:[];
+    'blue_eod_daily_v1','blue_research_signals_v1',
+    ...(kisTable?['blue_kis_provisional_daily_v1']:[])]:[];
   return {statements,client:{async execute(input){
     const sql=typeof input==='string'?input:input.sql;
     const args=typeof input==='string'?[]:input.args;
@@ -21,6 +23,9 @@ function fixture({eod={},signals={},eodRows={},signalRows={},tables=true}={}){
       ([trade_day,row])=>({trade_day,...row}))};
     if(sql.includes('COUNT(*) AS count FROM blue_eod_daily_v1'))return {rows:[{count:eodRows[args[0]]||0}]};
     if(sql.includes('COUNT(*) AS count FROM blue_research_signals_v1'))return {rows:[{count:signalRows[args[0]]||0}]};
+    if(sql.includes('FROM blue_kis_provisional_daily_v1'))return {rows:args
+      .filter(day=>kisRows[day]).map(trade_day=>({trade_day,rows:kisRows[trade_day].rows,
+        postclose_daily_rows:kisRows[trade_day].daily}))};
     throw Error('UNEXPECTED_SQL');
   }}};
 }
@@ -39,8 +44,10 @@ test('select oldest genuinely missing days; leave existing audits and conflicts 
     {day:'2026-11-12',eod:'missing',signals:'missing'},
   ]);
   assert.deepEqual(plan.blocked,[
-    {day:'2026-11-10',reason:'EXISTING_AUDIT_INCONSISTENT'},
-    {day:'2026-11-13',reason:'PARTIAL_OR_MISMATCHED_UNAUDITED_ROWS'},
+    {day:'2026-11-10',reason:'EXISTING_AUDIT_INCONSISTENT',
+      details:['SIGNAL_OBSERVED_VS_EOD_COUNT_MISMATCH']},
+    {day:'2026-11-13',reason:'PARTIAL_OR_MISMATCHED_UNAUDITED_ROWS',
+      details:['EOD_ROWS_WITHOUT_AUDIT']},
   ]);
   assert.equal(plan.already_audited,1);
   assert.equal(plan.d1_sql_queries,0);
@@ -84,8 +91,56 @@ test('lookahead lets later KRX-confirmed weekdays progress despite earlier unver
 test('days with existing un-audited signals are quarantined while the next date progresses',async()=>{
   const mock=fixture({signalRows:{'2026-11-09':1}});
   const plan=await planMissingHistory(mock.client,{calendar,batchSize:2});
-  assert.deepEqual(plan.blocked,[{day:'2026-11-09',reason:'PARTIAL_OR_MISMATCHED_UNAUDITED_ROWS'}]);
+  assert.deepEqual(plan.blocked,[{day:'2026-11-09',reason:'PARTIAL_OR_MISMATCHED_UNAUDITED_ROWS',
+    details:['SIGNAL_ROWS_WITHOUT_AUDIT']}]);
   assert.deepEqual(plan.selected.map(x=>x.day),['2026-11-10','2026-11-11']);
+});
+
+test('KIS-only historical date stays unconfirmed, even when KIS has postclose prices',async()=>{
+  const mock=fixture({kisTable:true,kisRows:{'2026-11-09':{rows:10,daily:8}}});
+  const plan=await planMissingHistory(mock.client,{calendar,batchSize:1});
+  assert.deepEqual(plan.selected,[{day:'2026-11-09',eod:'missing',signals:'missing'}]);
+  assert.deepEqual(plan.source_evidence,[{
+    day:'2026-11-09',eod_audit:'MISSING',signal_audit:'MISSING',
+    kis_provisional:'RECORDED_UNCONFIRMED',kis_rows:10,
+    kis_postclose_daily_rows:8,price_state:'KIS_ONLY_NO_KRX_CONFIRMED_EOD',
+  }]);
+  assert.equal(plan.db_writes,0);
+  assert.ok(mock.statements.every(s=>s.sql.startsWith('SELECT')));
+});
+
+test('invalid research audit reports exact mismatch and KIS evidence independently',async()=>{
+  const mock=fixture({kisTable:true,
+    eod:{'2026-11-10':eodRow(2662)},
+    signals:{'2026-11-10':signalRow(239,2600)},
+    kisRows:{'2026-11-10':{rows:15,daily:0}},
+  });
+  const plan=await planMissingHistory(mock.client,{calendar,batchSize:1});
+  assert.deepEqual(plan.blocked,[{day:'2026-11-10',
+    reason:'EXISTING_AUDIT_INCONSISTENT',
+    details:['SIGNAL_OBSERVED_VS_EOD_COUNT_MISMATCH']}]);
+  assert.deepEqual(plan.source_evidence.find(x=>x.day==='2026-11-10'),{
+    day:'2026-11-10',eod_audit:'PRESENT',signal_audit:'PRESENT',
+    kis_provisional:'RECORDED_UNCONFIRMED',kis_rows:15,
+    kis_postclose_daily_rows:0,price_state:'KRX_EOD_AUDIT_PRESENT',
+  });
+  assert.equal(plan.selected.length,1);
+});
+
+test('missing KIS table means unknown historical KIS evidence, not a zero-collection claim',async()=>{
+  const plan=await planMissingHistory(fixture().client,{calendar,batchSize:1});
+  assert.equal(plan.source_evidence[0].kis_provisional,'TABLE_MISSING');
+  assert.equal(plan.source_evidence[0].price_state,'NO_KRX_CONFIRMED_EOD');
+});
+
+test('invalid EOD audit does not become confirmed EOD when KIS exists',async()=>{
+  const mock=fixture({kisTable:true,eod:{'2026-11-09':{row_count:100,day_sha256:'invalid'}},
+    kisRows:{'2026-11-09':{rows:9,daily:9}}});
+  const plan=await planMissingHistory(mock.client,{calendar,batchSize:1});
+  assert.deepEqual(plan.blocked[0].details,['EOD_AUDIT_ROW_COUNT_INVALID','EOD_AUDIT_HASH_INVALID']);
+  const evidence=plan.source_evidence.find(x=>x.day==='2026-11-09');
+  assert.equal(evidence.price_state,'KRX_EOD_AUDIT_INVALID');
+  assert.equal(evidence.kis_provisional,'RECORDED_UNCONFIRMED');
 });
 
 test('missing underlying data table, invalid source sessions and unsafe batch fail closed',async()=>{
