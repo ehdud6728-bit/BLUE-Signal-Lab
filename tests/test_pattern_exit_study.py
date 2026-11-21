@@ -45,7 +45,13 @@ class PatternExitStudyTest(unittest.TestCase):
         self.assertFalse(path[0]['investment_recommendation_enabled'])
         stock = next(p for p in path[0]['patterns'] if p['pattern'] == 'BB20')
         self.assertEqual(stock['median_max_gain_pct'], 7)
+        self.assertEqual(stock['mean_max_gain_pct'], 7)
         self.assertEqual(stock['median_max_loss_pct'], -1)
+        self.assertEqual(stock['mean_max_loss_pct'], -1)
+        self.assertEqual(stock['max_gain_positive_count'], stock['n'])
+        self.assertEqual(stock['max_gain_at_least_5pct_count'], stock['n'])
+        self.assertEqual(stock['max_loss_at_most_minus_5pct_count'], 0)
+        self.assertEqual(stock['worst_max_loss_pct'], -1)
         self.assertEqual(stock['same_session_unresolved_count'], stock['n'])
         self.assertEqual(stock['low_first_count'] + stock['high_first_count'], 0)
 
@@ -84,6 +90,21 @@ class PatternExitStudyTest(unittest.TestCase):
         self.assertEqual(sixty['mature_signal_stock_days'], 0)
         self.assertGreater(sixty['pending_recent'], 0)
         self.assertEqual(sixty['patterns'], [])
+
+    def test_highest_gain_does_not_hide_deep_drawdown(self):
+        snap = fixture()
+        for bar in snap['bars']:
+            bar['high'] = 112
+            bar['low'] = 88
+        report = analyze(snap)
+        pattern = next(p for p in report['observed_path_windows'][0]['patterns']
+                       if p['pattern'] == 'BB20')
+        self.assertEqual(pattern['mean_max_gain_pct'], 12)
+        self.assertEqual(pattern['max_gain_at_least_5pct_count'], pattern['n'])
+        self.assertEqual(pattern['max_loss_at_most_minus_5pct_count'], pattern['n'])
+        self.assertEqual(pattern['worst_max_loss_pct'], -12)
+        self.assertEqual(pattern['same_session_unresolved_count'], pattern['n'])
+        self.assertFalse(report['investment_recommendation_enabled'])
 
     def test_mismatched_universe_dates_remain_visible_but_never_contribute_research_signals(self):
         snap = fixture()
