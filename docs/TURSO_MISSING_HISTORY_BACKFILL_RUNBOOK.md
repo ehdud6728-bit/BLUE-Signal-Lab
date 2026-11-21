@@ -74,6 +74,40 @@ GitHub Actions > `BLUE Turso Missing History Backfill (BOUNDED)` > Run workflow.
 AI 추천 및 보고서 `publish`는 일어나지 않습니다. 예약 실행은 위 날짜
 선택이나 후속 연구 없이 기존 2년 lookback 동작을 그대로 유지합니다.
 
+### KIS 잠정 시세만 저장된 날짜와 확정 일봉 구분 (2026-11-21)
+
+`selection.json`의 `source_evidence`는 **선택·차단된 날짜에 한해**
+Turso에서 읽은 자료 존재 여부를 표시합니다. `blue_kis_provisional_daily_v1`은
+KIS 부분 종목의 **잠정 자료**이며 `blue_eod_daily_v1`의 KRX 전체시장 확정
+일봉이 아닙니다. KIS 잠정 자료는 KRX 일봉 또는 BLUE 확정 패턴으로 자동 승격되지 않습니다.
+
+- `price_state=KIS_ONLY_NO_KRX_CONFIRMED_EOD`: KIS 잠정 행이 있지만 해당 날짜의
+  KRX EOD 감사 원장이 없음. `kis_rows`, `kis_postclose_daily_rows`는 **저장된
+  원자료 개수**이며 전체시장 완성 또는 일봉 내용 검증의 증거가 아님.
+- `price_state=NO_KRX_CONFIRMED_EOD`: KRX EOD 감사 원장이 없고 조회 가능한
+  KIS 잠정 행도 없음. `kis_provisional=TABLE_MISSING`이면 KIS 존재 여부를
+  판별할 테이블 자체가 없는 것이므로 수집 0건이라고 단정하지 않음.
+- `price_state=KRX_EOD_AUDIT_PRESENT`: KRX EOD 감사 메타데이터가 존재함.
+  이번 계획 단계는 전체 일봉 행이나 해시를 다시 읽지 않으므로 메타데이터의
+  존재만으로 모든 원천 행의 정합성을 새로 입증하지 않음.
+- `price_state=KRX_EOD_AUDIT_INVALID`: EOD 감사 원장 필수 필드가 비정상.
+  KIS 행이 함께 있더라도 KRX 확정 일봉으로 취급하지 않음.
+- `blocked[].details`: 기존 단일 `EXISTING_AUDIT_INCONSISTENT` 아래에서
+  `SIGNAL_OBSERVED_VS_EOD_COUNT_MISMATCH`, `EOD_AUDIT_HASH_INVALID`,
+  `SIGNAL_AUDIT_WITHOUT_EOD_AUDIT` 등 **실제 충돌 조건 코드**를 제공.
+  사유가 있다고 해서 KIS 탓으로 추정하거나 원장을 자동 수정하지 않음.
+
+이 추가 SELECT는 최대 100개 **선택·차단 날짜만** 확인합니다.
+`source_evidence_total_days` 및 `source_evidence_truncated`로 표시 범위를 알 수
+있고, 열거되지 않은 날짜의 KIS 수집 상태를 판단하지 않습니다. 저장·KIS 호출,
+인증 토큰 발급·D1 조회는 여전히 0회입니다.
+
+참고: [2026-11-21 Actions #44848048384](https://github.com/ehdud6728-bit/BLUE-Signal-Lab/actions/runs/44848048384)는
+`mode=apply`로 11월 2·5·6일을 EOD/패턴 저장(각 날짜 `DAY_OK`, 실패 0)했고,
+별도 읽기 전용 경로 연구 보고서도 생성했습니다. 당시 11월 10·13·16·17일은
+기존 통합 감사 충돌이라는 **통합 코드만** 표시됐으며 이 변경을 병합한 뒤
+다음 계획 로그부터 구체적인 원인과 KIS 잠정 존재 여부를 구분할 수 있습니다.
+
 ## 사용자 승인 후에만 예약 활성화
 
 기본적으로 예약된 백필은 **비활성**입니다. 사용자가 GitHub Repository

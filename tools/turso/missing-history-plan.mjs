@@ -9,7 +9,8 @@ import {dirname} from 'node:path';
 const DAY=/^20\d{2}-\d{2}-\d{2}$/;
 const HASH=/^[0-9a-f]{64}$/;
 const TABLES={eodAudit:'blue_eod_ingest_audit_v1',signalAudit:'blue_research_signal_audit_v1',
-  eod:'blue_eod_daily_v1',signal:'blue_research_signals_v1'};
+  eod:'blue_eod_daily_v1',signal:'blue_research_signals_v1',
+  kisProvisional:'blue_kis_provisional_daily_v1'};
 const fail=code=>{throw Error(code);};
 const integer=(v,min,max)=>v!==null&&v!==undefined&&v!==''&&
   Number.isSafeInteger(Number(v))&&Number(v)>=min&&Number(v)<=max;
@@ -60,6 +61,61 @@ async function countDay(client,table,day){
   return n;
 }
 
+function auditIssues(ea,sa){
+  const issues=[];
+  if(ea){
+    if(!integer(ea.row_count,1700,10000))issues.push('EOD_AUDIT_ROW_COUNT_INVALID');
+    if(!HASH.test(String(ea.day_sha256)))issues.push('EOD_AUDIT_HASH_INVALID');
+  }
+  if(sa){
+    if(!integer(sa.row_count,0,10000))issues.push('SIGNAL_AUDIT_ROW_COUNT_INVALID');
+    if(!integer(sa.observed_stocks,1700,10000))issues.push('SIGNAL_OBSERVED_STOCKS_INVALID');
+    if(integer(sa.row_count,0,10000)&&integer(sa.observed_stocks,1700,10000)&&
+        Number(sa.row_count)>Number(sa.observed_stocks))issues.push('SIGNAL_ROWS_EXCEED_OBSERVED');
+    if(!HASH.test(String(sa.source_payload_sha256)))issues.push('SIGNAL_PAYLOAD_HASH_INVALID');
+    if(!HASH.test(String(sa.source_audit_sha256)))issues.push('SIGNAL_SOURCE_AUDIT_HASH_INVALID');
+    if(!ea)issues.push('SIGNAL_AUDIT_WITHOUT_EOD_AUDIT');
+    else if(integer(ea.row_count,1700,10000)&&integer(sa.observed_stocks,1700,10000)&&
+      Number(sa.observed_stocks)!==Number(ea.row_count))
+      issues.push('SIGNAL_OBSERVED_VS_EOD_COUNT_MISMATCH');
+  }
+  return issues;
+}
+
+async function provisionalEvidence(client,names,days,eod,signal){
+  const present=names.has(TABLES.kisProvisional);
+  const rows=new Map();
+  if(present&&days.length){
+    const placeholders=days.map(()=>'?').join(',');
+    const result=await client.execute({sql:`SELECT trade_day, COUNT(*) AS rows,
+      SUM(CASE WHEN source='KIS_REST_INQUIRE_DAILY_PRICE_PROVISIONAL' THEN 1 ELSE 0 END)
+      AS postclose_daily_rows FROM ${TABLES.kisProvisional}
+      WHERE trade_day IN (${placeholders}) GROUP BY trade_day ORDER BY trade_day`,args:days});
+    if(result.rows.length>days.length)fail('MISSING_HISTORY_PROVISIONAL_COUNT_INVALID');
+    for(const row of result.rows){
+      const day=String(row.trade_day);
+      if(!days.includes(day)||rows.has(day)||!integer(row.rows,1,10000)||
+        !integer(row.postclose_daily_rows,0,10000)||
+        Number(row.postclose_daily_rows)>Number(row.rows))
+        fail('MISSING_HISTORY_PROVISIONAL_COUNT_INVALID');
+      rows.set(day,{rows:Number(row.rows),daily:Number(row.postclose_daily_rows)});
+    }
+  }
+  return days.map(day=>{
+    const provisional=rows.get(day),ea=eod.get(day),sa=signal.get(day);
+    return {day,
+      eod_audit:!ea?'MISSING':auditIssues(ea,null).length?'INVALID_METADATA':'PRESENT',
+      signal_audit:!sa?'MISSING':auditIssues(null,sa).filter(x=>
+        x!=='SIGNAL_AUDIT_WITHOUT_EOD_AUDIT').length?'INVALID_METADATA':'PRESENT',
+      kis_provisional:!present?'TABLE_MISSING':provisional?'RECORDED_UNCONFIRMED':'NO_ROWS',
+      kis_rows:provisional?.rows??0,
+      kis_postclose_daily_rows:provisional?.daily??0,
+      price_state:ea?(auditIssues(ea,null).length?'KRX_EOD_AUDIT_INVALID':
+        'KRX_EOD_AUDIT_PRESENT'):provisional?
+        'KIS_ONLY_NO_KRX_CONFIRMED_EOD':'NO_KRX_CONFIRMED_EOD'};
+  });
+}
+
 export async function planMissingHistory(client,{calendar,batchSize=5,candidateLimit=batchSize}={}){
   const sessions=validateHistorySessions(calendar);
   if(!Number.isInteger(batchSize)||batchSize<1||batchSize>5||
@@ -68,7 +124,7 @@ export async function planMissingHistory(client,{calendar,batchSize=5,candidateL
   const start=calendar.start,end=calendar.end;
   const named=await client.execute(`SELECT name FROM sqlite_master WHERE type='table' AND
     name IN ('blue_eod_ingest_audit_v1','blue_research_signal_audit_v1',
-      'blue_eod_daily_v1','blue_research_signals_v1')`);
+      'blue_eod_daily_v1','blue_research_signals_v1','blue_kis_provisional_daily_v1')`);
   const names=new Set(named.rows.map(r=>String(r.name)));
   // An audit without its underlying data table is a real inconsistency, never a completed day.
   for(const [audit,data] of [['eodAudit','eod'],['signalAudit','signal']]){
@@ -81,13 +137,9 @@ export async function planMissingHistory(client,{calendar,batchSize=5,candidateL
   let audited=0,missingAudits=0,queries=1+Number(names.has(TABLES.eodAudit))+Number(names.has(TABLES.signalAudit));
   for(const day of sessions){
     const ea=eod.get(day),sa=signal.get(day);
-    const eodValid=!ea||(integer(ea.row_count,1700,10000)&&HASH.test(String(ea.day_sha256)));
-    const signalValid=!sa||(integer(sa.row_count,0,10000)&&
-      integer(sa.observed_stocks,1700,10000)&&
-      Number(sa.row_count)<=Number(sa.observed_stocks)&&
-      HASH.test(String(sa.source_payload_sha256))&&HASH.test(String(sa.source_audit_sha256)));
-    if(!eodValid||!signalValid||(sa&&(!ea||Number(sa.observed_stocks)!==Number(ea.row_count)))){
-      blocked.push({day,reason:'EXISTING_AUDIT_INCONSISTENT'});
+    const issues=auditIssues(ea,sa);
+    if(issues.length){
+      blocked.push({day,reason:'EXISTING_AUDIT_INCONSISTENT',details:issues});
       continue;
     }
     if(ea&&sa){audited++;continue;}
@@ -100,15 +152,28 @@ export async function planMissingHistory(client,{calendar,batchSize=5,candidateL
     queries+=Number(names.has(TABLES.eod))+Number(names.has(TABLES.signal));
     if((ea&&haveEod!==Number(ea.row_count))||(!ea&&haveEod>0)||
        (sa&&haveSignal!==Number(sa.row_count))||(!sa&&haveSignal>0)){
-      blocked.push({day,reason:'PARTIAL_OR_MISMATCHED_UNAUDITED_ROWS'});
+      blocked.push({day,reason:'PARTIAL_OR_MISMATCHED_UNAUDITED_ROWS',details:[
+        ...(ea&&haveEod!==Number(ea.row_count)?['EOD_ROW_COUNT_MISMATCH']:[]),
+        ...(!ea&&haveEod>0?['EOD_ROWS_WITHOUT_AUDIT']:[]),
+        ...(sa&&haveSignal!==Number(sa.row_count)?['SIGNAL_ROW_COUNT_MISMATCH']:[]),
+        ...(!sa&&haveSignal>0?['SIGNAL_ROWS_WITHOUT_AUDIT']:[]),
+      ]});
       continue;
     }
     selected.push({day,eod:ea?'already_audited':'missing',
       signals:sa?'already_audited':'missing'});
   }
+  // Read only the selected/blocked days. A two-year provisional table can be large;
+  // do not scan the entire provisional history or claim unexamined dates have no KIS rows.
+  const evidenceDays=[...new Set([...selected,...blocked].map(x=>x.day))].sort();
+  const detailedDays=evidenceDays.slice(0,100);
+  const sourceEvidence=await provisionalEvidence(client,names,detailedDays,eod,signal);
+  queries+=Number(names.has(TABLES.kisProvisional)&&detailedDays.length>0);
   return {format:'BLUE_MISSING_HISTORY_PLAN_V1',start,end,
     weekday_candidates:sessions.length,already_audited:audited,
     missing_audit_sessions:missingAudits,selected,blocked,
+    source_evidence:sourceEvidence,source_evidence_total_days:evidenceDays.length,
+    source_evidence_truncated:evidenceDays.length>detailedDays.length,
     max_verified_days:batchSize,source_proof:'PENDING_KRX_EXACT_DAY',
     remaining_possible:Math.max(0,missingAudits-Math.min(batchSize,selected.length)),
     turso_select_queries:queries,d1_sql_queries:0,db_writes:0,
