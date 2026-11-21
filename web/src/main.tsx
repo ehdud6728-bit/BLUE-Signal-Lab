@@ -13,6 +13,7 @@ import {comparisonKey,fetchCompared,fetchComparedTursoFirst,fetchComparedTursoOn
   refreshKisQuoteToTurso,type PriceCompare} from './price-compare';
 import {missingKisSearchQuotes} from './auto-kis-search';
 import {discoveryTechnicalBadges} from './discovery-technical';
+import {researchCardClasses,validatedResearchSignal} from './research-gold-highlight';
 import './r1595-group-price.css';
 import AiWidget from './AiWidget';
 import React, {useCallback,useEffect, useRef, useState} from 'react';
@@ -40,11 +41,12 @@ import './r15116-technical-filters.css';
 import './r15125-result-tools.css';
 // R1581_SCAN_RESUME: persistent scan status across tabs and reloads.
 import './r1581-scan-monitor.css';
+import './r-research-gold-outline.css';
 
 // Keep the existing production API and Cloudflare Access cookies.
 const API = (import.meta.env.VITE_API_BASE || 'https://blue-signal-lab-api-v2.ehdud6728.workers.dev').replace(/\/+$/, '');
 type Signal = {code:string;name:string|null;day:string;signals:string[];close_price:number|null;supply_distance_pct:number|null;extras:Record<string,unknown>;
- observed_high_pct?:number|null;observed_low_pct?:number|null;amount_ratio20_sort?:number|null};
+ observed_high_pct?:number|null;observed_low_pct?:number|null;amount_ratio20_sort?:number|null;research_recommendation?:unknown};
 type Day = {day:string;observed_stocks:number;signal_events:number;matched_stocks:number};
 type ScanStatus = 'READY'|'NOT_IMPORTED'|'PENDING'|'FAILED'|'';
 type Line = {signal:string;price:number;gap_from_close_pct:number;slope_pct:number|null;status:string};
@@ -677,6 +679,12 @@ function App(){
   // Only verified EOD chart evidence is eligible: selected floor 3-30, default 8.
   const patternUp=(r:Signal)=>{const p=num(r,'r159_pattern_up_10d');const n=num(r,'r159_pattern_n_10d');
     return highlightMin!==null&&n!==null&&n>=patternSampleMin&&p!==null&&p>=highlightMin?p:null;};
+  // Never promote frequency growth or exploratory tomato observations to gold.
+  // Only a future, independently verified Turso v2 recommendation can qualify.
+  const goldSignal=(r:Signal)=>validatedResearchSignal(r,storageMode==='turso'&&searchSource==='patterns'&&patternBackend==='turso');
+  const stockHighlight=(r:Signal)=>researchCardClasses(goldSignal(r)!==null,patternUp(r)!==null);
+  const goldEvidenceBlock=(r:Signal)=>{const signal=goldSignal(r);
+    return signal?<div className="r-research-gold-label" role="note">★ 검증 연구 추천 패턴 · {showSignal(signal)}</div>:null;};
   // Single presentation predicate shared by outline, basket evidence and search filter.
   // R1.5.10.4 /api/search chooses a SAME-DAY active historical setup at the
   // user's selected minimum sample floor; never derive a rate from price moves.
@@ -1035,6 +1043,12 @@ function App(){
           <p className="result-hint">{patternBackend==='turso'
             ?'검색일 Turso 검증 종가와 이후 저장된 확정 일봉 관측가를 구분합니다. 현재 후속 관측 기간은 불완전할 수 있습니다.'
             :'검색일 확정 종가와 이후 D1 저장 시세·기간 고가를 구분해 표시합니다. 가격이 없으면 미수집으로 표시합니다.'}</p>
+          <div className="r-research-color-key" aria-label="검색 종목 카드 강조색 안내">
+            <span><i aria-hidden="true"/> 골드: 별도 검증 연구 추천</span>
+            <span><i className="tomato-key" aria-hidden="true"/> 토마토: 과거 10일 탐색 관측</span>
+            <span><i className="dual-key" aria-hidden="true"/> 대각선: 두 조건 동시 충족</span>
+            <em>골드는 검증된 추천 자료가 검색 결과에 있을 때만 표시</em>
+          </div>
           {basketNotice&&<p className="r1595-request-status" role="status">{basketNotice}</p>}
           {total===0&&(appliedAmountEok??amountEok)>0&&<p className="r15125-result-scope" role="status">현재 거래대금 최소 {(appliedAmountEok??amountEok).toLocaleString('ko-KR')}억원 조건으로는 검색 대상이 없습니다. 저거래대금 하단 터치 종목도 찾으려면 거래대금을 ‘전체(0억원)’로 바꾸고 검색해 보세요.</p>}
           {r1593Error&&<p className="r1593-comparison-status" role="status">가격 비교: {r1593Error}</p>}
@@ -1150,10 +1164,11 @@ function App(){
           {(appliedSort==='highest_gain'||appliedSort==='lowest_return')&&
             <p className="r15125-result-scope">최고·최저 수익률은 발견일 이후 저장된 검증 일봉 중 확인된 구간만 사용합니다. 후속 일봉이 없는 종목은 정렬 뒤쪽에 표시되며, 전체 보유기간 최저·최고를 보장하지 않습니다.</p>}
           <div className="desktop-results tablewrap"><table><thead><tr><th>날짜</th><th>종목명 / 코드</th><th>신호</th><th>검색일 종가 / 최근 확인가 / 기간 최고가</th><th>RSI / GC</th><th>Slow(14,3,3) / GC</th><th>MACD / GC</th><th>돌파선 후보</th><th>상단 매물대</th></tr></thead><tbody>
-            {visibleRows.length?visibleRows.map((r,i)=><tr key={`${r.code}-${r.day}-${i}`} className={'clickable'+(patternUp(r)!==null?' r159-tomato-stock':'')} tabIndex={0} onClick={()=>openDetail(r)} onKeyDown={e=>{if(e.key==='Enter')openDetail(r);}}>
+            {visibleRows.length?visibleRows.map((r,i)=><tr key={`${r.code}-${r.day}-${i}`} className={'clickable'+stockHighlight(r)} tabIndex={0} onClick={()=>openDetail(r)} onKeyDown={e=>{if(e.key==='Enter')openDetail(r);}}>
               <td>{r.day}</td><td><div className="r151-desktop-stock">
                  <div><b>{displayName(r)}</b><div className="small">{r.code} · {amountLabel(r)}</div>
                  <div className="r15125-amount-change">{amountChange(r)}{sortedPercent(r)&&<span> · {sortedPercent(r)}</span>}</div>
+                 {goldEvidenceBlock(r)}
                  {patternEvidenceBlock(r)}
                  {patternDays(r).length>0&&<div className="r1599-pattern-dates" title={patternDays(r).join(' · ')}>과거 신호일 {patternDays(r).slice(-3).join(' · ')}{patternDays(r).length>3?' 외':''}</div>}</div>
                  <button type="button" className={'r151-quick-add '+(inBasket(r)?'saved':'')}
@@ -1176,11 +1191,12 @@ function App(){
               <td>{supplyGrade(r)==='미확인'?'매물대 추정 재분석 필요':`상단물량 ${supplyGrade(r)} · ${money(num(r,'supply_reference_price'))}원 · 약 ${money(num(r,'supply_volume_est_shares'))}주 · 비중 ${fmt(r,'supply_bin_share_pct',2)}%`}</td>
             </tr>):<tr><td className="empty" colSpan={9}>{total!==null?'조건에 맞는 종목이 없습니다.':'날짜와 조건을 선택해 검색하세요.'}</td></tr>}</tbody></table></div>
           <div className="mobile-results">
-            {visibleRows.length?visibleRows.map((r,i)=><div className={'r151-mobile-row'+(patternUp(r)!==null?' r159-tomato-stock':'')} key={`${r.code}-${r.day}-${i}`}>
+            {visibleRows.length?visibleRows.map((r,i)=><div className={'r151-mobile-row'+stockHighlight(r)} key={`${r.code}-${r.day}-${i}`}>
               <div className="stock-card" role="button" tabIndex={0} onClick={()=>openDetail(r)}
                 onKeyDown={e=>{if(e.target===e.currentTarget&&(e.key==='Enter'||e.key===' ')){e.preventDefault();openDetail(r);}}}
                 aria-label={`${displayName(r)} 상세 분석 보기`}>
               <div className="stock-top"><div className="stock-identity"><strong>{displayName(r)}</strong><span>{r.code} <span className="stock-dot">·</span> {r.day}</span></div><div className="stock-price"><b>{money(r.close_price)}<small>원</small></b><span>종가</span></div><ChevronRight size={19} className="stock-chevron"/></div>
+              {goldEvidenceBlock(r)}
               {patternEvidenceBlock(r)}
               <PriceCompareMini compact data={r1593Prices[comparisonKey(r)]} baseline={r.close_price} loading={r1593Busy&&!r1593Prices[comparisonKey(r)]}
                 onRequest={()=>{void requestMissingQuote(r);}} requesting={r1595Requesting===comparisonKey(r)}
