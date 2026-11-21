@@ -2,6 +2,15 @@
 
 새 채팅에서 프로젝트를 이어가기 위한 **결정/구현/검증 이력**입니다. 대화 전체를 저장하지 않고 실제 개발에 필요한 내용만 보존합니다. 최신 항목을 위에 추가하고, 결과가 달라지면 추측 대신 검증된 상태로 수정합니다.
 
+## 2026-11-21 (KST) — 4일×50종목 연구 모집단 격차의 후보 목록 재구성 (PR 준비)
+
+- **확정 실측:** [연구 #44886675015](https://github.com/ehdud6728-bit/BLUE-Signal-Lab/actions/runs/44886675015) `mode=study` 성공. KRX EOD 15일/감사 일치 연구 11일, 구 연구 격차 4일 제외. 11/10 2612 vs 2662, 11/13 2613 vs 2663, 11/16 2611 vs 2661, 11/17 2611 vs 2661, 각 50개 순 차이. D+5 관측 성숙 1586종목·일, D+10 1022종목·일. 실제 목표가/손절가 검증용 holdout은 부족해 추천 미게시.
+- **제약 확인:** 원래 전체 종목별 관측 목록은 v1 연구 데이터에 남지 않음. 저장된 선택 패턴 신호를 제외하여 집계된 50종목을 거꾸로 식별할 수 없으며 당시 MARCAP parquet 리비전이 보존됐다는 증거도 없음. 이를 정확한 실제 50종목이나 개별 신호 누락 확정으로 단정하지 않음.
+- **추가 코드:** `research-universe-gap-export.mjs`로 네 날짜의 독립 KRX EOD 원장 메타/2,600여 전체 종목 코드와 구 연구 감사 수를 Turso SELECT로 제한 조회. 감사/실물 종목 수/이름/시장의 기본 정합성·50개 순 격차 확인 후 JSON 출력. `research_universe_gap.py`는 동일 4일을 **새로 받은** MARCAP 2026년 snapshot의 정규화된 종목과 비교하여 KRX 전용 후보·MARCAP 전용 코드, 소스 SHA256, 개별 순 격차를 산출. 원본 당시 구성원 증명/복구/익절·손절 추천은 항상 `false`.
+- **수동 실행:** 새 [BLUE Research Four-Day Universe Gap (READ ONLY)](../.github/workflows/blue_turso_research_universe_gap.yml)에서 사용자 병합 후 `mode=inspect` 1회. `plan`/PR은 DB 조회 0; `inspect`도 **읽기 전용 Turso**+공개 MARCAP 다운로드, KRX/KIS 호출·Turso/D1 쓰기/스키마/자동수집·배포/AI 게시 없음. 보고서 JSON만 아티팩트로 업로드(14일).
+- **검증:** Python 순수비교 5/5, Node Turso mock SELECT 3/3, JS 구문 및 `git diff --check` 로컬 통과. 실제 원격 Turso/현재 MARCAP에 대한 4일 후보 비교는 아직 실행하지 않았음.
+- **다음:** PR CI → 사용자 병합 → `mode=inspect` 1회 → 50개 후보 및 소스 변경 여부 점검 → 기존 v1 보존, 감사된 KRX 전 종목·과거 가격 바를 이용한 별도 **v2 연구 원장** 설계 후 명시 승인. 이미 제외된 4일 신호는 그 전까지 단기/장기 익절·손절 연구 표본에 넣지 않는다.
+
 ## 2026-11-21 (KST) — KRX EOD vs R1.1 연구 전체 종목 수 불일치 차단·탐색 연구 격리 (PR 준비)
 
 - **결과:** [Actions #44881004263](https://github.com/ehdud6728-bit/BLUE-Signal-Lab/actions/runs/44881004263) `mode=audit` 성공, 신규 저장 0. 11/02~20 평일 후보 15일 중 정상 EOD/신호 원장 11일, 신규 미감사 날짜 0, `blocked` 4일(11/10·11/13·11/16·11/17). 네 날짜 모두 `SIGNAL_OBSERVED_VS_EOD_COUNT_MISMATCH`; EOD 및 신호 감사 메타데이터는 있고 KIS 잠정 저장 0건. 원본 일봉/신호 개별 행의 완전성이나 차이 발생 원천은 아직 독립 조회 전이므로 단정하지 않음.

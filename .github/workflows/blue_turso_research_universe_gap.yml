@@ -1,0 +1,83 @@
+name: BLUE Research Four-Day Universe Gap (READ ONLY)
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/blue_turso_research_universe_gap.yml'
+      - 'tools/turso/research-universe-gap-export.mjs'
+      - 'tools/turso/research-universe-gap-export.test.mjs'
+      - 'scripts/research_universe_gap.py'
+      - 'tests/test_research_universe_gap.py'
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: 'plan: no secrets/DB/source download; inspect: 4 dates via Turso SELECT + fresh MARCAP'
+        type: choice
+        options: [plan, inspect]
+        default: plan
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: blue-turso-research-universe-gap
+  cancel-in-progress: false
+
+jobs:
+  gap:
+    if: github.event_name == 'pull_request' || github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      MODE: ${{ github.event_name == 'pull_request' && 'plan' || inputs.mode }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install isolated Turso client without lifecycle scripts
+        working-directory: tools/turso
+        run: npm install --no-audit --no-fund --ignore-scripts --no-package-lock
+      - name: Offline gap regression tests
+        run: |
+          node --test tools/turso/research-universe-gap-export.test.mjs
+          python3 -m unittest discover -s tests -p 'test_research_universe_gap.py' -v
+      - name: Plan without database, KRX, KIS or external download
+        if: env.MODE == 'plan'
+        run: node tools/turso/research-universe-gap-export.mjs --mode=plan
+      - name: Guard explicitly manual read-only research
+        if: env.MODE == 'inspect'
+        run: |
+          test "$GITHUB_REPOSITORY" = 'ehdud6728-bit/BLUE-Signal-Lab'
+          test "$GITHUB_REF" = 'refs/heads/main'
+          test "$MODE" = inspect
+      - uses: actions/setup-python@v5
+        if: env.MODE == 'inspect'
+        with:
+          python-version: '3.11'
+      - name: Install MARCAP parquet reader
+        if: env.MODE == 'inspect'
+        run: python -m pip install 'pandas>=2,<3' 'numpy>=1.24,<3' 'pyarrow>=17,<24' 'requests>=2,<3'
+      - name: Read four immutable EOD and research audits from Turso
+        if: env.MODE == 'inspect'
+        env:
+          TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
+          TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
+        run: |
+          node tools/turso/research-universe-gap-export.mjs --mode=inspect \
+            --out=output/universe_gap/source.json
+      - name: Compare current MARCAP universe with audited KRX codes
+        if: env.MODE == 'inspect'
+        run: |
+          python scripts/research_universe_gap.py \
+            --source output/universe_gap/source.json \
+            --out output/universe_gap/report.json
+      - name: Preserve candidate report, never raw full-market rows
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: BLUE_RESEARCH_UNIVERSE_GAP_${{ github.run_id }}
+          path: output/universe_gap/report.json
+          retention-days: 14
+          if-no-files-found: ignore
