@@ -2,6 +2,15 @@
 
 새 채팅에서 프로젝트를 이어가기 위한 **결정/구현/검증 이력**입니다. 대화 전체를 저장하지 않고 실제 개발에 필요한 내용만 보존합니다. 최신 항목을 위에 추가하고, 결과가 달라지면 추측 대신 검증된 상태로 수정합니다.
 
+## 2026-11-21 (KST) — 동일 코스닥 50종목 격차 확인, KRX 원본 해시 일치 기반 v2 재분석 준비 (PR 준비)
+
+- **실제 자료 확인:** PR #74 병합(`9b578bd`), [Actions #44894825971](https://github.com/ehdud6728-bit/BLUE-Signal-Lab/actions/runs/44894825971) `inspect` 성공/보고서 아티팩트 `BLUE_RESEARCH_UNIVERSE_GAP_44894825971`. 11/10·13·16·17 네 날짜의 KRX EOD보다 **정확히 동일한 KOSDAQ 50코드**가 최신 MARCAP 자료에 없음. 현재 MARCAP 하루 종목 수는 구 R1.1 감사의 관측 수와 모두 동일, 역방향(MARCAP-only)은 0건. 50코드 전체는 해당 아티팩트에서 확인 가능; KRX EOD의 `name` 열은 공백이어서 이름을 증빙 없이 채우지 않음. 당시 MARCAP 원본 parquet 해시가 없으므로 `historical_missing_codes_proven=false` 유지.
+- **원칙:** KRX 확정 일봉이 이미 Turso에 있으므로 날짜별 KRX 재요청·KIS 보충·기존 v1 연구/가격 덮어쓰기 없이 누락 연구일을 재분석. 저장된 일자별 KRX `day_sha256` 원본 해시와 **재구성한 JSONL 바이트 해시가 일치해야** R1.1 scanner 입력으로 사용한다. 해시 다르면 실패 처리, 새 digest로 거짓 검증하지 않음.
+- **이번 코드:** `research-v2-eod-export.mjs`(4일 EOD/구 연구감사 SELECT+정확일 원본 바이트 해시), `research_v2_replay_proof.py`(연구 감사/신호 스냅샷/원본 KRX 해시 연결), `research-v2-signal-import.mjs`(분리된 v2 신호·감사 테이블, 충돌 거부/멱등/실물 read-back). 새 수동 `blue_turso_research_v2_replay.yml`은 `plan`/`check`만 허용, `check`에서 MARCAP 연간 소스 1회 다운로드 후 4일×500종목 청크/2개 프로세스 R1.1 재생·Turso SELECT 대조·아티팩트 보존. `apply`는 코드에 안전 확인값을 요구하는 준비 단계만 있으며 Actions에서는 **절대 실행하지 않음**.
+- **누락 위험 차단:** 이전 연구의 **250개 과거 일봉 최소 기준** 때문에 KRX 정확일 50개를 채워도 나머지 역사 봉이 없으면 패턴을 평가할 수 없다. `research_v2_history_coverage.py`가 4일별 EOD-only 정확히 50종목 모두의 **재생 기준 250봉**을 먼저 검사. 하나라도 부족하면 보고서에 `BLOCKED_INSUFFICIENT_HISTORY` 표시 후 v2 연구/신호 검증을 건너뛴다. 완전한 50개 역사 검증의 SHA를 v2 증빙·감사에 결합하므로 단순 전체 종목 수 일치로 승격되지 않는다. 실제 충족 여부는 Actions 실행 전 미정.
+- **테스트:** Node 원본 EOD 해시·변조 차단·별도 v2 DB 격리/재시도/미승인 쓰기 차단 8/8, Python 출처 결합/수불일치 차단 4/4, GitHub Actions YAML 파싱 및 `git diff --check` 로컬 통과. 실 Turso에 대한 4일 KRX 바이트 해시 재생·패턴 연구/가격 매칭은 **병합 후 수동 `mode=check` 전에는 미확정**.
+- **다음:** PR CI → 사용자 병합 → **수동 `mode=check` 1회**(쓰기/새 KRX 호출 없음) → 4일 감사 KRX 원본 해시·v2 연구 표본/신호 수 검증 → 사용자 별도 승인 후 v2 전용 테이블 `apply` 워크플로 준비. 기존 패턴 Exit Study는 v1의 4개 날짜 제외 정책을 그대로 유지, 새 v2 연구 자동 병합·추천 미게시.
+
 ## 2026-11-21 (KST) — 4일×50종목 연구 모집단 격차의 후보 목록 재구성 (PR 준비)
 
 - **확정 실측:** [연구 #44886675015](https://github.com/ehdud6728-bit/BLUE-Signal-Lab/actions/runs/44886675015) `mode=study` 성공. KRX EOD 15일/감사 일치 연구 11일, 구 연구 격차 4일 제외. 11/10 2612 vs 2662, 11/13 2613 vs 2663, 11/16 2611 vs 2661, 11/17 2611 vs 2661, 각 50개 순 차이. D+5 관측 성숙 1586종목·일, D+10 1022종목·일. 실제 목표가/손절가 검증용 holdout은 부족해 추천 미게시.

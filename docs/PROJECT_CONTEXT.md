@@ -2,6 +2,13 @@
 
 > 업데이트: 2026-11-21 (한국 시간). 이 파일은 개발 인계용 요약이며, 서버의 실시간 상태를 자동으로 반영하지 않습니다.
 
+## 2026-11-21 (KST) — 동일 코스닥 50종목 격차 재현 후 별도 v2 연구 복구 사전검증 (PR 준비)
+
+- [읽기 전용 후보 조사 #44894825971](https://github.com/ehdud6728-bit/BLUE-Signal-Lab/actions/runs/44894825971) `inspect` 성공. 11/10·13·16·17의 KRX EOD 대비 **현재 MARCAP에서만 빠진 동일 코스닥 50개 종목코드**를 4일 모두 확인. 매일 MARCAP 정규화 종목 수는 구 연구 `observed_stocks`와 정확히 일치, MARCAP 전용 코드는 0개. 보고서 `fresh_marcap_parquet_sha256=699c5d8e58f6c4e041c2e33018b6bc9e0c3882c79db1d07fc9b3a29df8dc5d2b`. 이는 **현재 MARCAP의 4일 코드 목록 재현**이며 당시 PARQUET 완전 동일성/누락 신호 실명 증명은 아님. KRX 종목 이름이 비어 있어 후보 이름은 임의 생성하지 않음.
+- 복구용 새 [KRX Four-Day R1.1 v2 Replay](../.github/workflows/blue_turso_research_v2_replay.yml) 기본 `plan`/수동 `check`만 노출. `check`는 기존 Turso KRX EOD 가격 4일×전 종목을 SELECT → 원본 일자별 `day_sha256`와 **바이트 동일성 검사** 후 2025·2026 MARCAP을 한 번씩 다운로드하고 4일 R1.1 연구를 다시 계산. 원본 KRX 해시가 불일치하면 즉시 중단하며 KRX/KIS API 재수집 금지. 출력 연구 신호·차트/검증 증거와 v2 전용 출처 증빙은 14일 아티팩트로 보관. v1·EOD/장바구니/D1 수정 및 실거래/AI 추천/자동 스케줄 없음.
+- **핵심 추가 조건:** 단순 `observed_stocks == KRX EOD row_count`는 50개 종목의 패턴 분석을 증명하지 않음. 기존 R1.1은 종목별 과거 유효 일봉 **250개 이상** 없으면 해당 종목 신호를 제외함. 4개 날짜 각각에 대해 실제 50개 EOD-only 종목의 재생 시점 250봉 보유 여부를 검증하고 하나라도 부족하면 `BLOCKED_INSUFFICIENT_HISTORY` 보고서만 남기며 **연구 스캔·v2 저장 승격을 건너뜀**. v2 출처 증빙 및 저장기는 50개 모두 250봉 통과를 의무화. 이력을 실제 확인하기 전 4일 연구 복구 성공을 주장하지 않음.
+- 별도 `blue_research_signals_v2`/`blue_research_signal_audit_v2`에만 멱등 적재할 수 있는 새 importer 코드를 준비함. `dry_run`은 DB 0회, `check`는 실제 KRX EOD 감사 해시·개별 신호 종가 SELECT 대조만 수행. 운영 `apply`는 명시적 별도 확인값을 요구하며 **현재 Actions에서 아예 선택 불가**. 사용자 승인과 `check` 실물 검증 후 별도 저장 단계. 기존 4일의 v1 신호는 계속 제외; v2 연구는 원래 추천/익절·손절 연구에 자동 결합하지 않음.
+
 ## 2026-11-21 (KST) — 4일×50종목 격차 원인 후보 조회 (읽기 전용, PR 준비)
 
 - [Exit Study #44886675015](https://github.com/ehdud6728-bit/BLUE-Signal-Lab/actions/runs/44886675015)는 `mode=study` 성공. 2026-11-02~20 KRX EOD 15일 중 전체시장 연구 원장 11일만 사용하고 11/10·13·16·17 네 날짜의 패턴 신호를 제외. 해당 4일은 KRX EOD 전체 2,662/2,663/2,661/2,661종목 대비 구 연구 관측 2,612/2,613/2,611/2,611종목으로 **각각 50개 순 격차**. 보고서는 성과 확인용 탐색 연구이며 검증된 익절·손절 추천은 아님.
