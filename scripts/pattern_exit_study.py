@@ -24,6 +24,14 @@ except ModuleNotFoundError:  # direct `python scripts/pattern_exit_study.py` exe
 
 WINDOWS = (5, 10, 20, 60, 120, 250, 500)
 PATH_HORIZONS = (5, 10, 20, 60)  # holding sessions after signal, NOT signal recency
+# Exactly the default selectable Turso pattern-search tags in web/src/main.tsx.
+# Other audited research tags remain in the exploratory report, but never
+# silently replace a user-visible search condition.
+SEARCH_PATTERN_TAGS = (
+    'BB20', 'BB30', 'BB40', 'ENV20', 'ENV40',
+    'BB20_LOWER', 'BB30_LOWER', 'BB40_LOWER', 'BB40_LOWER_ALT',
+    'BB30_LOWER_RECLAIM', 'ENV20_LOWER_TOUCH',
+)
 # Fixed BEFORE observing returns. No post hoc expansion of the policy search.
 POLICIES = (
     ExitPolicy(3, 2, 5), ExitPolicy(5, 3, 5), ExitPolicy(5, 3, 10),
@@ -190,6 +198,7 @@ def analyze(snapshot: dict) -> dict:
     # Fixed holding horizons: unlike WINDOWS, these measure D+5/10/20/60
     # observed post-signal range from the NEXT audited session's open.
     observed_paths = []
+    search_pattern_comparison = []
     for horizon in PATH_HORIZONS:
         grouped = defaultdict(list)
         pending_recent = 0
@@ -229,6 +238,19 @@ def analyze(snapshot: dict) -> dict:
                     o.extrema_order == 'SAME_SESSION_UNRESOLVED' for o in cases),
                 'research_only': True})
         summaries.sort(key=lambda x: (-x['n'], x['pattern']))
+        by_pattern = {item['pattern']: item for item in summaries}
+        search_pattern_comparison.append({
+            'holding_sessions': horizon,
+            'patterns': [
+                {'pattern': tag, 'status': 'EXPLORATORY' if tag in by_pattern else 'INSUFFICIENT_MATURE_SAMPLES',
+                 'n': len(grouped.get(tag, [])),
+                 'median_max_gain_pct': by_pattern[tag]['median_max_gain_pct'] if tag in by_pattern else None,
+                 'median_max_loss_pct': by_pattern[tag]['median_max_loss_pct'] if tag in by_pattern else None,
+                 'max_gain_at_least_5pct_count': by_pattern[tag]['max_gain_at_least_5pct_count'] if tag in by_pattern else None,
+                 'max_loss_at_most_minus_5pct_count': by_pattern[tag]['max_loss_at_most_minus_5pct_count'] if tag in by_pattern else None}
+                for tag in SEARCH_PATTERN_TAGS],
+            'research_only': True,
+        })
         observed_paths.append({'holding_sessions': horizon,
             'audited_date_count_sufficient': len(dates) > horizon,
             'mature_signal_stock_days': matured,
@@ -246,6 +268,7 @@ def analyze(snapshot: dict) -> dict:
         'research_excluded_days': excluded,
         'signal_stock_days': len(signals), 'short_and_long_windows': windows,
         'observed_path_windows': observed_paths,
+        'search_pattern_comparison': search_pattern_comparison,
         'trading_calendar_verified': calendar_ok,
         'corporate_actions_verified': corporate_ok,
         'market_and_sector_benchmark_verified': False,

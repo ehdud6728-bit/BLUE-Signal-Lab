@@ -1,7 +1,7 @@
 import unittest
 from datetime import date, timedelta
 
-from scripts.pattern_exit_study import analyze, WINDOWS
+from scripts.pattern_exit_study import analyze, WINDOWS, SEARCH_PATTERN_TAGS
 
 
 def fixture(n=26, corporate=False, calendar=False):
@@ -53,6 +53,10 @@ class PatternExitStudyTest(unittest.TestCase):
         self.assertEqual(stock['max_loss_at_most_minus_5pct_count'], 0)
         self.assertEqual(stock['worst_max_loss_pct'], -1)
         self.assertEqual(stock['same_session_unresolved_count'], stock['n'])
+        comparison = report['search_pattern_comparison'][0]['patterns']
+        self.assertEqual([p['pattern'] for p in comparison], list(SEARCH_PATTERN_TAGS))
+        self.assertEqual(next(p for p in comparison if p['pattern'] == 'BB20')['n'], stock['n'])
+        self.assertIsNone(next(p for p in comparison if p['pattern'] == 'BB40')['median_max_gain_pct'])
         self.assertEqual(stock['low_first_count'] + stock['high_first_count'], 0)
 
     def test_even_opted_in_independent_proofs_do_not_fabricate_recommendations(self):
