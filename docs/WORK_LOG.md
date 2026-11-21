@@ -2,6 +2,14 @@
 
 새 채팅에서 프로젝트를 이어가기 위한 **결정/구현/검증 이력**입니다. 대화 전체를 저장하지 않고 실제 개발에 필요한 내용만 보존합니다. 최신 항목을 위에 추가하고, 결과가 달라지면 추측 대신 검증된 상태로 수정합니다.
 
+## 2026-11-21 (KST) — KRX EOD vs R1.1 연구 전체 종목 수 불일치 차단·탐색 연구 격리 (PR 준비)
+
+- **결과:** [Actions #44881004263](https://github.com/ehdud6728-bit/BLUE-Signal-Lab/actions/runs/44881004263) `mode=audit` 성공, 신규 저장 0. 11/02~20 평일 후보 15일 중 정상 EOD/신호 원장 11일, 신규 미감사 날짜 0, `blocked` 4일(11/10·11/13·11/16·11/17). 네 날짜 모두 `SIGNAL_OBSERVED_VS_EOD_COUNT_MISMATCH`; EOD 및 신호 감사 메타데이터는 있고 KIS 잠정 저장 0건. 원본 일봉/신호 개별 행의 완전성이나 차이 발생 원천은 아직 독립 조회 전이므로 단정하지 않음.
+- **코드 원인:** 기존 `tools/turso/signal-snapshot-import.mjs`는 EOD 감사 날짜 존재와 **선택된 신호 종목**의 KRX 종가 일치만 강제했고, `manifest.observed_stocks === eod_audit.row_count`를 검사하지 않았음. 최근 `market_scan_r11.py --verified-eod-dir`에는 같은 검사가 있지만 과거 다른 EOD/연구 소스 조합에서는 우회 가능. 과거 `pattern-exit-export.mjs`도 두 수의 불일치를 검사하지 않아 [연구 #44848048384](https://github.com/ehdud6728-bit/BLUE-Signal-Lab/actions/runs/44848048384) 보고서의 전체 연구 15일이 모두 동일 모집단이라고 볼 수 없음.
+- **수정:** 신규 패턴 저장 승인 시 KRX EOD 전체 감사 종목 수와 연구 관측 종목 수가 다르면 **신호를 쓰기 전** `TURSO_SIGNAL_RESEARCH_UNIVERSE_MISMATCH`로 차단. 수동 익절/손절 연구는 이런 과거 날짜의 신호를 연구 표본에서 명시적으로 제외하며, 해당 날짜 KRX EOD 고저/시종가는 **정상 날짜 신호의 후속 보유 경로**에는 계속 활용. 결과 요약에 `research_excluded_days`를 기록하고 임의 0%·손실로 계상하지 않음. 원본 저장 행·원장 불변, DB 스키마/관리 변수/자동 백필/토큰/D1/API/PWA/수동 publish/추천 모두 미변경.
+- **테스트:** 패턴 저장 및 익절/손절 export Node 10/10, Python 연구+기존 백필 가드 13/13, `git diff --check` 통과. 실제 Turso 재조회/새 요약 보고서 생성은 병합 후 수동 `mode=study`로 수행할 예정이며 추천 게시 없음.
+- **다음:** PR CI → 사용자 병합 → **추가 KRX 재수집 없이** read-only Exit Study `mode=study, sessions=60` 1회 실행하고 `research_excluded_days` 및 D+5/D+10 성숙 사례 확인. 기존 4일 연구를 진짜 복구해야 한다면 저장된 v1을 덮어쓰기 전에 버전별 원장/기존 기록 보존·전체시장 재현 가능성을 따로 설계한다.
+
 ## 2026-11-21 (KST) — 11월 결측 실제 적재 성공·KIS 잠정/확정 감사 구별 (신규 PR 준비)
 
 - **운영 결과:** [Actions #44848048384](https://github.com/ehdud6728-bit/BLUE-Signal-Lab/actions/runs/44848048384)는 `mode=apply`, 기간 2026-11-02~20, `batch_size=5`, `study_after=true`. KRX 정확일 확인 후 11/02·11/05·11/06 EOD 및 R1.1 패턴 저장 각각 `DAY_OK`, 배치 성공 3·실패 0·원천 미확인 0. 읽기 전용 청산 탐색 `asof=11/20`, EOD 15일/패턴 신호 종목일 2,798/가격 관측값 23,425, 보고서 아티팩트 정상 업로드. D+10 성숙 표본 수와 매매 정책 검증은 이 로그 숫자만으로 단정하지 않음. 기존 감사 불일치 11/10·13·16·17은 이번에도 저장 대상 제외.

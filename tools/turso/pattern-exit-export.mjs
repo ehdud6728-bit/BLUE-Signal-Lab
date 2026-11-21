@@ -42,21 +42,34 @@ export async function exportPatternExitSource(client,{sessions=60,mode='plan'}={
     signal_events,source_payload_sha256 FROM blue_research_signal_audit_v1
     WHERE trade_day BETWEEN ? AND ? ORDER BY trade_day`,args:[start,end]});
   const researchDays=new Map();
+  const excludedResearchDays=[];
+  const seenResearchDays=new Set();
   for(const r of audited.rows){const day=String(r.trade_day);
-    assert(eodSet.has(day)&&!researchDays.has(day),'EXIT_EXPORT_RESEARCH_WITHOUT_EOD');
+    assert(eodSet.has(day)&&!seenResearchDays.has(day),'EXIT_EXPORT_RESEARCH_WITHOUT_EOD');
+    seenResearchDays.add(day);
     const matched=n(r.row_count,0,10000),observed=n(r.observed_stocks,1700,10000);
     const events=n(r.signal_events,0,300000);
     const hash=String(r.source_payload_sha256);
     assert(matched<=observed&&events>=matched&&events<=matched*30&&/^[a-f0-9]{64}$/.test(hash),
       'EXIT_EXPORT_BAD_RESEARCH_AUDIT');
+    if(observed!==counts.get(day)){
+      excludedResearchDays.push({day,reason:'RESEARCH_UNIVERSE_EOD_COUNT_MISMATCH',
+        observed_stocks:observed,eod_stocks:counts.get(day)});
+      continue;
+    }
     researchDays.set(day,{matched,events,hash});
   }
+  const excludedSet=new Set(excludedResearchDays.map(r=>r.day));
   const research=await client.execute({sql:`SELECT trade_day,code,signal_names,source_payload_sha256
     FROM blue_research_signals_v1 WHERE trade_day BETWEEN ? AND ?
     ORDER BY trade_day,code LIMIT 100001`,args:[start,end]});
   assert(research.rows.length<=100000,'EXIT_EXPORT_TOO_MANY_SIGNALS');
   const signals=[],signalCount=new Map(),eventsCount=new Map();
   for(const r of research.rows){const day=String(r.trade_day),code=String(r.code);
+    // The earlier importer checked the close of selected stocks but did not
+    // compare total observed vs independently audited KRX universe. These
+    // historical partial-universe signals are not valid study outcomes.
+    if(excludedSet.has(day))continue;
     const names=String(r.signal_names).split(',');const proof=researchDays.get(day);
     assert(proof&&CODE.test(code)&&String(r.source_payload_sha256)===proof.hash&&
       names.length>0&&names.length<=30&&names.every(x=>TOKEN.test(x))&&
@@ -70,13 +83,14 @@ export async function exportPatternExitSource(client,{sessions=60,mode='plan'}={
       (eventsCount.get(day)||0)===proof.events,'EXIT_EXPORT_SIGNAL_AUDIT_MISMATCH');
   }
   const bars=[];const PAGE=2000;
-  for(let offset=0;offset<=350000;offset+=PAGE){
+  const validDays=[...researchDays.keys()];
+  for(let offset=0;validDays.length&&offset<=350000;offset+=PAGE){
     const result=await client.execute({sql:`SELECT e.trade_day AS day,e.code,e.open,e.high,e.low,e.close
       FROM blue_eod_daily_v1 e WHERE e.trade_day BETWEEN ? AND ? AND e.code IN
       (SELECT DISTINCT s.code FROM blue_research_signals_v1 s
-       WHERE s.trade_day BETWEEN ? AND ?)
+       WHERE s.trade_day IN (${validDays.map(()=>'?').join(',')}))
       ORDER BY e.trade_day,e.code LIMIT ? OFFSET ?`,
-      args:[start,end,start,end,PAGE,offset]});
+      args:[start,end,...validDays,PAGE,offset]});
     for(const r of result.rows){const day=String(r.day),code=String(r.code);
       assert(eodSet.has(day)&&CODE.test(code),'EXIT_EXPORT_BAD_BAR_KEY');
       const prices={};
@@ -92,10 +106,11 @@ export async function exportPatternExitSource(client,{sessions=60,mode='plan'}={
   }
   return {format:'BLUE_TURSO_EXIT_SOURCE_V1',storage:'TURSO',asof_day:end,
     eod_days:eod.map(d=>({day:d.day,expected:d.expected,actual:counts.get(d.day)})),
-    research_audited_days:researchDays.size,signals,bars,
+    research_audited_days:researchDays.size,research_excluded_days:excludedResearchDays,
+    signals,bars,
     audits_readback_verified:true,trading_calendar_verified:false,
     corporate_actions_verified:false,
-    note:'KRX EOD/연구 감사 건수와 원천 해시만 재확인. 거래소 휴장일·기업행동·시장/업종 기준선은 검증 전.'};
+    note:'종목 수가 KRX EOD와 다른 구 연구일은 신호 성과에서 제외. KRX EOD/남은 연구 감사 및 해시 확인; 거래소 휴장일·기업행동·시장/업종 기준선은 검증 전.'};
 }
 
 async function main(){

@@ -68,6 +68,21 @@ def analyze(snapshot: dict) -> dict:
         if _count(item.get('actual'), 0, 10000) != item['expected']:
             raise ValueError('INCOMPLETE_STUDY_AUDIT')
     indexed = {day: i for i, day in enumerate(dates)}
+    excluded = snapshot.get('research_excluded_days', [])
+    if not isinstance(excluded, list) or len(excluded) > len(dates):
+        raise ValueError('BAD_EXCLUDED_RESEARCH_DAYS')
+    excluded_dates = set()
+    for item in excluded:
+        if not isinstance(item, dict):
+            raise ValueError('BAD_EXCLUDED_RESEARCH_DAYS')
+        day = _date(item.get('day'))
+        observed = _count(item.get('observed_stocks'), 1700, 10000)
+        expected = _count(item.get('eod_stocks'), 1700, 10000)
+        if day not in indexed or day in excluded_dates or observed == expected or \
+                expected != days[indexed[day]]['expected'] or \
+                item.get('reason') != 'RESEARCH_UNIVERSE_EOD_COUNT_MISMATCH':
+            raise ValueError('BAD_EXCLUDED_RESEARCH_DAYS')
+        excluded_dates.add(day)
     per_code = defaultdict(dict)
     for row in bars:
         day = _date(row.get('day'))
@@ -83,7 +98,8 @@ def analyze(snapshot: dict) -> dict:
         day = _date(row.get('day'))
         code = row.get('code')
         names = row.get('names')
-        if day not in indexed or not isinstance(code, str) or not CODE.fullmatch(code) or \
+        if day not in indexed or day in excluded_dates or \
+                not isinstance(code, str) or not CODE.fullmatch(code) or \
                 not isinstance(names, list) or not names or \
                 names != sorted(set(names)) or any(not isinstance(s, str) or not SIGNAL.fullmatch(s)
                                                   for s in names) or (day, code) in keys:
@@ -220,6 +236,7 @@ def analyze(snapshot: dict) -> dict:
     return {'schema': 'BLUE_TURSO_PATTERN_EXIT_REPORT_V1', 'storage': 'TURSO',
         'asof_day': dates[-1], 'eod_audited_days': len(dates),
         'research_audited_days': _count(snapshot.get('research_audited_days'), 0, 520),
+        'research_excluded_days': excluded,
         'signal_stock_days': len(signals), 'short_and_long_windows': windows,
         'observed_path_windows': observed_paths,
         'trading_calendar_verified': calendar_ok,
@@ -241,6 +258,7 @@ def main():
     destination.write_text(json.dumps(study, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
     print('BLUE_PATTERN_EXIT_STUDY', study['asof_day'], 'eod_days=' + str(study['eod_audited_days']),
           'signal_stock_days=' + str(study['signal_stock_days']),
+          'research_excluded_days=' + str(len(study['research_excluded_days'])),
           'watchlist=DISABLED', 'source_sha256=' + sha256(source).hexdigest())
 
 

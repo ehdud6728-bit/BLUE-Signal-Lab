@@ -48,13 +48,13 @@ test('reject tampering, duplicate ticker, and future-dated chart before DB acces
 
 function mockTurso(){
   const records=new Map(),audits=new Map(),eod=new Map([['000660',1144000],['005930',194700]]);
-  let eodReady=true,closed=0;
+  let eodReady=true,closed=0,eodAuditCount=2660;
   const client={
     async execute(input){
       const sql=typeof input==='string'?input:input.sql;
       const args=typeof input==='string'?[]:input.args;
       if(sql.startsWith('CREATE '))return {rows:[]};
-      if(sql.includes('FROM blue_eod_ingest_audit_v1'))return {rows:eodReady?[{row_count:2660n}]:[]};
+      if(sql.includes('FROM blue_eod_ingest_audit_v1'))return {rows:eodReady?[{row_count:BigInt(eodAuditCount)}]:[]};
       if(sql.includes('FROM blue_eod_daily_v1'))return {rows:args.slice(1).sort().map(code=>
         eod.has(code)?{code,close:BigInt(eod.get(code))}:null).filter(Boolean)};
       if(sql.includes('INSERT INTO blue_research_signals_v1')){
@@ -77,7 +77,8 @@ function mockTurso(){
     },
     close(){closed++;},
   };
-  return {client,records,audits,eod,setEodReady:v=>{eodReady=v;},getClosed:()=>closed};
+  return {client,records,audits,eod,setEodReady:v=>{eodReady=v;},
+    setEodAuditCount:v=>{eodAuditCount=v;},getClosed:()=>closed};
 }
 
 test('apply requires independently audited EOD price parity; D1 is never contacted',async()=>{
@@ -96,6 +97,17 @@ test('apply requires independently audited EOD price parity; D1 is never contact
   mock.records.get('2026-11-18:005930').record_json='CORRUPTED';
   await assert.rejects(importSignalSnapshot(options),/TURSO_SIGNAL_EXISTING_RECORD_CONFLICT/);
   assert.equal(mock.getClosed(),5);
+});
+
+test('apply refuses research universe smaller than KRX EOD even when every matched price agrees',async()=>{
+  const {manifest,payload}=fixture(),mock=mockTurso();
+  mock.setEodAuditCount(2661);
+  await assert.rejects(importSignalSnapshot({manifest,payload,mode:'apply',
+    env:{TURSO_DATABASE_URL:'libsql://fake.invalid',TURSO_AUTH_TOKEN:'fake'},
+    clientFactory:()=>mock.client}),/TURSO_SIGNAL_RESEARCH_UNIVERSE_MISMATCH/);
+  assert.equal(mock.records.size,0);
+  assert.equal(mock.audits.size,0);
+  assert.equal(mock.getClosed(),1);
 });
 
 test('only explicitly selected apply mode can create or modify Turso',async()=>{
