@@ -214,8 +214,15 @@ def analyze(snapshot: dict) -> dict:
             if len(cases) < 3:
                 continue  # never turn one anecdotal candle into a pattern verdict
             summaries.append({'pattern': pattern, 'n': len(cases),
+                # Descriptive observed range, NOT an executable exit return.
+                'mean_max_gain_pct': round(mean(o.max_gain_pct for o in cases), 2),
                 'median_max_gain_pct': round(median(o.max_gain_pct for o in cases), 2),
+                'mean_max_loss_pct': round(mean(o.max_loss_pct for o in cases), 2),
                 'median_max_loss_pct': round(median(o.max_loss_pct for o in cases), 2),
+                'max_gain_positive_count': sum(o.max_gain_pct > 0 for o in cases),
+                'max_gain_at_least_5pct_count': sum(o.max_gain_pct >= 5 for o in cases),
+                'max_loss_at_most_minus_5pct_count': sum(o.max_loss_pct <= -5 for o in cases),
+                'worst_max_loss_pct': round(min(o.max_loss_pct for o in cases), 2),
                 'low_first_count': sum(o.extrema_order == 'LOW_FIRST' for o in cases),
                 'high_first_count': sum(o.extrema_order == 'HIGH_FIRST' for o in cases),
                 'same_session_unresolved_count': sum(
