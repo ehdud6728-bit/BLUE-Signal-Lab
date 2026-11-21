@@ -74,6 +74,13 @@ def replay_proof(audit: dict, eod: dict, snapshot: dict, coverage: dict) -> dict
             coverage.get('verified_source') != exact['source'] or
             coverage.get('eod_count') != count or
             coverage.get('source_sha256_by_year') != years or
+            coverage.get('research_market_scope') != 'RESEARCH_V2_PINNED_KOSDAQ_GLOBAL_50' or
+            audit.get('research_market_scope') != coverage['research_market_scope'] or
+            coverage.get('market_scope_code_count') != 50 or
+            audit.get('market_scope_code_count') != 50 or
+            not isinstance(coverage.get('market_scope_reclassified_rows'), int) or
+            coverage['market_scope_reclassified_rows'] < 50 * 250 or
+            audit.get('market_scope_reclassified_rows') != coverage['market_scope_reclassified_rows'] or
             not isinstance(coverage.get('missing_candidates'), list) or
             len(coverage['missing_candidates']) != 50 or
             any(not isinstance(r, dict) or r.get('meets_250_bar_threshold') is not True or
@@ -92,6 +99,8 @@ def replay_proof(audit: dict, eod: dict, snapshot: dict, coverage: dict) -> dict
         'source_marcap_sha256_2026': years['2026'],
         'history_50_coverage_sha256': coverage_hash,
         'targeted_history_sha256': historical_sha,
+        'research_market_scope': coverage['research_market_scope'],
+        'market_scope_reclassified_rows': coverage['market_scope_reclassified_rows'],
         'all_50_histories_ready': True,
         'v1_original_unchanged': True,
         'source': 'IMMUTABLE_KRX_EOD_HASH_MATCH_RESCAN',

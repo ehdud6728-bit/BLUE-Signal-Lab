@@ -494,6 +494,8 @@ def main():
                    help="Byte-verified historical bars for only 36 missing v2 symbols (research only)")
     p.add_argument("--prior-eod-root", default="",
                    help="Reuse original byte-verified previous v2 KRX days, no new provider calls")
+    p.add_argument("--research-v2-global-scope", action="store_true",
+                   help="V2 only: include the 50 pinned KOSDAQ GLOBAL histories")
     p.add_argument("--reuse-target-eod-dir", default="",
                    help="Reuse the already verified daily KRX target if history needs no other missing weekdays")
     p.add_argument("--daily-provider", choices=["auto", "openapi", "pykrx"], default="auto")
@@ -518,6 +520,9 @@ def main():
             raise ValueError('TARGETED_HISTORY_PRIOR_EOD_REQUIRES_TARGETED_HISTORY')
         from research_v2_targeted_history import reuse_prior_exact_eod
         raw,prior_eod_sha=reuse_prior_exact_eod(raw,args.prior_eod_root,date.fromisoformat(args.date))
+    if args.research_v2_global_scope and (
+            not args.verified_eod_dir or args.date not in ('2026-11-10','2026-11-13','2026-11-16','2026-11-17')):
+        raise ValueError('V2_GLOBAL_SCOPE_ONLY_VERIFIED_REPLAY')
     latest = normalise(raw).date.max().date()
     target = latest if args.date == "latest" else date.fromisoformat(args.date)
     today = ensure_eod_request(target, datetime.now(timezone.utc))
@@ -527,9 +532,13 @@ def main():
     prices = normalise(raw)
     requires_fetch = bool(args.turso_indicators_out) or today or target > prices.date.max().date() or len(prices.loc[prices.date.dt.date.eq(target)]) < 1700
     verified_count = None
+    market_scope = {}
     if args.verified_eod_dir:
         verified_day, target_source = load_verified_day(args.verified_eod_dir, target)
         verified_count = len(verified_day)
+        if args.research_v2_global_scope:
+            from research_v2_market_scope import project_v2_market
+            raw,market_scope=project_v2_market(raw,verified_day,target,hashes)
         upgraded = merge_verified_days(raw, target, [verified_day], [target.isoformat()])
         days = [target.isoformat()]
     elif args.reuse_target_eod_dir and can_reuse_verified_target(latest, target):
@@ -573,6 +582,7 @@ def main():
         "source_verified_at_kst": datetime.now(KST).isoformat(timespec="seconds"),
         "corporate_actions": corporate_actions_audit,
     })
+    audit.update(market_scope)
     if targeted_history_sha:
         audit['targeted_history_sha256']=targeted_history_sha
         audit['historical_source_policy']='UNADJUSTED_TICKER_KRX_FIRST_KIS_SECONDARY_RESEARCH_ONLY'

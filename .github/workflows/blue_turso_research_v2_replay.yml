@@ -14,12 +14,14 @@ on:
       - 'tests/test_research_v2_history_coverage.py'
       - 'scripts/research_v2_targeted_history.py'
       - 'tests/test_research_v2_targeted_history.py'
+      - 'scripts/research_v2_market_scope.py'
+      - 'tests/test_research_v2_market_scope.py'
       - 'tools/turso/research-v2-history-runner.mjs'
       - 'tools/turso/research-v2-history-runner.test.mjs'
   workflow_dispatch:
     inputs:
       mode:
-        description: 'plan: offline; check: existing historical sources; recover: 36 KRX history tickers, KIS fallback with cached token (no writes)'
+        description: 'plan: offline; check: pinned MARCAP KOSDAQ GLOBAL v2 research (no new KRX/KIS); recover: fallback only if still needed'
         type: choice
         options: [plan, check, recover]
         default: plan
@@ -61,6 +63,7 @@ jobs:
           python3 -m unittest discover -s tests -p 'test_research_v2_replay_proof.py' -v
           python3 -m unittest discover -s tests -p 'test_research_v2_history_coverage.py' -v
           python3 -m unittest discover -s tests -p 'test_research_v2_targeted_history.py' -v
+          python3 -m unittest discover -s tests -p 'test_research_v2_market_scope.py' -v
       - name: Plan without credentials, network market collection or DB
         if: env.MODE == 'plan'
         run: node tools/turso/research-v2-eod-export.mjs --mode=plan
@@ -103,6 +106,7 @@ jobs:
             DIR="output/v2_replay/$DAY"
             python scripts/research_v2_history_coverage.py --date "$DAY" \
               --local-data-dir output/v2_replay/marcap \
+              --research-v2-global-scope \
               --verified-eod-dir "$DIR/eod" --out "$DIR/coverage.json"
             if ! python -c 'import json,sys; d=json.load(open(sys.argv[1])); sys.exit(0 if d["all_50_have_250_valid_bars"] is True else 1)' \
               "$DIR/coverage.json"; then
@@ -141,6 +145,7 @@ jobs:
             DIR="output/v2_replay/$DAY"
             python scripts/research_v2_history_coverage.py --date "$DAY" \
               --local-data-dir output/v2_replay/marcap \
+              --research-v2-global-scope \
               --verified-eod-dir "$DIR/eod" \
               --targeted-history-dir=output/v2_replay/targeted_history \
               --prior-eod-root=output/v2_replay \
@@ -166,6 +171,7 @@ jobs:
             DIR="output/v2_replay/$DAY"
             python scripts/market_scan_r11.py --date "$DAY" --years 2025,2026 \
               --local-data-dir output/v2_replay/marcap \
+              --research-v2-global-scope \
               --verified-eod-dir "$DIR/eod" --scan-workers 2 --scan-chunk-size 500 \
               "${HISTORY_ARGS[@]}" \
               --out "$DIR/source"
