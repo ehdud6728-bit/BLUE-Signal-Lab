@@ -34,7 +34,8 @@ def evaluate_candidates(day: str,old_codes: set[str],eod_codes: set[str],
             'original_v1_modified':False,'writes':0}
 
 
-def measure_coverage(raw, verified, day: date, hashes: dict) -> dict:
+def measure_coverage(raw, verified, day: date, hashes: dict,
+                     targeted_history_dir: str = '', prior_eod_root: str = '') -> dict:
     from market_scan import normalise
     from market_scan_r11 import merge_verified_days
     target=day.isoformat()
@@ -42,11 +43,23 @@ def measure_coverage(raw, verified, day: date, hashes: dict) -> dict:
     old_codes=set(base.loc[base.date.eq(target),'code'])
     eod_codes=set(verified['Code'])
     missing=eod_codes-old_codes
+    history_sha = None
+    if targeted_history_dir:
+        from research_v2_targeted_history import load_and_merge
+        raw, history_sha = load_and_merge(raw,targeted_history_dir,day)
+    prior_eod_sha = {}
+    if prior_eod_root:
+        from research_v2_targeted_history import reuse_prior_exact_eod
+        raw,prior_eod_sha=reuse_prior_exact_eod(raw,prior_eod_root,day)
     patched=merge_verified_days(raw,day,[verified],[target])
     clean=normalise(patched)
     counts=clean.loc[(clean.date.le(target)) & clean.code.isin(missing)] \
         .groupby('code').size().to_dict()
-    return evaluate_candidates(target,old_codes,eod_codes,counts,hashes)
+    report=evaluate_candidates(target,old_codes,eod_codes,counts,hashes)
+    if history_sha:
+        report['targeted_history_sha256']=history_sha
+        report['prior_exact_eod_sha256_by_day']=prior_eod_sha
+    return report
 
 
 def main():
@@ -55,6 +68,8 @@ def main():
     parser.add_argument('--local-data-dir',required=True)
     parser.add_argument('--verified-eod-dir',required=True)
     parser.add_argument('--out',required=True)
+    parser.add_argument('--targeted-history-dir',default='')
+    parser.add_argument('--prior-eod-root',default='')
     args=parser.parse_args()
     target=date.fromisoformat(args.date)
     if target.isoformat() not in ('2026-11-10','2026-11-13','2026-11-16','2026-11-17'):
@@ -63,7 +78,7 @@ def main():
     from turso_history_replay_source import load_verified_day
     raw,hashes=load_marcap([2025,2026],args.local_data_dir)
     verified,source=load_verified_day(args.verified_eod_dir,target)
-    report=measure_coverage(raw,verified,target,hashes)
+    report=measure_coverage(raw,verified,target,hashes,args.targeted_history_dir,args.prior_eod_root)
     eod_manifest=json.loads((Path(args.verified_eod_dir)/'manifest.json').read_text())
     report['eod_day_sha256']=eod_manifest['days'][0]['sha256']
     report['verified_source']=source

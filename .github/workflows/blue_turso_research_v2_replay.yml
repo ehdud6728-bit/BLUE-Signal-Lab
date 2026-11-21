@@ -1,4 +1,4 @@
-name: BLUE KRX 4-Day R1.1 v2 Replay (READ ONLY PREFLIGHT)
+name: BLUE KRX 4-Day R1.1 v2 Replay (READ ONLY / TARGETED RECOVERY)
 
 on:
   pull_request:
@@ -12,12 +12,16 @@ on:
       - 'tests/test_research_v2_replay_proof.py'
       - 'scripts/research_v2_history_coverage.py'
       - 'tests/test_research_v2_history_coverage.py'
+      - 'scripts/research_v2_targeted_history.py'
+      - 'tests/test_research_v2_targeted_history.py'
+      - 'tools/turso/research-v2-history-runner.mjs'
+      - 'tools/turso/research-v2-history-runner.test.mjs'
   workflow_dispatch:
     inputs:
       mode:
-        description: 'plan: no DB/source download; check: four old dates, read-only Turso, no KRX/KIS calls'
+        description: 'plan: offline; check: existing historical sources; recover: 36 KRX history tickers, KIS fallback with cached token (no writes)'
         type: choice
-        options: [plan, check]
+        options: [plan, check, recover]
         default: plan
         required: true
 
@@ -41,33 +45,39 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
       - name: Install query client without lifecycle scripts
         working-directory: tools/turso
         run: npm install --no-audit --no-fund --ignore-scripts --no-package-lock
+      - name: Install Python test dependencies before running new history tests
+        run: python -m pip install 'pandas>=2,<3' 'numpy>=1.24,<3'
       - name: Test SHA-parity, immutable v2 writer and read-only guard
         run: |
           node --test tools/turso/research-v2-eod-export.test.mjs \
-            tools/turso/research-v2-signal-import.test.mjs
+            tools/turso/research-v2-signal-import.test.mjs \
+            tools/turso/research-v2-history-runner.test.mjs
           python3 -m unittest discover -s tests -p 'test_research_v2_replay_proof.py' -v
           python3 -m unittest discover -s tests -p 'test_research_v2_history_coverage.py' -v
+          python3 -m unittest discover -s tests -p 'test_research_v2_targeted_history.py' -v
       - name: Plan without credentials, network market collection or DB
         if: env.MODE == 'plan'
         run: node tools/turso/research-v2-eod-export.mjs --mode=plan
-      - name: Guard read-only main-branch check mode
-        if: env.MODE == 'check'
+      - name: Guard read-only main-branch check/recover modes
+        if: env.MODE == 'check' || env.MODE == 'recover'
         run: |
           test "$GITHUB_REPOSITORY" = 'ehdud6728-bit/BLUE-Signal-Lab'
           test "$GITHUB_REF" = 'refs/heads/main'
-          test "$MODE" = check
-      - uses: actions/setup-python@v5
-        if: env.MODE == 'check'
-        with:
-          python-version: '3.11'
+          [[ "$MODE" == check || "$MODE" == recover ]]
       - name: Install existing pattern scanner dependencies (no pykrx or KRX auth)
-        if: env.MODE == 'check'
-        run: python -m pip install 'pandas>=2,<3' 'numpy>=1.24,<3' 'pyarrow>=17,<24' 'requests>=2,<3'
+        if: env.MODE == 'check' || env.MODE == 'recover'
+        run: python -m pip install 'pyarrow>=17,<24' 'requests>=2,<3'
+      - name: Install single-ticker KRX history client only for explicitly requested recovery
+        if: env.MODE == 'recover'
+        run: python -m pip install 'pykrx==1.2.9'
       - name: Reuse yearly MARCAP snapshots once for all four scans
-        if: env.MODE == 'check'
+        if: env.MODE == 'check' || env.MODE == 'recover'
         run: |
           set -euo pipefail
           mkdir -p output/v2_replay/marcap
@@ -78,14 +88,14 @@ jobs:
             --output output/v2_replay/marcap/marcap-2026.parquet \
             'https://raw.githubusercontent.com/FinanceData/marcap/master/data/marcap-2026.parquet'
       - name: Reconstruct exactly hashed KRX EOD from existing Turso (no new KRX requests)
-        if: env.MODE == 'check'
+        if: env.MODE == 'check' || env.MODE == 'recover'
         env:
           TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
           TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
         run: node tools/turso/research-v2-eod-export.mjs --mode=inspect --out=output/v2_replay
       - name: Check 250-day research history for every one of the 50 previously absent tickers
         id: coverage
-        if: env.MODE == 'check'
+        if: env.MODE == 'check' || env.MODE == 'recover'
         run: |
           set -euo pipefail
           READY=true
@@ -103,15 +113,61 @@ jobs:
           if [[ "$READY" != 'true' ]]; then
             echo 'V2_REPLAY_BLOCKED_INCOMPLETE_50_HISTORY: no research or DB writes attempted' >> "$GITHUB_STEP_SUMMARY"
           fi
-      - name: Re-run all 4 R1.1 research days against original KRX day hashes (no DB writes)
-        if: env.MODE == 'check' && steps.coverage.outputs.ready == 'true'
+      - name: Plan only 36 missing-history tickers from four exact source audits
+        if: env.MODE == 'recover' && steps.coverage.outputs.ready == 'false'
+        run: |
+          python scripts/research_v2_targeted_history.py --mode=plan \
+            --coverage-root=output/v2_replay \
+            --out=output/v2_replay/history-plan.json
+      - name: Fetch only targeted historical ticker bars (KRX first, cached KIS second)
+        if: env.MODE == 'recover' && steps.coverage.outputs.ready == 'false'
+        env:
+          TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
+          TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
+          KIS_APP_KEY: ${{ secrets.KIS_APP_KEY }}
+          KIS_APP_SECRET: ${{ secrets.KIS_APP_SECRET }}
+        run: |
+          node tools/turso/research-v2-history-runner.mjs \
+            --plan=output/v2_replay/history-plan.json \
+            --anchor-eod-dir=output/v2_replay/2026-11-10/eod \
+            --out=output/v2_replay/targeted_history
+      - name: Recheck all 50 histories against research-only augmented bars
+        id: recovered
+        if: env.MODE == 'recover' && steps.coverage.outputs.ready == 'false'
         run: |
           set -euo pipefail
+          READY=true
+          for DAY in $REPLAY_DAYS; do
+            DIR="output/v2_replay/$DAY"
+            python scripts/research_v2_history_coverage.py --date "$DAY" \
+              --local-data-dir output/v2_replay/marcap \
+              --verified-eod-dir "$DIR/eod" \
+              --targeted-history-dir=output/v2_replay/targeted_history \
+              --prior-eod-root=output/v2_replay \
+              --out "$DIR/coverage.json"
+            if ! python -c 'import json,sys; d=json.load(open(sys.argv[1])); sys.exit(0 if d["all_50_have_250_valid_bars"] is True else 1)' \
+              "$DIR/coverage.json"; then
+              READY=false
+            fi
+          done
+          echo "ready=$READY" >> "$GITHUB_OUTPUT"
+          if [[ "$READY" != 'true' ]]; then
+            echo 'TARGETED_HISTORY_STILL_INSUFFICIENT: 4-day scan not run. See saved coverage.json; do not force 250 bars.' >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - name: Re-run all 4 R1.1 research days against original KRX day hashes (no DB writes)
+        if: (env.MODE == 'check' || env.MODE == 'recover') && (steps.coverage.outputs.ready == 'true' || steps.recovered.outputs.ready == 'true')
+        run: |
+          set -euo pipefail
+          HISTORY_ARGS=()
+          if [[ -f output/v2_replay/targeted_history/manifest.json ]]; then
+            HISTORY_ARGS+=(--targeted-history-dir output/v2_replay/targeted_history --prior-eod-root output/v2_replay)
+          fi
           for DAY in $REPLAY_DAYS; do
             DIR="output/v2_replay/$DAY"
             python scripts/market_scan_r11.py --date "$DAY" --years 2025,2026 \
               --local-data-dir output/v2_replay/marcap \
               --verified-eod-dir "$DIR/eod" --scan-workers 2 --scan-chunk-size 500 \
+              "${HISTORY_ARGS[@]}" \
               --out "$DIR/source"
             python scripts/export_turso_signal_snapshot.py \
               --input-dir "$DIR/source" --out "$DIR/signals"
@@ -123,7 +179,7 @@ jobs:
               --input-dir="$DIR/signals" --proof="$DIR/proof.json"
           done
       - name: Verify all replay signals vs original Turso EOD prices (SELECT only)
-        if: env.MODE == 'check' && steps.coverage.outputs.ready == 'true'
+        if: (env.MODE == 'check' || env.MODE == 'recover') && (steps.coverage.outputs.ready == 'true' || steps.recovered.outputs.ready == 'true')
         env:
           TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
           TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
@@ -142,6 +198,9 @@ jobs:
           path: |
             output/v2_replay/*/eod/manifest.json
             output/v2_replay/*/coverage.json
+            output/v2_replay/history-plan.json
+            output/v2_replay/targeted_history/manifest.json
+            output/v2_replay/targeted_history/history.jsonl
             output/v2_replay/*/proof.json
             output/v2_replay/*/signals/manifest.json
             output/v2_replay/*/signals/records.jsonl
