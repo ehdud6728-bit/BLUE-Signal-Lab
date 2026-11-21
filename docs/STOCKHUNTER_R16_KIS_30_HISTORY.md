@@ -15,8 +15,9 @@
 1. PR CI의 `offline_safety`가 통과하면 소스를 검토 후 `main`에 병합한다. **병합은 데이터 수집이 아니다.**
 2. GitHub Actions에서 `BLUE to Stock-Hunter R16 KIS 30 Tickers History (RESEARCH ONLY)`를 선택한다.
 3. 기본 `mode=dry_run`으로 **네트워크·DB·비밀키 사용 없는** 점검을 한다.
-4. 실제 KIS 이력 수집을 승인하면 `mode=capture`, `confirm_fixed_scope=true`를 수동 선택한다. BLUE 기존 4개 Actions Secrets만 사용하며 키 값을 대화에 전달하거나 Stock-Hunter에 복사하지 않는다.
-5. Actions 아티팩트 `BLUE_STOCKHUNTER_R16_KIS_30_<run_id>`의 다음 파일을 확인한다.
+4. `mode=token_check`로 **기존 암호화 Turso 토큰의 유효성·복호화만** 확인한다. KIS 시세 GET이나 `tokenP`는 호출하지 않는다. 오류는 미리 정한 비밀정보 없는 상태코드로만 기록한다.
+5. 기존 토큰 확인 후 실제 KIS 이력 수집을 승인하면 `mode=capture`, `confirm_fixed_scope=true`를 수동 선택한다. BLUE 기존 4개 Actions Secrets만 사용하며 키 값을 대화에 전달하거나 Stock-Hunter에 복사하지 않는다.
+6. Actions 아티팩트 `BLUE_STOCKHUNTER_R16_KIS_30_<run_id>`의 다음 파일을 확인한다.
    - `R16_KIS_UNADJUSTED_30.csv`: `date,code,open,high,low,close,volume,amount` 정규화 원주가 및 수량/금액
    - `R16_KIS_SOURCE_MANIFEST.json`: 30개 원래 명단, 코드별 실제 조회 첫날/마지막 날·행 수, 280봉/35% 갭 검사, 페이지별 응답 SHA256, 합계 및 CSV SHA256
    - `R16_KIS_RUN_SUMMARY.json`: 전체 `status`, 실패 이유, 토큰 신규 발급·DB 쓰기 0 표기
@@ -26,11 +27,19 @@
 | 실제 상태 | 해석 |
 |---|---|
 | `DRY_RUN_NO_REMOTE_REQUESTS` | 코드만 오프라인 검증. **원천 일봉 0건** |
+| `TOKEN_VALID_NO_KIS_REQUESTS` | 기존 Turso KIS 토큰 1회 SELECT·검증 성공. **KIS 시세 조회 0회** |
+| `EXISTING_TURSO_TOKEN_EXPIRED` 등 사전 허용된 오류 | 기존 캐시 토큰의 만료/메타데이터/복호화/DB 읽기 실패. 신규 tokenP 발급은 하지 않음 |
 | `CAPTURE_COMPLETE_REPLAY_NOT_DONE` | 30종목 순회 완료, 그중 최소 10종목 280봉 및 갭 사전검사 충족. **R116/R14/R15 신호 재실행·수익검증 아님** |
 | `INSUFFICIENT_R16_COVERAGE` | 30종목 순회 완료했지만 사전검증 충족 10종목 미만. **연구 성과 금지** |
 | `SOURCE_UNAVAILABLE_FAIL_CLOSED` | 인증·권한·호출 제한 등으로 조기 중단. 데이터 결과가 없더라도 실패 원인만 기록 |
 
 `first_requested_date_proven=false`: KIS가 조회 시작일 이전의 마지막 거래일 또는 상장일을 별도로 인증해 주지 않는다. 실제로 2020년 첫날부터 전 기간을 확보했는지는 코드별 `first_date/last_date/bars`와 별도의 상장·거래소 달력 자료를 비교해야 한다. **280봉 이상도 6년 전체 이력 인증은 아니다.**
+
+### 2026-11-22 첫 실수집 장애 (#44919873568)
+
+- [PR CI #44918896455](https://github.com/ehdud6728-bit/BLUE-Signal-Lab/actions/runs/44918896455)는 오프라인 테스트·`dry_run` 성공. 실 원천 수집은 **건너뜀**.
+- [수동 첫 `capture` #44919873568](https://github.com/ehdud6728-bit/BLUE-Signal-Lab/actions/runs/44919873568)는 실제 가격 조회 전에 약 1초 만에 `SOURCE_UNAVAILABLE_FAIL_CLOSED`, `UNEXPECTED_SOURCE_ERROR`로 중단. 이유 미특정 상태에서 KIS 키 오류나 실 데이터 성공을 주장하지 않는다.
+- 후속 수정은 **기존 R9 토큰 리더가 이미 제공하는 안전한 거부 코드**(예: 토큰 만료/읽기·복호화 실패)를 원문 예외/키/토큰 없이 전달하며, 별도 `token_check`로 KIS 호출 0회 상태 진단을 우선한다. 기존 승인된 단일 발급자 외 새 토큰을 자동 발급하지 않는다.
 
 BLUE CSV는 **Stock-Hunter R16에 곧바로 병합되는 입력이 아니다**. Stock-Hunter R16의 독립 수입기에서 행별 원주가·범위·코드·SHA 및 기업행동/극단값을 확인한 후, 재현이 가능한 종목만 R116/R14/R15 분석으로 넘긴다. 30개가 2,225종목의 사전 신호 출처 명단에서 추출된 **종목 중복 없는 편의 표본**이라는 한계와 20개 유효 이벤트 요건은 여전히 적용된다. 실전 추천 및 자동 매매 전환은 금지한다.
 

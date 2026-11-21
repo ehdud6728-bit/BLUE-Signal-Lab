@@ -106,6 +106,36 @@ test('missing secrets and changing 30-code scope fail before network',async()=>{
   });
 });
 
+test('token_check uses only existing cached token with zero KIS quote GETs',async()=>{
+  await withDir(async(dir)=>{
+    let reads=0;
+    const result=await executeExport(dir,ENV,{mode:'token_check',pause,
+      tokenReader:async()=>{reads++;return 'fake-cached-token';},
+      getPage:()=>assert.fail('KIS GET forbidden during token_check')});
+    assert.equal(result.status,'TOKEN_VALID_NO_KIS_REQUESTS');
+    assert.equal(reads,1);
+    assert.deepEqual(await readdir(dir),['R16_KIS_RUN_SUMMARY.json']);
+    assert.ok(!(await readFile(join(dir,'R16_KIS_RUN_SUMMARY.json'),'utf8')).includes('fake-cached-token'));
+  });
+});
+
+test('cached-token errors are classified without leaking raw exception text',async()=>{
+  for(const errorCode of ['EXISTING_TURSO_TOKEN_EXPIRED','EXISTING_TURSO_TOKEN_READ_UNAVAILABLE']) {
+    await withDir(async(dir)=>{
+      const result=await executeExport(dir,ENV,{mode:'token_check',pause,
+        tokenReader:async()=>{const e=new Error('PRIVATE_SECRET_VALUE');e.code=errorCode;throw e;},
+        getPage:()=>assert.fail('no KIS GET')});
+      assert.equal(result.error_code,errorCode);
+      assert.ok(!(await readFile(join(dir,'R16_KIS_RUN_SUMMARY.json'),'utf8')).includes('PRIVATE_SECRET_VALUE'));
+    });
+  }
+  await withDir(async(dir)=>{
+    const result=await executeExport(dir,ENV,{mode:'token_check',pause,
+      tokenReader:async()=>{const e=new Error('PRIVATE_SECRET_VALUE');e.code='PRIVATE_SECRET_VALUE';throw e;}});
+    assert.equal(result.error_code,'UNEXPECTED_SOURCE_ERROR');
+  });
+});
+
 test('capture uses existing token one time and emits R16 schema plus SHA audit',async()=>{
   await withDir(async(dir)=>{
     let tokenReads=0,apiCalls=0;
