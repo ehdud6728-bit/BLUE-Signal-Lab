@@ -85,6 +85,10 @@ export async function importSignalSnapshot({manifest,payload,mode='dry_run',env=
     const proof=await client.execute({sql:`SELECT row_count FROM blue_eod_ingest_audit_v1
       WHERE trade_day=? AND row_count>=1700 LIMIT 1`,args:[manifest.day]});
     assert(proof.rows.length===1,'TURSO_SIGNAL_EOD_DAY_NOT_VERIFIED');
+    // A matched stock's close can be correct even if the scanner silently
+    // omitted other KRX tickers. No complete-market research audit in that case.
+    assert(Number(proof.rows[0].row_count)===manifest.observed_stocks,
+      'TURSO_SIGNAL_RESEARCH_UNIVERSE_MISMATCH');
     for(let i=0;i<records.length;i+=40){
       const chunk=records.slice(i,i+40);
       const eod=await client.execute({sql:`SELECT code,close FROM blue_eod_daily_v1

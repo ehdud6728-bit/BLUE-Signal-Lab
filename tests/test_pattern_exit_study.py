@@ -85,6 +85,19 @@ class PatternExitStudyTest(unittest.TestCase):
         self.assertGreater(sixty['pending_recent'], 0)
         self.assertEqual(sixty['patterns'], [])
 
+    def test_mismatched_universe_dates_remain_visible_but_never_contribute_research_signals(self):
+        snap = fixture()
+        day = snap['eod_days'][3]['day']
+        snap['research_excluded_days'] = [{'day': day,
+            'reason': 'RESEARCH_UNIVERSE_EOD_COUNT_MISMATCH',
+            'observed_stocks': 2600, 'eod_stocks': 2660}]
+        report = analyze(snap)
+        self.assertEqual(report['research_excluded_days'], snap['research_excluded_days'])
+        self.assertTrue(report['investment_recommendation_enabled'] is False)
+        snap['signals'].append({'day': day, 'code': '005930', 'names': ['BB20']})
+        with self.assertRaisesRegex(ValueError, 'INVALID_STUDY_SIGNAL'):
+            analyze(snap)
+
 
 if __name__ == '__main__':
     unittest.main()

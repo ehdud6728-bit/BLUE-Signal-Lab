@@ -3,7 +3,7 @@ import {test} from 'node:test';
 import {DatabaseSync} from 'node:sqlite';
 import {exportPatternExitSource} from './pattern-exit-export.mjs';
 
-function fixture({missing=false,badHash=false}={}){
+function fixture({missing=false,badHash=false,researchMismatch=false}={}){
   const db=new DatabaseSync(':memory:');
   db.exec(`CREATE TABLE blue_eod_ingest_audit_v1 (
     trade_day TEXT,row_count INTEGER,source TEXT,day_sha256 TEXT);
@@ -20,7 +20,7 @@ function fixture({missing=false,badHash=false}={}){
   const signal=db.prepare('INSERT INTO blue_research_signals_v1 VALUES (?,?,?,?)');
   for(const [idx,day] of ['2026-11-18','2026-11-19'].entries()){
     audit.run(day,1700,'KRX_PYKRX_EXACT_DAY_VERIFIED','a'.repeat(64));
-    researchAudit.run(day,1,1700,1,'b'.repeat(64));
+    researchAudit.run(day,1,researchMismatch&&idx?1800:1700,1,'b'.repeat(64));
     signal.run(day,idx?'000002':'000001','BB20',badHash?'c'.repeat(64):'b'.repeat(64));
     for(let i=1;i<=1700-(missing&&idx?1:0);i++){
       rows.run(day,String(i).padStart(6,'0'),100,104,98,101);
@@ -63,6 +63,21 @@ test('row count mismatches and mismatching research source hash refuse to export
       /EXIT_EXPORT_(?:INCOMPLETE_EOD|UNVERIFIED_SIGNAL)/);
     db.close();
   }
+});
+
+test('excludes historical partial-universe signal days, while retaining their verified future KRX bars',async()=>{
+  const db=fixture({researchMismatch:true});
+  const x=await exportPatternExitSource(db.client,{mode:'study',sessions:5});
+  assert.deepEqual(x.research_excluded_days,[{
+    day:'2026-11-19',reason:'RESEARCH_UNIVERSE_EOD_COUNT_MISMATCH',
+    observed_stocks:1800,eod_stocks:1700,
+  }]);
+  assert.equal(x.research_audited_days,1);
+  assert.deepEqual(x.signals.map(s=>s.day),['2026-11-18']);
+  assert.equal(x.eod_days.length,2);
+  assert.equal(x.bars.length,2); // November 19 remains an EOD observation for November 18 signals.
+  assert.ok(db.calls.every(sql=>sql.trim().startsWith('SELECT')));
+  db.close();
 });
 
 test('rejects unsupported windows without opening a database',async()=>{
