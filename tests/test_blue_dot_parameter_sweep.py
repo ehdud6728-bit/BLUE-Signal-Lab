@@ -8,7 +8,8 @@ from unittest import mock
 import pandas as pd
 
 from scripts.blue_dot_parameter_sweep import (
-    BASELINES, build_tuning_signals, candidate_definitions, compact_report,
+    BASELINES, CHART_CHECK_FLAGS, build_tuning_signals, candidate_definitions,
+    chart_check_dossier, compact_report,
     contiguous_lookback, frozen_parameters, main,
 )
 from tests.test_env20_rebound_comparison import fixture
@@ -93,6 +94,61 @@ class BlueDotParameterSweepTest(unittest.TestCase):
         self.assertTrue(result['previously_inspected_2026_holdout_not_pristine'])
         self.assertTrue(result['grid_designed_after_prior_baseline_results_were_seen'])
         json.dumps(result)
+
+    def test_chart_dossier_uses_actual_prior_hlc3_line_and_rejects_false_signals(self):
+        # Controlled downward HLC3 history followed by a candle crossing the
+        # shifted historical upper line. No real broker values are injected.
+        days = pd.bdate_range('2026-07-01', periods=100)
+        price = [160-i for i in range(100)]
+        data = pd.DataFrame({
+            'date': days, 'code': ['000001']*100,
+            'Name': ['시험종목']*100, 'session_index': list(range(100)),
+            'open': price, 'high': price, 'low': price, 'close': price,
+            'prior_close': [float('nan'), *price[:-1]],
+        })
+        data.loc[70, ['open', 'high', 'low', 'close']] = [90, 145, 90, 145]
+        for flag in CHART_CHECK_FLAGS:
+            data[flag] = False
+        flag = 'T_H_20_20_26_G'
+        data.loc[70, flag] = True
+        sample = {'code': '000001', 'signal_day': days[70].strftime('%Y-%m-%d'),
+                  'stock_name_at_signal': '시험종목', 'first_touch_type': 'STOP_GAP',
+                  'assumed_net_return_pct': -12.3}
+        patterns = {f: {k: [] for _, k in (
+            ('take', 'holdout_latest_first_take_examples'),
+            ('stop', 'holdout_latest_first_stop_examples'),
+            ('gap', 'holdout_latest_stop_gap_examples'),
+            ('severe', 'holdout_latest_severe_loss_examples'))}
+            for f in CHART_CHECK_FLAGS}
+        patterns[flag]['holdout_latest_stop_gap_examples'] = [sample]
+        patterns[flag]['holdout_latest_severe_loss_examples'] = [sample]
+        full = {'results': [{'observation_sessions_not_forced_holding': 5,
+                            'take_profit_pct': 2.5, 'stop_loss_pct': 4.5,
+                            'patterns': patterns}]}
+        result = chart_check_dossier(full, data, candidate_definitions())
+        gap = result['cases_by_flag'][flag]['categories']['stop_gap'][0]
+        self.assertTrue(gap['model_line_cross_classification']['geometry_cross'])
+        self.assertLess(gap['model_line_krw_signal_day'],
+                        gap['model_line_krw_prior_day'])
+        self.assertEqual(gap['source_ohlc_krw_on_signal_day']['close'], 145)
+        self.assertFalse(result['broker_numeric_line_parity_verified'])
+        self.assertEqual(result['confirmed_broker_signal_examples'], [])
+        self.assertEqual(result['cases_by_flag'][flag]['categories']['severe_loss'], [gap])
+        dispute = {'disputes': [{'code': '000001',
+                    'model_signal_day': sample['signal_day'],
+                    'user_reported_chart_signal_day': None,
+                    'verdict': 'USER_REPORTS_NO_BLUE_DOTTED_LINE_CROSS'}]}
+        disputed = chart_check_dossier(full, data, candidate_definitions(),
+                                       chart_disputes=dispute)
+        disputed_case = (disputed['cases_by_flag'][flag]['categories']['stop_gap'][0])
+        self.assertEqual(disputed_case['chart_validation_status'],
+                         'USER_DISPUTED_MODEL_SIGNAL')
+        self.assertFalse(disputed_case['broker_signal_verified'])
+        self.assertEqual(disputed_case['user_chart_dispute']['verdict'],
+                         'USER_REPORTS_NO_BLUE_DOTTED_LINE_CROSS')
+        data.loc[70, flag] = False
+        with self.assertRaisesRegex(ValueError, 'SAMPLE_NOT_A_VALID_SIGNAL'):
+            chart_check_dossier(full, data, candidate_definitions())
 
 
 if __name__ == '__main__':

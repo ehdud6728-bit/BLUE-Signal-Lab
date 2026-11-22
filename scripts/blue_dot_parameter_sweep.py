@@ -25,11 +25,13 @@ import pandas as pd
 
 try:
     from scripts.blue_dot_2026_research import build_blue_signals
+    from scripts.blue_dot_broker_parity import classify_cross
     from scripts.env20_rebound_comparison import MIN_HISTORY, evaluate
     from scripts.market_scan import load_marcap
     from scripts.research_v2_targeted_history import EXACT_MARCAP_HASHES
 except ModuleNotFoundError:
     from blue_dot_2026_research import build_blue_signals
+    from blue_dot_broker_parity import classify_cross
     from env20_rebound_comparison import MIN_HISTORY, evaluate
     from market_scan import load_marcap
     from research_v2_targeted_history import EXACT_MARCAP_HASHES
@@ -41,6 +43,18 @@ STYLES = ('strict', 'geometry')
 PRIMARY_POLICY = (5, 2.5, 4.5)
 ALL_POLICIES = ((2.5, 4.5), (5.0, 3.0))
 ALL_HORIZONS = (5, 20)
+# Fixed for *chart checking*, not selected by realized returns. The 35-day
+# sample is the user's own inspected Kiwoom setting; 20/39 tests shift risk.
+CHART_CHECK_FLAGS = ('T_H_20_20_26_G', 'T_H_30_20_26_G',
+                     'T_H_35_20_26_G', 'T_H_20_20_39_G')
+CHART_CHECK_CATEGORIES = (
+    ('take', 'holdout_latest_first_take_examples'),
+    ('stop', 'holdout_latest_first_stop_examples'),
+    ('stop_gap', 'holdout_latest_stop_gap_examples'),
+    ('severe_loss', 'holdout_latest_severe_loss_examples'),
+)
+CHART_DISPUTES_FILE = (Path(__file__).resolve().parents[1] /
+                       'research/blue_dot_chart_disputes.json')
 
 
 def frozen_parameters():
@@ -178,6 +192,121 @@ def compact_report(full, specs):
     return data
 
 
+def chart_check_dossier(full, d: pd.DataFrame, specs, *, chart_disputes=None):
+    """Annotate a small, predeclared set of holdout examples for HTS checks.
+
+    Broker line values are *not* read from an HTS. Every displayed modeled
+    line is recomputed from the pinned unadjusted HLC3 bars, with all needed
+    prior bars retained. Reject a case that is not actually a modeled cross.
+    """
+    if chart_disputes is None:
+        chart_disputes = json.loads(CHART_DISPUTES_FILE.read_text(encoding='utf-8'))
+    disputed = {}
+    for item in chart_disputes['disputes']:
+        pair = (str(item['code']).zfill(6), str(item['model_signal_day']))
+        if pair in disputed or item['verdict'] not in (
+            'MODEL_SIGNAL_DAY_DIFFERS_FROM_USER_CHART',
+            'USER_REPORTS_NO_BLUE_DOTTED_LINE_CROSS'):
+            raise ValueError('CHART_CHECK_INVALID_USER_DISPUTE')
+        disputed[pair] = item
+    studies = [s for s in full['results'] if (
+        s['observation_sessions_not_forced_holding'],
+        s['take_profit_pct'], s['stop_loss_pct']) == PRIMARY_POLICY]
+    if len(studies) != 1:
+        raise ValueError('CHART_CHECK_PRIMARY_STUDY_NOT_UNIQUE')
+    patterns = studies[0]['patterns']
+    spec_map = {spec['flag']: spec for spec in specs}
+    if any(flag not in spec_map or flag not in patterns
+           for flag in CHART_CHECK_FLAGS):
+        raise ValueError('CHART_CHECK_MISSING_PREDEFINED_FLAG')
+
+    selected = set()
+    for flag in CHART_CHECK_FLAGS:
+        for _, key in CHART_CHECK_CATEGORIES:
+            if key not in patterns[flag]:
+                raise ValueError('CHART_CHECK_MISSING_RISK_EXAMPLES')
+            for case in patterns[flag][key]:
+                selected.add(str(case['code']).zfill(6))
+    # Restrict heavy rolling computations to the small number of chart
+    # samples; keep each code's entire history to avoid lookback leakage.
+    columns = ['date', 'code', 'Name', 'open', 'high', 'low', 'close',
+               'prior_close', 'session_index', *CHART_CHECK_FLAGS]
+    stock = d.loc[d.code.isin(selected), columns].copy()
+    if not stock.empty and stock.duplicated(['code', 'date']).any():
+        raise ValueError('CHART_CHECK_DUPLICATE_SOURCE_BAR')
+    stock = stock.sort_values(['code', 'date']).reset_index(drop=True)
+    hlc3 = (stock.high + stock.low + stock.close) / 3
+    output = {}
+    for flag in CHART_CHECK_FLAGS:
+        spec = spec_map[flag]
+        if spec['basis'] != 'hlc3' or spec['cross'] != 'geometry':
+            raise ValueError('CHART_CHECK_UNEXPECTED_SPEC')
+        period, shift = spec['period'], spec['shift']
+        rolling = hlc3.groupby(stock.code, sort=False).transform(
+            lambda x: x.rolling(period, min_periods=period).mean() +
+            2 * x.rolling(period, min_periods=period).std(ddof=0))
+        line = rolling.groupby(stock.code, sort=False).shift(shift)
+        previous_line = line.groupby(stock.code, sort=False).shift(1)
+        safe = contiguous_lookback(stock.session_index, stock.code, period + shift)
+        lookup = {(row.code, row.date.strftime('%Y-%m-%d')): idx
+                  for idx, row in enumerate(stock.itertuples(index=False))}
+        cases = {}
+        for category, key in CHART_CHECK_CATEGORIES:
+            annotated = []
+            for sample in patterns[flag][key]:
+                code = str(sample['code']).zfill(6)
+                idx = lookup.get((code, sample['signal_day']))
+                if idx is None or not safe.iloc[idx] or not bool(stock.iloc[idx][flag]):
+                    raise ValueError('CHART_CHECK_SAMPLE_NOT_A_VALID_SIGNAL')
+                row = stock.iloc[idx]
+                if not pd.notna(line.iloc[idx]) or not pd.notna(previous_line.iloc[idx]):
+                    raise ValueError('CHART_CHECK_NO_MODELED_LINE')
+                classification = classify_cross(
+                    float(row.open), float(row.close), float(row.prior_close),
+                    float(previous_line.iloc[idx]), float(line.iloc[idx]))
+                if not classification['geometry_cross']:
+                    raise ValueError('CHART_CHECK_MODELED_GEOMETRY_MISMATCH')
+                dispute = disputed.get((code, sample['signal_day']))
+                annotated.append({**sample,
+                    'source_ohlc_krw_on_signal_day': {
+                        'open': float(row.open), 'high': float(row.high),
+                        'low': float(row.low), 'close': float(row.close),
+                        'prior_close': float(row.prior_close)},
+                    'model_line_krw_signal_day': round(float(line.iloc[idx]), 3),
+                    'model_line_krw_prior_day': round(float(previous_line.iloc[idx]), 3),
+                    'model_line_cross_classification': classification,
+                    'source_ticker_sessions_contiguous_for_line': True,
+                    'broker_line_value_not_supplied_for_this_sample': True,
+                    'broker_signal_verified': False,
+                    'chart_validation_status': (
+                        'USER_DISPUTED_MODEL_SIGNAL' if dispute else
+                        'MODEL_ONLY_NOT_BROKER_VERIFIED'),
+                    'user_chart_dispute': ({
+                        'verdict': dispute['verdict'],
+                        'user_reported_chart_signal_day':
+                            dispute['user_reported_chart_signal_day']}
+                        if dispute else None)})
+            cases[category] = annotated
+        output[flag] = {'parameters': {'period': period,
+                        'multiplier': spec['multiplier'], 'shift': shift},
+                        'price_basis_hypothesis': 'hlc3',
+                        'cross': 'geometry', 'categories': cases}
+    return {
+        'sample_selection': 'LATEST_FULL_HOLDOUT_DISTINCT_TICKERS_AND_DATES_BY_CATEGORY',
+        'categories_can_overlap_and_are_not_independent': True,
+        'samples_are_not_random_or_ranked_by_performance': True,
+        'only_predeclared_hlc3_geometry_flags': list(CHART_CHECK_FLAGS),
+        'broker_numeric_line_parity_verified': False,
+        'confirmed_broker_signal_examples': [],
+        'no_candidates_may_be_labeled_broker_verified': True,
+        'reported_disagreements': chart_disputes['disputes'],
+        'dispute_screenshots_do_not_show_exact_indicator_settings': True,
+        'broker_adjustment_and_fill_not_verified': True,
+        'source_is_pinned_unadjusted_marcap_not_kiwoom': True,
+        'cases_by_flag': output,
+    }
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--mode', choices=('plan', 'study'), default='plan')
@@ -200,8 +329,9 @@ def main():
     d, sessions, definitions = build_tuning_signals(raw)
     full = evaluate(d, sessions, stage_flags={s['flag']: s['flag'] for s in specs},
                     pattern_definitions=definitions, policies=ALL_POLICIES,
-                    horizons=ALL_HORIZONS)
+                    horizons=ALL_HORIZONS, expose_risk_examples=True)
     report = compact_report(full, specs)
+    report['chart_check_dossier'] = chart_check_dossier(full, d, specs)
     target = Path(args.out)
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text(json.dumps(report, ensure_ascii=False, indent=2)+'\n',
