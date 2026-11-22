@@ -1,0 +1,15 @@
+{
+  "source": "USER_REPORTED_KIWOOM_HTS_2026-11-22_NOT_INDEPENDENTLY_AUDITED",
+  "price_session": "KRX_REGULAR_ONLY_09_00_TO_15_30",
+  "broker_adjusted_prices_checked": true,
+  "ticker_code": "005300",
+  "ticker_name": "롯데칠성",
+  "formula": "SHIFT(BBandsUp(Period,D1),shift)",
+  "period": 35,
+  "multiplier": 2.0,
+  "shift": 26,
+  "observations": [
+    {"date": "2026-11-11", "blue_line_krw": 100542},
+    {"date": "2026-11-12", "blue_line_krw": 100267}
+  ]
+}

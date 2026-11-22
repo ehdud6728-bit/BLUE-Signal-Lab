@@ -4,16 +4,19 @@ on:
   pull_request:
     paths:
       - 'scripts/blue_dot_parameter_sweep.py'
+      - 'scripts/blue_dot_broker_parity.py'
       - 'scripts/blue_dot_2026_research.py'
       - 'scripts/env20_rebound_comparison.py'
       - 'tests/test_blue_dot_parameter_sweep.py'
+      - 'tests/test_blue_dot_broker_parity.py'
+      - 'research/blue_dot_broker_samples.json'
       - '.github/workflows/blue_dot_parameter_sweep.yml'
   workflow_dispatch:
     inputs:
       mode:
-        description: 'plan (no market data) or study (pinned public history)'
+        description: 'plan (offline), parity (broker-line audit), or study (sweep)'
         type: choice
-        options: [plan, study]
+        options: [plan, parity, study]
         default: plan
         required: true
 
@@ -43,17 +46,18 @@ jobs:
       - name: Verify candidate grid and no-lookahead invariants
         run: |
           python3 -m unittest discover -s tests -p 'test_blue_dot_parameter_sweep.py' -v
+          python3 -m unittest discover -s tests -p 'test_blue_dot_broker_parity.py' -v
           python3 -m unittest discover -s tests -p 'test_blue_dot_2026_research.py' -v
       - name: Print frozen parameter plan without market downloads
         if: env.MODE == 'plan'
         run: python3 scripts/blue_dot_parameter_sweep.py --mode=plan
-      - name: Require manual study on main only
-        if: env.MODE == 'study'
+      - name: Require manual research with source download on main only
+        if: env.MODE == 'study' || env.MODE == 'parity'
         run: |
           test "$GITHUB_REPOSITORY" = 'ehdud6728-bit/BLUE-Signal-Lab'
           test "$GITHUB_REF" = 'refs/heads/main'
       - name: Retrieve only two pinned public parquet files
-        if: env.MODE == 'study'
+        if: env.MODE == 'study' || env.MODE == 'parity'
         run: |
           set -euo pipefail
           mkdir -p output/blue_dot_tuning/sources
@@ -68,11 +72,19 @@ jobs:
           python3 scripts/blue_dot_parameter_sweep.py --mode=study \
             --source-dir output/blue_dot_tuning/sources \
             --out output/blue_dot_tuning/report.json
-      - name: Archive aggregate study only with no raw market bars
+      - name: Compare user-reported broker line with two unadjusted price bases
+        if: env.MODE == 'parity'
+        run: |
+          python3 scripts/blue_dot_broker_parity.py \
+            --source-dir output/blue_dot_tuning/sources \
+            --out output/blue_dot_tuning/parity.json
+      - name: Archive aggregate study or broker diagnostic, without raw market bars
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: BLUE_DOTTED_TUNING_${{ github.run_id }}
-          path: output/blue_dot_tuning/report.json
+          path: |
+            output/blue_dot_tuning/report.json
+            output/blue_dot_tuning/parity.json
           if-no-files-found: ignore
           retention-days: 14
