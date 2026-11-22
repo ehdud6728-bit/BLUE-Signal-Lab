@@ -8,10 +8,12 @@ on:
       - 'scripts/empirical_entry_exit_research.py'
       - 'scripts/closing_price_entry_research.py'
       - 'scripts/first_touch_risk_research.py'
+      - 'scripts/market_condition_risk.py'
       - 'tests/test_pattern_exit_study.py'
       - 'tests/test_empirical_entry_exit_research.py'
       - 'tests/test_closing_price_entry_research.py'
       - 'tests/test_first_touch_risk_research.py'
+      - 'tests/test_market_condition_risk.py'
       - 'tools/turso/pattern-exit-export.mjs'
       - 'tools/turso/pattern-exit-export.test.mjs'
       - 'tools/turso/pattern-exit-publish.mjs'
@@ -70,6 +72,7 @@ jobs:
           python3 -m unittest discover -s tests -p 'test_empirical_entry_exit_research.py' -v
           python3 -m unittest discover -s tests -p 'test_closing_price_entry_research.py' -v
           python3 -m unittest discover -s tests -p 'test_first_touch_risk_research.py' -v
+          python3 -m unittest discover -s tests -p 'test_market_condition_risk.py' -v
           python3 -m unittest discover -s tests -p 'test_turso_history_batch_guard.py' -v
           node --test tools/turso/pattern-exit-export.test.mjs tools/turso/pattern-exit-publish.test.mjs
       - name: Plan without SQL, secrets or Worker changes
@@ -97,7 +100,7 @@ jobs:
         run: |
           node tools/turso/pattern-exit-export.mjs --mode=study --sessions="$SESSIONS" \
             --out=output/exit_study/source.json
-      - name: Compare next-open exits, conditional closing entries and first-touch tail risk
+      - name: Compare closing entry first-touch risk by audited pre-entry market breadth
         if: env.MODE != 'plan'
         run: |
           python3 scripts/pattern_exit_study.py \

@@ -20,12 +20,16 @@ try:
         MIN_TRAIN_DAYS, QUANTILES, _levels, _statistics,
     )
     from scripts.exit_policy_research import VerifiedBar, _valid_bars
+    from scripts.market_condition_risk import (
+        describe_market_conditional, validated_market_context,
+    )
 except ModuleNotFoundError:
     from empirical_entry_exit_research import (
         COST_PCT, HORIZONS, MIN_HOLDOUT, MIN_HOLDOUT_DAYS, MIN_TRAIN,
         MIN_TRAIN_DAYS, QUANTILES, _levels, _statistics,
     )
     from exit_policy_research import VerifiedBar, _valid_bars
+    from market_condition_risk import describe_market_conditional, validated_market_context
 
 
 @dataclass(frozen=True)
@@ -82,7 +86,8 @@ def _feature_groups(bar: VerifiedBar) -> tuple[str, ...]:
     return tuple(labels)
 
 
-def _describe(cases, take, stop, minimum_cases, minimum_days, *, features=False):
+def _describe(cases, take, stop, minimum_cases, minimum_days, *, features=False,
+              market_context=None):
     """Never treat censored cases as a forced close, win, or loss."""
     signal_days = len({day for day, _, _, _ in cases})
     observed = []
@@ -150,10 +155,14 @@ def _describe(cases, take, stop, minimum_cases, minimum_days, *, features=False)
                     round(100 * len(stops) / len(group), 1) if group else None),
             }
         result['signal_day_features_train_only'] = feature_summaries
+    if market_context is not None:
+        result['market_conditioned_risk_and_pre_entry_filter_tradeoffs'] = (
+            describe_market_conditional(observed, market_context, _feature_groups))
     return result
 
 
-def analyze_first_touch_risk(dates, events, per_code, patterns):
+def analyze_first_touch_risk(dates, events, per_code, patterns, *, market_rows=None,
+                             market_labels=None, expected_counts=None):
     """Predefined chronological 75/25 split with a FULL-window train embargo.
 
     Windows limit observation and data completeness ONLY. A no-touch path does
@@ -161,6 +170,10 @@ def analyze_first_touch_risk(dates, events, per_code, patterns):
     historical training paths. Every grid combination is shown: no retrospective
     winner ranking from censored/repeated signals or sparse holdout samples.
     """
+    if market_rows is not None and expected_counts is None:
+        raise ValueError('MISSING_MARKET_EOD_AUDIT_COUNTS')
+    market_context = validated_market_context(
+        dates, expected_counts, market_rows, market_labels)
     split_index = max(1, min(len(dates) - 1, len(dates) * 3 // 4)) if len(dates) > 1 else 0
     windows = []
     for horizon in HORIZONS:
@@ -223,9 +236,9 @@ def analyze_first_touch_risk(dates, events, per_code, patterns):
                     result['first_touch_grid'].append({
                         'take_profit_pct': take, 'stop_loss_pct': stop,
                         'training': _describe(train, take, stop, MIN_TRAIN, MIN_TRAIN_DAYS,
-                                              features=True),
+                                              features=True,market_context=market_context),
                         'holdout': _describe(holdout, take, stop, MIN_HOLDOUT,
-                                             MIN_HOLDOUT_DAYS),
+                                             MIN_HOLDOUT_DAYS,market_context=market_context),
                     })
             result['candidate_count'] = len(result['first_touch_grid'])
             result['status'] = 'TRAIN_ONLY_GRID_NOT_SELECTED'
@@ -238,6 +251,19 @@ def analyze_first_touch_risk(dates, events, per_code, patterns):
         'closing_call_auction_1520_1530': 'BLOCKED_NO_PRE_CLOSE_SIGNAL_OR_AUCTION_FILLS',
         'actual_entry_or_exit_fills_verified': False,
         'future_gap_used_to_select_entry': False,
+        'market_condition_status': ('AUDITED_EQUAL_WEIGHT_BREADTH_PROXY_DESCRIPTIVE_ONLY'
+                                    if market_context is not None else
+                                    'MARKET_BREADTH_MISSING_FROM_SOURCE'),
+        'market_condition_definitions': {
+            'reference': 'ALL_KRX_OR_OWN_KOSPI_KOSDAQ_EQUAL_WEIGHT_STOCK_BREADTH',
+            'lag': 'PREVIOUS_1_OR_5_AUDITED_EOD_DATES_NOT_OFFICIAL_INDEX_RETURN',
+            'up': 'ADVANCING_MINUS_DECLINING_DIVIDED_BY_MATCHED_AT_LEAST_PLUS_10PCT',
+            'down': 'ADVANCING_MINUS_DECLINING_DIVIDED_BY_MATCHED_AT_MOST_MINUS_10PCT',
+            'mixed': 'NET_BREADTH_STRICTLY_BETWEEN_MINUS_10_AND_PLUS_10PCT',
+            'unknown': 'NO_REFERENCE_OR_LESS_THAN_90PCT_STOCK_COVERAGE_OR_UNDER_30',
+            'known_at_entry': 'SIGNAL_DAY_FINAL_CLOSE_AFTER_HOURS_ONLY',
+            'historical_market_labels_and_calendar_independently_verified': False,
+        },
         'observation_window_is_not_a_time_exit': True,
         'no_touch_is_unresolved_not_a_win_or_loss': True,
         'stop_gap_fill': 'NEXT_OR_LATER_SESSION_OPEN_IF_BELOW_STOP',

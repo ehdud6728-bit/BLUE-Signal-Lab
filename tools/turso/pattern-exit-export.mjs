@@ -38,6 +38,50 @@ export async function exportPatternExitSource(client,{sessions=60,mode='plan'}={
   assert(actualEod.rows.length===eod.length&&
     actualEod.rows.every(r=>eodSet.has(String(r.trade_day)))&&
     eod.every(r=>counts.get(r.day)===r.expected),'EXIT_EXPORT_INCOMPLETE_EOD');
+  // Close-known market condition: use the entire independently audited KRX
+  // EOD universe, not only stocks that matched a search signal. The reference
+  // is the exact previous / fifth previous AUDITED date, not LAG per issuer
+  // (which can skip suspended or delisted sessions). No index API/network use.
+  const market=await client.execute({sql:`WITH ordered AS (
+      SELECT trade_day,
+        LAG(trade_day,1) OVER (ORDER BY trade_day) AS prior1,
+        LAG(trade_day,5) OVER (ORDER BY trade_day) AS prior5
+      FROM blue_eod_ingest_audit_v1 WHERE trade_day BETWEEN ? AND ?
+    ), priced AS (
+      SELECT o.trade_day AS day,e.market,e.close AS current_close,
+        p1.close AS prev1,p5.close AS prev5
+      FROM ordered o JOIN blue_eod_daily_v1 e ON e.trade_day=o.trade_day
+      LEFT JOIN blue_eod_daily_v1 p1 ON p1.trade_day=o.prior1 AND p1.code=e.code
+      LEFT JOIN blue_eod_daily_v1 p5 ON p5.trade_day=o.prior5 AND p5.code=e.code
+    ), scoped AS (
+      SELECT day,'ALL' AS scope,current_close,prev1,prev5 FROM priced
+      UNION ALL
+      SELECT day,market AS scope,current_close,prev1,prev5 FROM priced
+    ) SELECT day,scope,COUNT(*) AS universe,
+      SUM(CASE WHEN current_close<=0 THEN 1 ELSE 0 END) AS invalid_prices,
+      SUM(CASE WHEN prev1>0 THEN 1 ELSE 0 END) AS matched1,
+      SUM(CASE WHEN prev1>0 AND current_close>prev1 THEN 1 ELSE 0 END) AS up1,
+      SUM(CASE WHEN prev1>0 AND current_close<prev1 THEN 1 ELSE 0 END) AS down1,
+      SUM(CASE WHEN prev5>0 THEN 1 ELSE 0 END) AS matched5,
+      SUM(CASE WHEN prev5>0 AND current_close>prev5 THEN 1 ELSE 0 END) AS up5,
+      SUM(CASE WHEN prev5>0 AND current_close<prev5 THEN 1 ELSE 0 END) AS down5
+    FROM scoped GROUP BY day,scope ORDER BY day,scope`,args:[start,end]});
+  const marketBreadth=[];
+  const marketByDay=new Map();
+  for(const r of market.rows){
+    const day=String(r.day),scope=String(r.scope);
+    assert(eodSet.has(day)&&['ALL','KOSPI','KOSDAQ'].includes(scope)&&
+      !marketByDay.has(`${day}/${scope}`),'EXIT_EXPORT_BAD_MARKET_SCOPE');
+    const universe=n(r.universe,1,10000),invalid=n(r.invalid_prices,0,10000);
+    const matched1=n(r.matched1,0,10000),up1=n(r.up1,0,10000),down1=n(r.down1,0,10000);
+    const matched5=n(r.matched5,0,10000),up5=n(r.up5,0,10000),down5=n(r.down5,0,10000);
+    assert(invalid===0&&up1+down1<=matched1&&matched1<=universe&&
+      up5+down5<=matched5&&matched5<=universe,'EXIT_EXPORT_BAD_MARKET_BREADTH');
+    const value={day,scope,universe,matched1,up1,down1,matched5,up5,down5};
+    marketByDay.set(`${day}/${scope}`,value);marketBreadth.push(value);
+  }
+  assert(eod.every(d=>marketByDay.get(`${d.day}/ALL`)?.universe===d.expected),
+    'EXIT_EXPORT_MARKET_UNIVERSE_MISMATCH');
   const audited=await client.execute({sql:`SELECT trade_day,row_count,observed_stocks,
     signal_events,source_payload_sha256 FROM blue_research_signal_audit_v1
     WHERE trade_day BETWEEN ? AND ? ORDER BY trade_day`,args:[start,end]});
@@ -85,21 +129,23 @@ export async function exportPatternExitSource(client,{sessions=60,mode='plan'}={
   const bars=[];const PAGE=2000;
   const validDays=[...researchDays.keys()];
   for(let offset=0;validDays.length&&offset<=350000;offset+=PAGE){
-    const result=await client.execute({sql:`SELECT e.trade_day AS day,e.code,e.open,e.high,e.low,e.close
+    const result=await client.execute({sql:`SELECT e.trade_day AS day,e.code,e.market,e.open,e.high,e.low,e.close
       FROM blue_eod_daily_v1 e WHERE e.trade_day BETWEEN ? AND ? AND e.code IN
       (SELECT DISTINCT s.code FROM blue_research_signals_v1 s
        WHERE s.trade_day IN (${validDays.map(()=>'?').join(',')}))
       ORDER BY e.trade_day,e.code LIMIT ? OFFSET ?`,
       args:[start,end,...validDays,PAGE,offset]});
     for(const r of result.rows){const day=String(r.day),code=String(r.code);
-      assert(eodSet.has(day)&&CODE.test(code),'EXIT_EXPORT_BAD_BAR_KEY');
+      const marketScope=String(r.market);
+      assert(eodSet.has(day)&&CODE.test(code)&&['KOSPI','KOSDAQ'].includes(marketScope),
+        'EXIT_EXPORT_BAD_BAR_KEY');
       const prices={};
       for(const key of ['open','high','low','close']){
         const value=n(r[key],1,10000000000);prices[key]=value;
       }
       assert(prices.low<=Math.min(prices.open,prices.close)&&
         prices.high>=Math.max(prices.open,prices.close),'EXIT_EXPORT_INVALID_OHLC');
-      bars.push({day,code,...prices});
+      bars.push({day,code,market:marketScope,...prices});
     }
     assert(bars.length<=350000,'EXIT_EXPORT_TOO_MANY_BARS');
     if(result.rows.length<PAGE)break;
@@ -107,10 +153,11 @@ export async function exportPatternExitSource(client,{sessions=60,mode='plan'}={
   return {format:'BLUE_TURSO_EXIT_SOURCE_V1',storage:'TURSO',asof_day:end,
     eod_days:eod.map(d=>({day:d.day,expected:d.expected,actual:counts.get(d.day)})),
     research_audited_days:researchDays.size,research_excluded_days:excludedResearchDays,
-    signals,bars,
+    signals,bars,market_breadth_by_day:marketBreadth,
+    market_breadth_method:'AUDITED_KRX_EQUAL_WEIGHT_ADVANCERS_VS_PRIOR_1_AND_5_AUDITED_EOD_DATES',
     audits_readback_verified:true,trading_calendar_verified:false,
     corporate_actions_verified:false,
-    note:'종목 수가 KRX EOD와 다른 구 연구일은 신호 성과에서 제외. KRX EOD/남은 연구 감사 및 해시 확인; 거래소 휴장일·기업행동·시장/업종 기준선은 검증 전.'};
+    note:'종목 수가 KRX EOD와 다른 구 연구일은 신호 성과에서 제외. 시장 구분은 감사된 전체 종목의 1/5감사일 상승 비율이며 코스피/코스닥 공식 지수 수익률이 아니다. KRX EOD/남은 연구 감사 및 해시 확인; 거래소 휴장일·기업행동·유동성·지수/섹터 독립 기준선은 검증 전.'};
 }
 
 async function main(){

@@ -98,6 +98,7 @@ def analyze(snapshot: dict) -> dict:
             raise ValueError('BAD_EXCLUDED_RESEARCH_DAYS')
         excluded_dates.add(day)
     per_code = defaultdict(dict)
+    per_code_market = defaultdict(dict)
     for row in bars:
         day = _date(row.get('day'))
         code = row.get('code')
@@ -106,6 +107,11 @@ def analyze(snapshot: dict) -> dict:
             raise ValueError('INVALID_STUDY_BAR_KEY')
         per_code[code][day] = VerifiedBar(day, *(float(row[key]) for key in
             ('open', 'high', 'low', 'close')), audited=True)
+        market_label = row.get('market')
+        if market_label is not None:
+            if market_label not in ('KOSPI', 'KOSDAQ'):
+                raise ValueError('INVALID_STUDY_BAR_MARKET')
+            per_code_market[code][day] = market_label
     events = []
     keys = set()
     for row in signals:
@@ -270,7 +276,15 @@ def analyze(snapshot: dict) -> dict:
     # an independent approval are missing even if individual policy tests pass.
     empirical = analyze_empirical_entries(dates, events, per_code, SEARCH_PATTERN_TAGS)
     closing = analyze_closing_entries(dates, events, per_code, SEARCH_PATTERN_TAGS)
-    first_touch = analyze_first_touch_risk(dates, events, per_code, SEARCH_PATTERN_TAGS)
+    if snapshot.get('market_breadth_by_day') is not None and snapshot.get(
+            'market_breadth_method') != (
+            'AUDITED_KRX_EQUAL_WEIGHT_ADVANCERS_VS_PRIOR_1_AND_5_AUDITED_EOD_DATES'):
+        raise ValueError('UNVERIFIED_MARKET_BREADTH_METHOD')
+    first_touch = analyze_first_touch_risk(
+        dates, events, per_code, SEARCH_PATTERN_TAGS,
+        market_rows=snapshot.get('market_breadth_by_day'),
+        market_labels=per_code_market,
+        expected_counts={item['day']: item['expected'] for item in days})
     return {'schema': 'BLUE_TURSO_PATTERN_EXIT_REPORT_V1', 'storage': 'TURSO',
         'asof_day': dates[-1], 'eod_audited_days': len(dates),
         'research_audited_days': _count(snapshot.get('research_audited_days'), 0, 520),
