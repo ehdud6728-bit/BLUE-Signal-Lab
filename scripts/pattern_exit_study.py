@@ -20,10 +20,12 @@ try:
     from scripts.exit_policy_research import ExitPolicy, VerifiedBar, simulate_exit, describe_exits, observe_path
     from scripts.empirical_entry_exit_research import analyze_empirical_entries
     from scripts.closing_price_entry_research import analyze_closing_entries
+    from scripts.first_touch_risk_research import analyze_first_touch_risk
 except ModuleNotFoundError:  # direct `python scripts/pattern_exit_study.py` execution
     from exit_policy_research import ExitPolicy, VerifiedBar, simulate_exit, describe_exits, observe_path
     from empirical_entry_exit_research import analyze_empirical_entries
     from closing_price_entry_research import analyze_closing_entries
+    from first_touch_risk_research import analyze_first_touch_risk
 
 
 WINDOWS = (5, 10, 20, 60, 120, 250, 500)
@@ -268,6 +270,7 @@ def analyze(snapshot: dict) -> dict:
     # an independent approval are missing even if individual policy tests pass.
     empirical = analyze_empirical_entries(dates, events, per_code, SEARCH_PATTERN_TAGS)
     closing = analyze_closing_entries(dates, events, per_code, SEARCH_PATTERN_TAGS)
+    first_touch = analyze_first_touch_risk(dates, events, per_code, SEARCH_PATTERN_TAGS)
     return {'schema': 'BLUE_TURSO_PATTERN_EXIT_REPORT_V1', 'storage': 'TURSO',
         'asof_day': dates[-1], 'eod_audited_days': len(dates),
         'research_audited_days': _count(snapshot.get('research_audited_days'), 0, 520),
@@ -277,11 +280,12 @@ def analyze(snapshot: dict) -> dict:
         'search_pattern_comparison': search_pattern_comparison,
         'empirical_entry_exit_research': empirical,
         'closing_price_entry_research': closing,
+        'first_touch_exit_risk_research': first_touch,
         'trading_calendar_verified': calendar_ok,
         'corporate_actions_verified': corporate_ok,
         'market_and_sector_benchmark_verified': False,
         'candidate_stocks': [], 'investment_recommendation_enabled': False,
-        'note': '정확한 미래 거래일/기업행동/시장 기준선 독립 검증 전 탐색 통계입니다. 기존 empirical 연구는 신호 다음 시가 진입, 신규 closing 연구는 당일 종가의 시간외 조건부 체결 가격경로만 관찰합니다. 15:20 단일가매매 신호/체결은 EOD만으로 재현 불가. 고저가 관측은 체결 수익이 아니며 종목 추천도 아닙니다.'}
+        'note': '독립 거래일/기업행동/체결 검증 전 탐색 통계입니다. 기존 empirical은 다음 시가, closing 및 first_touch는 미검증 시간외 종가 체결 가정입니다. first_touch의 5/10/20/60일은 관측 한도일 뿐 강제 청산이 아니며 익절·손절 미도달은 미해결입니다. 15:20 단일가매매 신호/체결은 EOD만으로 재현 불가. 추천/주문 없음.'}
 
 
 def main():
