@@ -1,0 +1,78 @@
+name: BLUE Dotted 20/30 Shift26 Research (MANUAL / READ ONLY)
+
+on:
+  pull_request:
+    paths:
+      - 'scripts/blue_dot_2026_research.py'
+      - 'scripts/env20_rebound_comparison.py'
+      - 'tests/test_blue_dot_2026_research.py'
+      - 'tests/test_env20_rebound_comparison.py'
+      - '.github/workflows/blue_dotted_line_2026_research.yml'
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: 'plan (zero network/SQL) or study (pinned public MARCAP only)'
+        type: choice
+        options: [plan, study]
+        default: plan
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: blue-dotted-20-30-research
+  cancel-in-progress: false
+
+jobs:
+  study:
+    if: github.event_name == 'pull_request' || github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      MODE: ${{ github.event_name == 'pull_request' && 'plan' || inputs.mode }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install pinned calendar and offline research mathematics
+        run: |
+          python -m pip install 'pandas>=2,<3' 'numpy>=1.24,<3' \
+            'pyarrow>=17,<24' 'exchange_calendars==4.13.3'
+      - name: Unit test 20/30 plotted shift parity and first-touch uncertainty
+        run: |
+          python3 -m unittest discover -s tests -p 'test_blue_dot_2026_research.py' -v
+          python3 -m unittest discover -s tests -p 'test_env20_rebound_comparison.py' -v
+      - name: Offline plan: no market source, Turso, KIS, D1 or trade requests
+        if: env.MODE == 'plan'
+        run: python3 scripts/blue_dot_2026_research.py --mode=plan
+      - name: Guard manual-only exploratory execution on main
+        if: env.MODE == 'study'
+        run: |
+          test "$GITHUB_REPOSITORY" = 'ehdud6728-bit/BLUE-Signal-Lab'
+          test "$GITHUB_REF" = 'refs/heads/main'
+      - name: Retrieve only two pinned public historical parquet inputs
+        if: env.MODE == 'study'
+        run: |
+          set -euo pipefail
+          mkdir -p output/blue_dot_2026/sources
+          for YEAR in 2025 2026; do
+            curl --fail --location --retry 2 --silent --show-error \
+              --output "output/blue_dot_2026/sources/marcap-$YEAR.parquet" \
+              "https://raw.githubusercontent.com/FinanceData/marcap/master/data/marcap-$YEAR.parquet"
+          done
+      - name: Compare shifted upper/lower 20 and 30 without publishing signals
+        if: env.MODE == 'study'
+        run: |
+          python3 scripts/blue_dot_2026_research.py --mode=study \
+            --source-dir output/blue_dot_2026/sources \
+            --out output/blue_dot_2026/report.json
+      - name: Archive aggregate research, exclude raw source bars
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: BLUE_DOTTED_20_30_REPORT_${{ github.run_id }}
+          path: output/blue_dot_2026/report.json
+          if-no-files-found: ignore
+          retention-days: 14

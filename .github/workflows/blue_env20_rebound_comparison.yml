@@ -1,0 +1,74 @@
+name: BLUE ENV20 Touch vs Reclaim Research (MANUAL / READ ONLY)
+
+on:
+  pull_request:
+    paths:
+      - 'scripts/env20_rebound_comparison.py'
+      - 'tests/test_env20_rebound_comparison.py'
+      - '.github/workflows/blue_env20_rebound_comparison.yml'
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: 'plan (no market downloads) or study (pinned public MARCAP only)'
+        type: choice
+        options: [plan, study]
+        default: plan
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: blue-env20-rebound-comparison
+  cancel-in-progress: false
+
+jobs:
+  compare:
+    if: github.event_name == 'pull_request' || github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      MODE: ${{ github.event_name == 'pull_request' && 'plan' || inputs.mode }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install offline math, parquet reader and calendar (no credentials)
+        run: |
+          python -m pip install 'pandas>=2,<3' 'numpy>=1.24,<3' \
+            'pyarrow>=17,<24' 'exchange_calendars==4.13.3'
+      - name: Test independent touch, reclaim, calendar-gap and no-fill guards
+        run: python3 -m unittest discover -s tests -p 'test_env20_rebound_comparison.py' -v
+      - name: Plan without network, secrets, SQL or trades
+        if: env.MODE == 'plan'
+        run: python3 scripts/env20_rebound_comparison.py --mode=plan
+      - name: Require explicitly selected main-branch exploratory study
+        if: env.MODE == 'study'
+        run: |
+          test "$GITHUB_REPOSITORY" = 'ehdud6728-bit/BLUE-Signal-Lab'
+          test "$GITHUB_REF" = 'refs/heads/main'
+      - name: Retrieve only historical pinned public MARCAP (no KRX or KIS API)
+        if: env.MODE == 'study'
+        run: |
+          set -euo pipefail
+          mkdir -p output/env20_rebound/sources
+          for YEAR in 2025 2026; do
+            curl --fail --location --retry 2 --silent --show-error \
+              --output "output/env20_rebound/sources/marcap-$YEAR.parquet" \
+              "https://raw.githubusercontent.com/FinanceData/marcap/master/data/marcap-$YEAR.parquet"
+          done
+      - name: Research A first-touch, B rising-price reclaim, C A then B
+        if: env.MODE == 'study'
+        run: |
+          python3 scripts/env20_rebound_comparison.py --mode=study \
+            --source-dir output/env20_rebound/sources \
+            --out output/env20_rebound/report.json
+      - name: Keep aggregate exploratory report only, never raw market bars
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: BLUE_ENV20_REBOUND_REPORT_${{ github.run_id }}
+          path: output/env20_rebound/report.json
+          if-no-files-found: ignore
+          retention-days: 14
