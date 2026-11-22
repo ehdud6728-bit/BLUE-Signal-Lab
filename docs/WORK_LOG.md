@@ -9,6 +9,14 @@
 - 차단: 30건·서로 다른 학습일 5일 미만 또는 홀드아웃 12건·서로 다른 신호일 3일 미만이면 검증/추천으로 표시하지 않는다. 거래소 공식 연속 영업일·기업행동/수정주가·유동성·시장/업종 비교/표본 중복 독립 검증 및 다중비교 보정 미완료. 모든 경우 `candidate_stocks=[]`·`recommendation_allowed=false`·골드 추천/실거래 신호 생성 없음. 추가 KRX/KIS 호출, Turso/D1 SQL, Worker 배포/스케줄 변경 없음.
 - 검증: 신규 학습/홀드아웃 격리·60일 제한·중복경로 누락·시가 갭 변경 불변성 테스트 및 기존 전체 청산 연구 단위 테스트를 로컬 실행. GitHub PR CI·실제 원격 Turso SELECT `mode=study` 보고서는 병합 후 별도 확인. 다음: PR CI→사용자 병합→기존 `blue_turso_pattern_exit_study.yml`의 수동 **`mode=study`, `sessions=60`** (읽기 전용) 실행→아티팩트의 새 학습/홀드아웃 비교 검토. 성숙 표본이 부족한 20/60일은 부족으로 표시, 과거 데이터 수집과 연구를 함께 확대한다.
 
+## 2026-11-22 (KST) — R16 첫 KIS 실수집의 토큰 판독 실패 진단 및 별도 token_check (PR 준비)
+
+- **실행 확인:** BLUE PR #82 병합 커밋 `f3beb676`, [PR CI #44918896455](https://github.com/ehdud6728-bit/BLUE-Signal-Lab/actions/runs/44918896455)의 오프라인 단위 테스트/무통신 `dry_run`는 성공, 실제 원천 데이터 수집 작업은 그 CI에서 건너뜀. 이어 사용자가 수동으로 실행한 [#44919873568](https://github.com/ehdud6728-bit/BLUE-Signal-Lab/actions/runs/44919873568)은 `manual_capture`의 고정 범위·GitHub Secrets 매핑·기존 Turso 드라이버 설치까지 통과했으나 `SOURCE_UNAVAILABLE_FAIL_CLOSED`, `UNEXPECTED_SOURCE_ERROR`로 약 1초 안에 종료. 시세 행 파일은 없고 요약 파일만 업로드. **이상 종료 원인은 아직 확정되지 않았으며 KIS 자격증명 오류로 단정하지 않는다.**
+- **문제:** R16의 예외 변환기가 기존 R9 연구 브리지의 안전 `BridgeFailure.code`를 일률적으로 `UNEXPECTED_SOURCE_ERROR`로 덮어써 토큰 만료/암호문 복호화/DB SELECT 장애의 구분이 불가능했음.
+- **변경:** 기존 R9가 미리 허용한 6개 비밀 없는 오류 코드만 전달, 원문 예외·Turso 주소·앱키·토큰은 계속 비노출. 새 `mode=token_check`는 기존 암호화 Turso KIS 토큰 SELECT와 복호화 여부만 확인하며 **KIS HTTP GET 0회·tokenP 발급 0회·Turso 쓰기 0회**. GitHub Actions 기본 `dry_run` 유지, `token_check` 선택에 `confirm_fixed_scope`를 요구하지 않고 실제 30종목 `capture`에만 여전히 명시 확인 필요.
+- **로컬 검증:** 신규 토큰 체크·허용 오류 분류/원문 예외 누출 차단 테스트 추가, 전체 Node 12/12 통과, 소스 syntax·워크플로 YAML 파서 정상. 실 Turso SELECT/token_check 재실행은 **병합 전 미실행**.
+- **다음:** 이 진단 PR CI→사용자 병합→GitHub Actions 수동 `mode=token_check` 1회→출력 상태코드/아티팩트로 인증 원인을 확정→유효 토큰일 때만 연구용 `capture` 재시도. 기존 승인된 단일 토큰 관리자 외 새 발급 금지, LIVE/SEARCH/WATCH 및 운영 DB/Cloudflare 변경 금지.
+
 ## 2026-11-22 (KST) — BLUE 기존 KIS 토큰 활용 Stock-Hunter R16 신규 30종목 2020~2025 원주가 수집 (PR 준비)
 
 - **사용자 결정:** 별도 KRX 키 발급/Stock-Hunter로 비밀정보 복사 대신, 이미 KIS 인증이 있는 **BLUE-Signal-Lab**에서 연구용 원천 데이터만 수집. Stock-Hunter R16 사전 고정 30코드·기간(2020-01-01~2025-12-31) 유지, 실패 종목 교체 금지.

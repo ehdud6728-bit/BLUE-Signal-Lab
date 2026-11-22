@@ -23,6 +23,14 @@ const MAX_PAGES_PER_TICKER = 22;
 const MAX_RESPONSE_BYTES = 2_000_000;
 const MIN_HISTORY_BARS = 280;
 const CSV_FIELDS = ['date','code','open','high','low','close','volume','amount'];
+const SAFE_CACHED_TOKEN_ERRORS = new Set([
+  'EXISTING_TURSO_TOKEN_MISSING',
+  'EXISTING_TOKEN_METADATA_INVALID',
+  'EXISTING_TURSO_TOKEN_EXPIRED',
+  'EXISTING_TOKEN_DECRYPT_UNAVAILABLE',
+  'EXISTING_BLUE_SECRETS_MISSING',
+  'EXISTING_TURSO_TOKEN_READ_UNAVAILABLE',
+]);
 const sha = input => createHash('sha256').update(input).digest('hex');
 const sleep = ms => new Promise(done => setTimeout(done, ms));
 
@@ -160,8 +168,18 @@ export async function collectTicker(code, credentials, {getPage=requestPage,paus
 
 // Runtime-only dynamic import avoids any DB driver load in offline tests/dry_run.
 async function existingBlueToken(env) {
-  const {obtainExistingToken} = await import('./stockhunter-r9-kis-bridge.mjs');
-  return obtainExistingToken(env);
+  let obtainExistingToken;
+  try {
+    ({obtainExistingToken} = await import('./stockhunter-r9-kis-bridge.mjs'));
+  } catch {
+    throw new HistoryFailure('EXISTING_TOKEN_READER_UNAVAILABLE');
+  }
+  try {
+    return await obtainExistingToken(env);
+  } catch (err) {
+    if (SAFE_CACHED_TOKEN_ERRORS.has(err?.code)) throw new HistoryFailure(err.code);
+    throw new HistoryFailure('EXISTING_TOKEN_READER_UNAVAILABLE');
+  }
 }
 
 function csvBytes(rows) {
@@ -186,7 +204,7 @@ export async function executeExport(outDir, env=process.env, {
   await mkdir(outDir,{recursive:true});
   try {
     if (mode==='dry_run') {summary.status='DRY_RUN_NO_REMOTE_REQUESTS';return summary;}
-    if (mode!=='capture' || codes.length!==CODES.length ||
+    if (!['token_check','capture'].includes(mode) || codes.length!==CODES.length ||
         codes.some((code,i)=>code!==CODES[i])) throw new HistoryFailure('UNAPPROVED_SCOPE');
     const key=env.KIS_APP_KEY?.trim(),secret=env.KIS_APP_SECRET?.trim();
     if (!key||!secret||!env.TURSO_DATABASE_URL||!env.TURSO_AUTH_TOKEN) {
@@ -194,6 +212,10 @@ export async function executeExport(outDir, env=process.env, {
     }
     const token = await tokenReader(env,{now});
     if (typeof token!=='string'||!token) throw new HistoryFailure('EXISTING_BLUE_TOKEN_INVALID');
+    if (mode==='token_check') {
+      summary.status='TOKEN_VALID_NO_KIS_REQUESTS';
+      return summary;
+    }
     const all=[],audit=[];
     for (const [i,code] of codes.entries()) {
       if (i>0) await pause(1750);
@@ -225,7 +247,8 @@ export async function executeExport(outDir, env=process.env, {
     return summary;
   } catch (err) {
     summary.status='SOURCE_UNAVAILABLE_FAIL_CLOSED';
-    summary.error_code=err instanceof HistoryFailure?err.code:'UNEXPECTED_SOURCE_ERROR';
+    summary.error_code=err instanceof HistoryFailure?err.code:
+      SAFE_CACHED_TOKEN_ERRORS.has(err?.code)?err.code:'UNEXPECTED_SOURCE_ERROR';
     return summary;
   } finally {
     await writeFile(resolve(outDir,'R16_KIS_RUN_SUMMARY.json'),`${JSON.stringify(summary,null,2)}\n`);
@@ -238,7 +261,8 @@ async function main() {
   const result=await executeExport(outDir,process.env,{mode});
   console.log(`BLUE_R16_KIS_STATUS=${result.status}`);
   if (result.error_code) console.log(`BLUE_R16_KIS_ERROR=${result.error_code}`);
-  if (!['DRY_RUN_NO_REMOTE_REQUESTS','CAPTURE_COMPLETE_REPLAY_NOT_DONE'].includes(result.status)) {
+  if (!['DRY_RUN_NO_REMOTE_REQUESTS','TOKEN_VALID_NO_KIS_REQUESTS',
+        'CAPTURE_COMPLETE_REPLAY_NOT_DONE'].includes(result.status)) {
     process.exitCode=2;
   }
 }
