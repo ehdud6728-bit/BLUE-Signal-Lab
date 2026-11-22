@@ -104,9 +104,12 @@ export async function exportPatternExitSource(client,{sessions=60,mode='plan'}={
     researchDays.set(day,{matched,events,hash});
   }
   const excludedSet=new Set(excludedResearchDays.map(r=>r.day));
-  const research=await client.execute({sql:`SELECT trade_day,code,signal_names,source_payload_sha256
-    FROM blue_research_signals_v1 WHERE trade_day BETWEEN ? AND ?
-    ORDER BY trade_day,code LIMIT 100001`,args:[start,end]});
+  const research=await client.execute({sql:`SELECT s.trade_day,s.code,s.signal_names,
+    s.source_payload_sha256,e.name AS stock_name
+    FROM blue_research_signals_v1 s
+    JOIN blue_eod_daily_v1 e ON e.trade_day=s.trade_day AND e.code=s.code
+    WHERE s.trade_day BETWEEN ? AND ?
+    ORDER BY s.trade_day,s.code LIMIT 100001`,args:[start,end]});
   assert(research.rows.length<=100000,'EXIT_EXPORT_TOO_MANY_SIGNALS');
   const signals=[],signalCount=new Map(),eventsCount=new Map();
   for(const r of research.rows){const day=String(r.trade_day),code=String(r.code);
@@ -118,7 +121,12 @@ export async function exportPatternExitSource(client,{sessions=60,mode='plan'}={
     assert(proof&&CODE.test(code)&&String(r.source_payload_sha256)===proof.hash&&
       names.length>0&&names.length<=30&&names.every(x=>TOKEN.test(x))&&
       names.join(',')===[...new Set(names)].sort().join(','),'EXIT_EXPORT_UNVERIFIED_SIGNAL');
-    signals.push({day,code,names});
+    // A display name is taken from the SAME audited KRX EOD row as the
+    // signal's close. No live directory/current name or external API lookup.
+    const stockName=String(r.stock_name??'').trim();
+    assert(stockName.length<=100&&!/[\u0000-\u001f\u007f]/.test(stockName),
+      'EXIT_EXPORT_BAD_STOCK_NAME');
+    signals.push({day,code,names,stock_name_at_signal:stockName||null});
     signalCount.set(day,(signalCount.get(day)||0)+1);
     eventsCount.set(day,(eventsCount.get(day)||0)+names.length);
   }

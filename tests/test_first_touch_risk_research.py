@@ -2,7 +2,8 @@ import unittest
 from datetime import date, timedelta
 
 from scripts.exit_policy_research import VerifiedBar
-from scripts.first_touch_risk_research import first_touch, analyze_first_touch_risk
+from scripts.first_touch_risk_research import (
+    first_touch, analyze_first_touch_risk, _representative_stop_stocks)
 from scripts.pattern_exit_study import analyze, SEARCH_PATTERN_TAGS
 
 
@@ -89,6 +90,59 @@ class FirstTouchUnitTests(unittest.TestCase):
 
 
 class FirstTouchReportTests(unittest.TestCase):
+    def test_repeated_stop_stock_examples_keep_signal_days_and_gap_separate(self):
+        cases = [
+            ('2026-11-02', '000001', [bar('2026-11-02'),
+                bar('2026-11-03', open_=88, high=91, low=87, close=89)], True),
+            ('2026-11-04', '000001', [bar('2026-11-04'),
+                bar('2026-11-05', open_=100, high=102, low=94, close=96)], True),
+            ('2026-11-02', '000002', [bar('2026-11-02'),
+                bar('2026-11-03', open_=100, high=107, low=99, close=106)], True),
+            ('2026-11-04', '000003', [bar('2026-11-04'),
+                bar('2026-11-05', open_=100, high=102, low=95, close=97)], True),
+        ]
+        examples = _representative_stop_stocks(cases, 5, 3, None,
+            {('2026-11-02', '000001'): '가상종목A',
+             ('2026-11-04', '000001'): '가상종목A'})
+        first = examples['top_stocks_by_first_stop_count'][0]
+        self.assertEqual(first['code'], '000001')
+        self.assertEqual(first['stock_name_at_signal'], '가상종목A')
+        self.assertEqual(first['distinct_signal_days'], 2)
+        self.assertEqual(first['first_stop_count'], 2)
+        self.assertEqual(first['stop_gap_count'], 1)
+        self.assertEqual(first['first_stop_fraction_of_all_signals_pct'], 100)
+        self.assertEqual(examples['worst_stop_gap_events'][0]['signal_day'],
+                         '2026-11-02')
+        self.assertAlmostEqual(examples['worst_stop_gap_events'][0]
+                               ['net_return_pct'], -12.3)
+        self.assertEqual(examples['total_distinct_stocks_with_a_first_stop'], 2)
+        self.assertFalse(examples['policy_selected_or_recommended'])
+
+    def test_representative_examples_not_a_buy_list_or_holdout_selected_policy(self):
+        dates, events, prices, _ = fixture()
+        for code in prices:
+            prices[code][dates[15]] = bar(dates[15], open_=60, high=100,
+                                          low=59, close=100)
+        names = {(dates[14], '000001'): '검증종목'}
+        report = analyze_first_touch_risk(dates, events, prices,
+            SEARCH_PATTERN_TAGS, signal_stock_names=names)
+        five = group(report)
+        examples = five['representative_stop_stocks_first_grid_only']
+        self.assertEqual(examples['take_profit_pct'],
+                         five['first_touch_grid'][0]['take_profit_pct'])
+        self.assertEqual(examples['stop_loss_pct'],
+                         five['first_touch_grid'][0]['stop_loss_pct'])
+        self.assertTrue(examples['training']['worst_stop_gap_events'])
+        self.assertFalse(report['recommendation_allowed'])
+        self.assertNotIn('representative_stop_stocks_first_grid_only',
+                         group(report, horizon=20))
+
+    def test_stock_name_provenance_rejects_control_characters(self):
+        _, _, _, snap = fixture(n=12, codes=1)
+        snap['signals'][0]['stock_name_at_signal'] = 'bad\nname'
+        with self.assertRaisesRegex(ValueError, 'INVALID_SIGNAL_STOCK_NAME'):
+            analyze(snap)
+
     def test_rare_training_open_crash_is_counted_as_catastrophic_stop_gap(self):
         dates, events, prices, _ = fixture()
         for code in prices:

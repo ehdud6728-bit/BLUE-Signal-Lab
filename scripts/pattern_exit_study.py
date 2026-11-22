@@ -114,6 +114,7 @@ def analyze(snapshot: dict) -> dict:
             per_code_market[code][day] = market_label
     events = []
     keys = set()
+    signal_stock_names = {}
     for row in signals:
         day = _date(row.get('day'))
         code = row.get('code')
@@ -127,6 +128,12 @@ def analyze(snapshot: dict) -> dict:
         keys.add((day, code))
         if day not in per_code[code]:
             raise ValueError('SIGNAL_WITHOUT_AUDITED_CLOSE')
+        stock_name = row.get('stock_name_at_signal')
+        if stock_name is not None and (not isinstance(stock_name, str) or
+                not stock_name.strip() or len(stock_name) > 100 or
+                any(ord(ch) < 32 or ord(ch) == 127 for ch in stock_name)):
+            raise ValueError('INVALID_SIGNAL_STOCK_NAME')
+        signal_stock_names[(day, code)] = stock_name
         events.append((indexed[day], day, code, names))
     events.sort()
     policy_keys = tuple(f'TP{p.take_profit_pct:g}_SL{p.stop_loss_pct:g}_H{p.max_holding_sessions}'
@@ -284,7 +291,8 @@ def analyze(snapshot: dict) -> dict:
         dates, events, per_code, SEARCH_PATTERN_TAGS,
         market_rows=snapshot.get('market_breadth_by_day'),
         market_labels=per_code_market,
-        expected_counts={item['day']: item['expected'] for item in days})
+        expected_counts={item['day']: item['expected'] for item in days},
+        signal_stock_names=signal_stock_names)
     return {'schema': 'BLUE_TURSO_PATTERN_EXIT_REPORT_V1', 'storage': 'TURSO',
         'asof_day': dates[-1], 'eod_audited_days': len(dates),
         'research_audited_days': _count(snapshot.get('research_audited_days'), 0, 520),

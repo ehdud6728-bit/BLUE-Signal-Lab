@@ -21,7 +21,7 @@ try:
     )
     from scripts.exit_policy_research import VerifiedBar, _valid_bars
     from scripts.market_condition_risk import (
-        describe_market_conditional, validated_market_context,
+        describe_market_conditional, market_state, validated_market_context,
     )
 except ModuleNotFoundError:
     from empirical_entry_exit_research import (
@@ -30,6 +30,7 @@ except ModuleNotFoundError:
     )
     from exit_policy_research import VerifiedBar, _valid_bars
     from market_condition_risk import describe_market_conditional, validated_market_context
+    from market_condition_risk import market_state
 
 
 @dataclass(frozen=True)
@@ -84,6 +85,80 @@ def _feature_groups(bar: VerifiedBar) -> tuple[str, ...]:
     if bar.high > bar.low and (bar.close - bar.low) / (bar.high - bar.low) <= 0.25:
         labels.append('signal_day_close_in_bottom_quartile')
     return tuple(labels)
+
+
+def _representative_stop_stocks(cases, take, stop, market_context, display_names):
+    """Bounded, descriptive stock-level examples for ONE predeclared grid entry.
+
+    Stop frequency is not an independent trial count: a code can emit nearby
+    signals, and all codes on a market day share the same market exposure.
+    This does not supply candidate buys or an optimized stopping policy.
+    """
+    by_code = defaultdict(lambda: {'n': 0, 'stops': 0, 'takes': 0,
+        'stop_gaps': 0, 'unresolved': 0, 'pending': 0, 'signal_days': set(),
+        'stop_signal_days': set(), 'worst_stop_net_pct': None,
+        'down_market_takes': 0, 'down_market_stops': 0,
+        'up_market_takes': 0, 'up_market_stops': 0, 'name': None})
+    gap_examples = []
+    for day, code, segment, full_window in cases:
+        outcome = first_touch(segment, take, stop)
+        state = market_state(market_context, day, code, 'ALL', 1)
+        item = by_code[code]
+        item['n'] += 1
+        item['signal_days'].add(day)
+        label = display_names.get((day, code))
+        if label:
+            item['name'] = label
+        if outcome.reason in ('STOP', 'STOP_GAP', 'AMBIGUOUS_STOP_FIRST'):
+            item['stops'] += 1
+            item['stop_signal_days'].add(day)
+            item['worst_stop_net_pct'] = min(
+                item['worst_stop_net_pct'] if item['worst_stop_net_pct'] is not None
+                else outcome.net_return_pct, outcome.net_return_pct)
+            if state in ('UP', 'DOWN'):
+                item[f'{state.lower()}_market_stops'] += 1
+            if outcome.reason == 'STOP_GAP':
+                item['stop_gaps'] += 1
+                gap_examples.append({'code': code, 'stock_name_at_signal': label,
+                    'signal_day': day, 'market_breadth_1d': state,
+                    'net_return_pct': round(outcome.net_return_pct, 3),
+                    'stop_gap_overrun_pct_points': outcome.stop_gap_overrun_pct_points,
+                    'sessions_until_first_touch': outcome.sessions_until_touch})
+        elif outcome.reason in ('TAKE', 'TAKE_GAP'):
+            item['takes'] += 1
+            if state in ('UP', 'DOWN'):
+                item[f'{state.lower()}_market_takes'] += 1
+        else:
+            item['unresolved'] += 1
+            if not full_window:
+                item['pending'] += 1
+    ranked = []
+    for code, item in by_code.items():
+        if not item['stops']:
+            continue
+        ranked.append({'code': code, 'stock_name_at_signal': item['name'],
+            'signal_count': item['n'], 'distinct_signal_days': len(item['signal_days']),
+            'first_stop_count': item['stops'],
+            'distinct_first_stop_signal_days': len(item['stop_signal_days']),
+            'first_stop_fraction_of_all_signals_pct': round(100*item['stops']/item['n'], 1),
+            'stop_gap_count': item['stop_gaps'], 'first_take_count': item['takes'],
+            'no_touch_count': item['unresolved'],
+            'pending_recent_no_touch': item['pending'],
+            'unresolved_no_touch_full_window': item['unresolved'] - item['pending'],
+            'worst_resolved_stop_net_pct': round(item['worst_stop_net_pct'], 3),
+            'down_market_1d_first_takes': item['down_market_takes'],
+            'down_market_1d_first_stops': item['down_market_stops'],
+            'up_market_1d_first_takes': item['up_market_takes'],
+            'up_market_1d_first_stops': item['up_market_stops']})
+    ranked.sort(key=lambda r: (-r['first_stop_count'], -r['stop_gap_count'],
+                               -r['signal_count'], r['code']))
+    gap_examples.sort(key=lambda r: (r['net_return_pct'], r['code'], r['signal_day']))
+    return {'status': 'ILLUSTRATIVE_REPEAT_SIGNALS_NOT_INDEPENDENT_STOCK_RISK',
+        'top_stocks_by_first_stop_count': ranked[:10],
+        'worst_stop_gap_events': gap_examples[:10],
+        'total_distinct_stocks_with_a_first_stop': len(ranked),
+        'stock_names_as_of': 'VERIFIED_SIGNAL_DAY_KRX_EOD_OR_UNKNOWN',
+        'policy_selected_or_recommended': False}
 
 
 def _describe(cases, take, stop, minimum_cases, minimum_days, *, features=False,
@@ -162,7 +237,8 @@ def _describe(cases, take, stop, minimum_cases, minimum_days, *, features=False,
 
 
 def analyze_first_touch_risk(dates, events, per_code, patterns, *, market_rows=None,
-                             market_labels=None, expected_counts=None):
+                             market_labels=None, expected_counts=None,
+                             signal_stock_names=None):
     """Predefined chronological 75/25 split with a FULL-window train embargo.
 
     Windows limit observation and data completeness ONLY. A no-touch path does
@@ -174,6 +250,13 @@ def analyze_first_touch_risk(dates, events, per_code, patterns, *, market_rows=N
         raise ValueError('MISSING_MARKET_EOD_AUDIT_COUNTS')
     market_context = validated_market_context(
         dates, expected_counts, market_rows, market_labels)
+    display_names = signal_stock_names if signal_stock_names is not None else {}
+    if not isinstance(display_names, dict) or any(
+            not isinstance(key, tuple) or len(key) != 2 or
+            key[0] not in dates or not isinstance(key[1], str) or
+            (name is not None and (not isinstance(name, str) or len(name) > 100))
+            for key, name in display_names.items()):
+        raise ValueError('INVALID_SIGNAL_STOCK_NAMES')
     split_index = max(1, min(len(dates) - 1, len(dates) * 3 // 4)) if len(dates) > 1 else 0
     windows = []
     for horizon in HORIZONS:
@@ -240,6 +323,21 @@ def analyze_first_touch_risk(dates, events, per_code, patterns, *, market_rows=N
                         'holdout': _describe(holdout, take, stop, MIN_HOLDOUT,
                                              MIN_HOLDOUT_DAYS,market_context=market_context),
                     })
+            if horizon in (5, 10):
+                # First training-derived grid cell only, not the best cell in
+                # retrospect. Listing stock examples for all 9 cells would
+                # create a misleading post-hoc worst-stock leaderboard.
+                first = result['first_touch_grid'][0]
+                result['representative_stop_stocks_first_grid_only'] = {
+                    'take_profit_pct': first['take_profit_pct'],
+                    'stop_loss_pct': first['stop_loss_pct'],
+                    'training': _representative_stop_stocks(train,
+                        first['take_profit_pct'], first['stop_loss_pct'],
+                        market_context, display_names),
+                    'holdout': _representative_stop_stocks(holdout,
+                        first['take_profit_pct'], first['stop_loss_pct'],
+                        market_context, display_names),
+                }
             result['candidate_count'] = len(result['first_touch_grid'])
             result['status'] = 'TRAIN_ONLY_GRID_NOT_SELECTED'
             summaries.append(result)
