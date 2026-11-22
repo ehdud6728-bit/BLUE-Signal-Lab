@@ -18,8 +18,10 @@ from statistics import mean, median
 
 try:
     from scripts.exit_policy_research import ExitPolicy, VerifiedBar, simulate_exit, describe_exits, observe_path
+    from scripts.empirical_entry_exit_research import analyze_empirical_entries
 except ModuleNotFoundError:  # direct `python scripts/pattern_exit_study.py` execution
     from exit_policy_research import ExitPolicy, VerifiedBar, simulate_exit, describe_exits, observe_path
+    from empirical_entry_exit_research import analyze_empirical_entries
 
 
 WINDOWS = (5, 10, 20, 60, 120, 250, 500)
@@ -262,6 +264,7 @@ def analyze(snapshot: dict) -> dict:
             'investment_recommendation_enabled': False})
     # Never output a stock buy list: issuer/survivorship/market benchmark and
     # an independent approval are missing even if individual policy tests pass.
+    empirical = analyze_empirical_entries(dates, events, per_code, SEARCH_PATTERN_TAGS)
     return {'schema': 'BLUE_TURSO_PATTERN_EXIT_REPORT_V1', 'storage': 'TURSO',
         'asof_day': dates[-1], 'eod_audited_days': len(dates),
         'research_audited_days': _count(snapshot.get('research_audited_days'), 0, 520),
@@ -269,6 +272,7 @@ def analyze(snapshot: dict) -> dict:
         'signal_stock_days': len(signals), 'short_and_long_windows': windows,
         'observed_path_windows': observed_paths,
         'search_pattern_comparison': search_pattern_comparison,
+        'empirical_entry_exit_research': empirical,
         'trading_calendar_verified': calendar_ok,
         'corporate_actions_verified': corporate_ok,
         'market_and_sector_benchmark_verified': False,

@@ -36,7 +36,7 @@ class ExitPolicy:
         if not (0 < self.take_profit_pct <= 40 and 0 < self.stop_loss_pct <= 30 and
                 isinstance(self.max_holding_sessions, int) and
                 not isinstance(self.max_holding_sessions, bool) and
-                1 <= self.max_holding_sessions <= 40 and
+                1 <= self.max_holding_sessions <= 60 and
                 0 <= self.total_round_trip_cost_pct <= 5):
             raise ValueError('INVALID_EXIT_POLICY')
 
