@@ -44,7 +44,7 @@ jobs:
         run: |
           python3 -m unittest discover -s tests -p 'test_blue_dot_2026_research.py' -v
           python3 -m unittest discover -s tests -p 'test_env20_rebound_comparison.py' -v
-      - name: Offline plan: no market source, Turso, KIS, D1 or trade requests
+      - name: 'Offline plan: no market source, Turso, KIS, D1 or trade requests'
         if: env.MODE == 'plan'
         run: python3 scripts/blue_dot_2026_research.py --mode=plan
       - name: Guard manual-only exploratory execution on main
