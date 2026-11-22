@@ -1,0 +1,14 @@
+{
+  "source": "USER_KIWOOM_KRX_SCREENSHOTS_2026_11_22_NOT_INDEPENDENT_EXPORT",
+  "ticker_code": "013810",
+  "ticker_name": "스페코",
+  "reported_settings": [30, 2, 26],
+  "price_session": "KRX_VISIBLE; KRX_VS_UNIFIED_LINE_VALUES_SAME_ON_SCREEN",
+  "adjusted_prices_setting_verified": false,
+  "source_formula_to_visible_line_mapping_verified": false,
+  "observations": [
+    {"date": "2026-10-21", "blue_line_krw": 1529.14},
+    {"date": "2026-10-22", "blue_line_krw": 1531.15},
+    {"date": "2026-10-23", "blue_line_krw": 1533.75}
+  ]
+}
