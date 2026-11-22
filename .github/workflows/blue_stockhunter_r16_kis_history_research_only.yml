@@ -9,11 +9,11 @@ on:
   workflow_dispatch:
     inputs:
       mode:
-        description: 'dry_run is offline; capture reads existing BLUE Turso KIS token and GETs fixed R16 daily history'
+        description: 'dry_run: offline; token_check: existing Turso token SELECT only; capture: fixed R16 KIS history GETs'
         type: choice
         required: true
         default: dry_run
-        options: [dry_run, capture]
+        options: [dry_run, token_check, capture]
       confirm_fixed_scope:
         description: 'Set true to explicitly allow 30 tickers x 2020-2025, up to 660 KIS historical GETs'
         type: boolean
@@ -53,21 +53,26 @@ jobs:
           if-no-files-found: warn
           retention-days: 14
 
-  manual_capture:
-    if: github.event_name == 'workflow_dispatch' && inputs.mode == 'capture'
+  manual_existing_token_or_capture:
+    if: github.event_name == 'workflow_dispatch' && inputs.mode != 'dry_run'
     needs: offline_safety
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
-      - name: Guard authorized repository, main branch and explicit scope
+      - name: Guard authorized repository, main branch and explicit capture scope
         shell: bash
         env:
           CONFIRMED: ${{ inputs.confirm_fixed_scope }}
+          MODE: ${{ inputs.mode }}
         run: |
           set -euo pipefail
           test "$GITHUB_REPOSITORY" = 'ehdud6728-bit/BLUE-Signal-Lab'
           test "$GITHUB_REF" = 'refs/heads/main'
-          test "$CONFIRMED" = 'true'
+          if [[ "$MODE" == 'capture' ]]; then
+            test "$CONFIRMED" = 'true'
+          else
+            test "$MODE" = 'token_check'
+          fi
       - name: Checkout BLUE without stored git credentials
         uses: actions/checkout@v4
         with:
@@ -79,13 +84,14 @@ jobs:
       - name: Install existing encrypted Turso token reader dependency only
         working-directory: tools/turso
         run: npm install --no-audit --no-fund --ignore-scripts --no-package-lock
-      - name: Capture KIS original daily history using existing cached token
+      - name: Check existing cached token or capture KIS original daily history
         env:
+          MODE: ${{ inputs.mode }}
           KIS_APP_KEY: ${{ secrets.KIS_APP_KEY }}
           KIS_APP_SECRET: ${{ secrets.KIS_APP_SECRET }}
           TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
           TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
-        run: node tools/turso/stockhunter-r16-kis-history.mjs capture output/stockhunter_r16_kis_history
+        run: node tools/turso/stockhunter-r16-kis-history.mjs "$MODE" output/stockhunter_r16_kis_history
       - name: Upload research prices and provenance, never credentials or cached tokens
         if: always()
         uses: actions/upload-artifact@v4
