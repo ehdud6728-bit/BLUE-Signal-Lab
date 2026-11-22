@@ -234,7 +234,7 @@ def evaluate(d: pd.DataFrame, sessions: list[pd.Timestamp], *, start=START,
              end=END, policies=POLICIES, horizons=HORIZONS,
              min_market_stocks=1700, stage_flags=None,
              output_schema='BLUE_ENV20_MARCAP_REVERSAL_EXPLORATORY_V1',
-             pattern_definitions=None):
+             pattern_definitions=None, expose_risk_examples=False):
     if stage_flags is None:
         stage_flags = dict(zip(('A', 'B', 'C'), STAGES))
     if pattern_definitions is None:
@@ -319,6 +319,15 @@ def evaluate(d: pd.DataFrame, sessions: list[pd.Timestamp], *, start=START,
                           'holdout_latest_first_stop_examples':
                               _latest_distinct_examples(
                                   groups['holdout'], ('STOP', 'STOP_GAP'))}
+                if expose_risk_examples:
+                    # Only requested by the read-only broker-chart study.
+                    # Preserve default result schema for all other consumers.
+                    result['holdout_latest_stop_gap_examples'] = (
+                        _latest_distinct_examples(groups['holdout'], ('STOP_GAP',)))
+                    severe = [x for x in groups['holdout']
+                              if x['net'] is not None and x['net'] <= -10]
+                    result['holdout_latest_severe_loss_examples'] = (
+                        _latest_distinct_examples(severe, ('STOP', 'STOP_GAP')))
                 for cohort in ('train', 'holdout'):
                     result[cohort + '_by_market_1d'] = {
                         state: _summarize([x for x in groups[cohort]

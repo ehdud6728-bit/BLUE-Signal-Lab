@@ -1,9 +1,10 @@
 import unittest
+from unittest import mock
 
 import pandas as pd
 
 from scripts.env20_rebound_comparison import (
-    STAGES, build_signals, observe_touch, validate_market_calendar,
+    STAGES, build_signals, evaluate, observe_touch, validate_market_calendar,
     _latest_distinct_examples, _summarize,
 )
 
@@ -107,6 +108,35 @@ class Env20ReboundTest(unittest.TestCase):
                           ('000003', '2026-11-11'),
                           ('000006', '2026-11-09')])
         self.assertEqual(actual[0]['stock_name_at_signal'], '종목000001')
+
+    def test_gap_severe_dossier_is_opt_in_without_changing_old_schema(self):
+        sessions = list(pd.bdate_range('2026-09-01', periods=60))
+        rows = []
+        for i, day in enumerate(sessions):
+            op, hi, lo, cl = (88, 95, 87, 90) if i == 46 else (100, 100, 100, 100)
+            rows.append({'date': day, 'code': '000001', 'Name': '검증종목',
+                         'session_index': i, 'open': op, 'high': hi,
+                         'low': lo, 'close': cl,
+                         'prior_close': 100 if i else float('nan'),
+                         'TEST': i == 45})
+        data = pd.DataFrame(rows)
+        options = {'start': sessions[0].strftime('%Y-%m-%d'),
+                   'end': sessions[-1].strftime('%Y-%m-%d'),
+                   'min_market_stocks': 1, 'stage_flags': {'TEST': 'TEST'},
+                   'horizons': (5,), 'policies': ((2.5, 4.5),)}
+        with mock.patch('scripts.env20_rebound_comparison.validate_market_calendar',
+                        return_value=60):
+            baseline = evaluate(data, sessions, **options)
+            extended = evaluate(data, sessions, expose_risk_examples=True, **options)
+        old = baseline['results'][0]['patterns']['TEST']
+        new = extended['results'][0]['patterns']['TEST']
+        self.assertNotIn('holdout_latest_stop_gap_examples', old)
+        self.assertNotIn('holdout_latest_severe_loss_examples', old)
+        self.assertEqual(new['holdout']['stop_gap_count'], 1)
+        self.assertEqual(new['holdout']['severe_resolved_net_at_or_below_minus_10pct_count'], 1)
+        self.assertEqual(new['holdout_latest_stop_gap_examples'][0]['code'], '000001')
+        self.assertEqual(new['holdout_latest_severe_loss_examples'][0]
+                         ['assumed_net_return_pct'], -12.3)
 
 
 if __name__ == '__main__':

@@ -1,0 +1,22 @@
+{
+  "source": "User-reported Kiwoom mobile daily chart screenshots, 2026-11-22 KST",
+  "chart_price_session_independently_verified": false,
+  "indicator_period_multiplier_shift_confirmed_on_these_screenshots": false,
+  "broker_numeric_blue_line_values_supplied_for_these_cases": false,
+  "disputes": [
+    {
+      "code": "013810",
+      "name": "스페코",
+      "model_signal_day": "2026-10-23",
+      "user_reported_chart_signal_day": "2026-10-22",
+      "verdict": "MODEL_SIGNAL_DAY_DIFFERS_FROM_USER_CHART"
+    },
+    {
+      "code": "101730",
+      "name": "위메이드맥스",
+      "model_signal_day": "2026-10-07",
+      "user_reported_chart_signal_day": null,
+      "verdict": "USER_REPORTS_NO_BLUE_DOTTED_LINE_CROSS"
+    }
+  ]
+}
