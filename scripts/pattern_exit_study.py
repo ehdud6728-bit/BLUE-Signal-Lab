@@ -19,9 +19,11 @@ from statistics import mean, median
 try:
     from scripts.exit_policy_research import ExitPolicy, VerifiedBar, simulate_exit, describe_exits, observe_path
     from scripts.empirical_entry_exit_research import analyze_empirical_entries
+    from scripts.closing_price_entry_research import analyze_closing_entries
 except ModuleNotFoundError:  # direct `python scripts/pattern_exit_study.py` execution
     from exit_policy_research import ExitPolicy, VerifiedBar, simulate_exit, describe_exits, observe_path
     from empirical_entry_exit_research import analyze_empirical_entries
+    from closing_price_entry_research import analyze_closing_entries
 
 
 WINDOWS = (5, 10, 20, 60, 120, 250, 500)
@@ -265,6 +267,7 @@ def analyze(snapshot: dict) -> dict:
     # Never output a stock buy list: issuer/survivorship/market benchmark and
     # an independent approval are missing even if individual policy tests pass.
     empirical = analyze_empirical_entries(dates, events, per_code, SEARCH_PATTERN_TAGS)
+    closing = analyze_closing_entries(dates, events, per_code, SEARCH_PATTERN_TAGS)
     return {'schema': 'BLUE_TURSO_PATTERN_EXIT_REPORT_V1', 'storage': 'TURSO',
         'asof_day': dates[-1], 'eod_audited_days': len(dates),
         'research_audited_days': _count(snapshot.get('research_audited_days'), 0, 520),
@@ -273,11 +276,12 @@ def analyze(snapshot: dict) -> dict:
         'observed_path_windows': observed_paths,
         'search_pattern_comparison': search_pattern_comparison,
         'empirical_entry_exit_research': empirical,
+        'closing_price_entry_research': closing,
         'trading_calendar_verified': calendar_ok,
         'corporate_actions_verified': corporate_ok,
         'market_and_sector_benchmark_verified': False,
         'candidate_stocks': [], 'investment_recommendation_enabled': False,
-        'note': '정확한 미래 거래일/기업행동/시장 기준선 독립 검증 전 탐색 통계입니다. 신호일 다음 거래일 시가 진입, 보수적 일봉 첫 도달·비용 0.3% 가정. 별도 D+5/10/20/60 고저가 관측은 체결 수익이 아니며 같은 날 고저가 발생 순서는 알 수 없습니다. 확률 예측이나 종목 추천이 아닙니다.'}
+        'note': '정확한 미래 거래일/기업행동/시장 기준선 독립 검증 전 탐색 통계입니다. 기존 empirical 연구는 신호 다음 시가 진입, 신규 closing 연구는 당일 종가의 시간외 조건부 체결 가격경로만 관찰합니다. 15:20 단일가매매 신호/체결은 EOD만으로 재현 불가. 고저가 관측은 체결 수익이 아니며 종목 추천도 아닙니다.'}
 
 
 def main():

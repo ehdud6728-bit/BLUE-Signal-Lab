@@ -6,8 +6,10 @@ on:
       - 'scripts/pattern_exit_study.py'
       - 'scripts/exit_policy_research.py'
       - 'scripts/empirical_entry_exit_research.py'
+      - 'scripts/closing_price_entry_research.py'
       - 'tests/test_pattern_exit_study.py'
       - 'tests/test_empirical_entry_exit_research.py'
+      - 'tests/test_closing_price_entry_research.py'
       - 'tools/turso/pattern-exit-export.mjs'
       - 'tools/turso/pattern-exit-export.test.mjs'
       - 'tools/turso/pattern-exit-publish.mjs'
@@ -64,6 +66,7 @@ jobs:
           python3 -m unittest discover -s tests -p 'test_exit_policy_research.py' -v
           python3 -m unittest discover -s tests -p 'test_pattern_exit_study.py' -v
           python3 -m unittest discover -s tests -p 'test_empirical_entry_exit_research.py' -v
+          python3 -m unittest discover -s tests -p 'test_closing_price_entry_research.py' -v
           python3 -m unittest discover -s tests -p 'test_turso_history_batch_guard.py' -v
           node --test tools/turso/pattern-exit-export.test.mjs tools/turso/pattern-exit-publish.test.mjs
       - name: Plan without SQL, secrets or Worker changes
@@ -91,7 +94,7 @@ jobs:
         run: |
           node tools/turso/pattern-exit-export.mjs --mode=study --sessions="$SESSIONS" \
             --out=output/exit_study/source.json
-      - name: Compare train-derived exit levels with embargoed chronological holdout
+      - name: Compare next-open exits and two explicitly separate closing-entry hypotheses
         if: env.MODE != 'plan'
         run: |
           python3 scripts/pattern_exit_study.py \
