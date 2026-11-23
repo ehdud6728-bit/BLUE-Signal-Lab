@@ -22,6 +22,8 @@ on:
       - 'scripts/blue_dot_formula_conflict_review.py'
       - 'scripts/blue_dot_broker_evidence_gate.py'
       - 'tests/test_blue_dot_broker_evidence_gate.py'
+      - 'research/kiwoom_blue_dot_capture_offline.html'
+      - 'tests/test_blue_dot_capture_offline.py'
       - 'tests/test_blue_dot_formula_conflict_review.py'
       - 'research/blue_dot_broker_samples.json'
       - 'research/kiwoom_blue_dot_30_2_26_observations.json'
@@ -67,6 +69,7 @@ jobs:
           python -m unittest tests.test_blue_dot_original_formula_audit -v
           python -m unittest tests.test_blue_dot_formula_conflict_review -v
           python -m unittest tests.test_blue_dot_broker_evidence_gate -v
+          python -m unittest tests.test_blue_dot_capture_offline -v
           python -m unittest tests.test_blue_dot_supply_interaction -v
           python -m unittest discover -s tests -p 'test_supply_profile_r15110.py' -v
           python -m unittest tests.test_blue_dot_triple_period_parity -v
