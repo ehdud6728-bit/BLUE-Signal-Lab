@@ -73,8 +73,15 @@ def check_and_normalize_observations(payload, supported_cases):
             raise ValueError('BROKER_OBSERVATION_PRECISION_INVALID')
         if abs(price-round(price,precision))>1e-6:
             raise ValueError('BROKER_OBSERVATION_PRICE_PRECISION_MISMATCH')
-        if item.get('source')!='USER_REPORTED_KIWOOM_INDICATOR':
+        if item.get('source') not in (
+                'USER_REPORTED_KIWOOM_INDICATOR',
+                'USER_PROVIDED_KIWOOM_MTS_SCREENSHOT'):
             raise ValueError('BROKER_OBSERVATION_SOURCE_UNVERIFIED')
+        evidence_note=item.get('evidence_note')
+        if evidence_note is not None and (
+                not isinstance(evidence_note,str) or
+                not 1<=len(evidence_note)<=1200):
+            raise ValueError('BROKER_OBSERVATION_EVIDENCE_NOTE_INVALID')
         if item.get('market_session') not in ('KRX','NXT','UNKNOWN'):
             raise ValueError('BROKER_OBSERVATION_SESSION_INVALID')
         adjusted=item.get('adjusted_prices')
@@ -87,6 +94,7 @@ def check_and_normalize_observations(payload, supported_cases):
             'source':item['source'],
             'market_session':item['market_session'],
             'adjusted_prices':adjusted,
+            'evidence_note':evidence_note,
         }
     return found
 
@@ -148,10 +156,14 @@ def check_model_pairs(raw_audit, payload):
                     'date':x['date'],'broker_line_krw':b,
                     'model_line_krw':model_value,
                     'model_minus_broker_krw':round(delta,5) if delta is not None else None,
+                    'model_minus_broker_pct':
+                        round(100*delta/b,6) if delta is not None else None,
                     'allowed_rounding_krw':round(tolerance,6),
                     'display_precision_match':passes,
                     'market_session':broker['market_session'],
-                    'adjusted_prices':broker['adjusted_prices']})
+                    'adjusted_prices':broker['adjusted_prices'],
+                    'observation_source':broker['source'],
+                    'evidence_note':broker['evidence_note']})
             last_observed_date=case['signal_day']
             final_broker=observations.get((code,last_observed_date))
             candle_cross=(
@@ -185,6 +197,19 @@ def check_model_pairs(raw_audit, payload):
             'available_user_observations':
                 len([x for x in observations if x[0]==code]),
             'price_basis_hypothesis_comparison':rows,
+            'signal_day_observed_blue_line_krw':(
+                observations.get((code,case['signal_day']),{}).get(
+                    'line_value_krw')),
+            'signal_day_blue_line_within_screen_bull_body':(
+                float(case['screenshot_ohlc_krw']['open'])<
+                observations[(code,case['signal_day'])]['line_value_krw']<
+                float(case['screenshot_ohlc_krw']['close'])
+                if (code,case['signal_day']) in observations else None),
+            'screenshot_close_vs_source_close_data_basis_may_differ':(
+                not case.get('marcap_ohlc_matches_screenshot_exactly',False)
+                if 'marcap_ohlc_matches_screenshot_exactly' in case
+                else None),
+            'full_strict_downline_upcross_unverified_without_prior_blue_line':True,
             'broker_formula_proven':False,
             'broker_trade_execution_verified':False,
         })
@@ -195,6 +220,7 @@ def check_model_pairs(raw_audit, payload):
                   if not observations else
                   'USER_NUMERIC_SAMPLES_RECEIVED_REVIEW_ONLY'),
         'observed_value_count':len(observations),
+        'a_screenshot_indicator_popup_value_is_not_a_confirmed_BBandsUp_function_implementation':True,
         'unadjusted_marcap_source_vs_broker_adjustments_not_fully_verified':True,
         'fixed_period_multiplier_shift_only_no_automatic_basis_choice':True,
         'rounding_agreement_is_not_formula_identity':True,
