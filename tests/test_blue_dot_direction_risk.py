@@ -131,5 +131,57 @@ class BlueDotDirectionRiskTest(unittest.TestCase):
         self.assertIn('"no_download_no_db_no_orders": true', stdout.getvalue())
 
 
+
+    def test_falling_three_and_five_moves_nested(self):
+        from scripts.blue_dot_direction_risk import falling_streak_flags
+        d, _, _, _ = build_direction_signals(
+            fixture(descending=True), min_history=70)
+        specs, definitions, _ = falling_streak_flags(d)
+        self.assertEqual(len(specs), 24)
+        self.assertEqual(len(definitions), 24)
+        row = d[d.date.eq(pd.Timestamp('2026-10-22'))].iloc[0]
+        for s in specs:
+            self.assertTrue(bool(row[s['flag']]))
+        for s in specs:
+            if s['falling_moves'] != 5:
+                continue
+            flag3 = s['flag'].replace('_5D', '_3D')
+            self.assertFalse(bool((d[s['flag']] & ~d[flag3]).any()))
+
+    def test_flat_line_does_not_count_as_falling(self):
+        from scripts.blue_dot_direction_risk import falling_streak_flags
+        d, _, _, _ = build_direction_signals(fixture(), min_history=70)
+        specs, _, _ = falling_streak_flags(d)
+        self.assertFalse(d[[s['flag'] for s in specs]].any().any())
+
+    def test_falling_future_data_cannot_change_past(self):
+        from scripts.blue_dot_direction_risk import falling_streak_flags
+        raw = fixture(descending=True)
+        base, _, _, _ = build_direction_signals(raw,min_history=70)
+        specs, _, _=falling_streak_flags(base)
+        raw.loc[raw.Date.eq(pd.Timestamp('2026-10-23')),
+                ['Open','High','Low','Close']] = [500,3500,500,3000]
+        changed, _, _, _=build_direction_signals(raw,min_history=70)
+        falling_streak_flags(changed)
+        names=[s['flag'] for s in specs]
+        pd.testing.assert_frame_equal(
+            base.loc[base.date.lt('2026-10-23'),names].reset_index(drop=True),
+            changed.loc[changed.date.lt('2026-10-23'),names].reset_index(drop=True))
+
+    def test_falling_missing_market_session_rejected(self):
+        from scripts.blue_dot_direction_risk import falling_streak_flags
+        raw=fixture(descending=True)
+        raw=raw[raw.Date.ne(pd.Timestamp('2026-10-21'))].copy()
+        d,_,_,_=build_direction_signals(raw,min_history=70)
+        specs,_,_=falling_streak_flags(d)
+        row=d[d.date.eq(pd.Timestamp('2026-10-22'))].iloc[0]
+        self.assertFalse(any(bool(row[s['flag']]) for s in specs))
+
+    def test_audit_references_fixed_9_old_failure_cases(self):
+        from scripts.blue_dot_direction_risk import PREVIOUS_MODEL_STOP_AUDIT
+        self.assertEqual(len(PREVIOUS_MODEL_STOP_AUDIT),9)
+        self.assertEqual({row[2] for row in PREVIOUS_MODEL_STOP_AUDIT},{20,30,40})
+
+
 if __name__ == '__main__':
     unittest.main()

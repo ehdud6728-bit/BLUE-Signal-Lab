@@ -262,6 +262,177 @@ def assert_supply_reconciles(report: dict) -> None:
                                  row['flag'] + '_' + str(lag))
 
 
+
+# The canonical user signal is a descending blue line that is crossed UPWARD.
+# A 3-day descent means three strictly decreasing day-over-day comparisons
+# (four line observations), not merely the most recent negative difference.
+FALLING_LENGTHS = (3, 5)
+PREVIOUS_MODEL_STOP_AUDIT = (
+    ('000640', '2026-11-12', 20, '동아제약'),
+    ('001530', '2026-11-10', 20, 'DI동일'),
+    ('002995', '2026-11-09', 20, '금호건설우'),
+    ('043650', '2026-11-12', 30, '국순당'),
+    ('001515', '2026-11-11', 30, 'SK증권우'),
+    ('014280', '2026-11-10', 30, '금강공업'),
+    ('000050', '2026-11-11', 40, '경방'),
+    ('004060', '2026-11-10', 40, 'SG세계물산'),
+    ('002995', '2026-11-09', 40, '금호건설우'),
+)
+
+
+def falling_streak_flags(d: pd.DataFrame):
+    """Add 3/5 consecutive down *moves* to existing 1-day A model.
+
+    Does not modify legacy A/B flags, supply analysis, DB, or production search.
+    Historical lookback is complete through the shifted source window.
+    """
+    specs, descriptions, line_cols = [], {}, {}
+    sources = {'close': d.close, 'hlc3': (d.high+d.low+d.close)/3}
+    for n in PERIODS:
+        for basis, values in sources.items():
+            grouped = values.groupby(d.code, sort=False)
+            ma = grouped.transform(lambda x: x.rolling(n, min_periods=n).mean())
+            std = grouped.transform(lambda x: x.rolling(n, min_periods=n).std(ddof=0))
+            for band, sign in (('upper', 1), ('lower', -1)):
+                letter = ('C' if basis == 'close' else 'H')
+                side = ('U' if band == 'upper' else 'L')
+                prefix = f'FALL_{{n}}_{{letter}}_{{side}}'
+                base = f'DIR_{{n}}_{{letter}}_{{side}}A'
+                line = (ma + sign*MULTIPLIER*std).groupby(
+                    d.code, sort=False).shift(SHIFT)
+                line_cols[prefix] = line
+                group_line = line.groupby(d.code, sort=False)
+                prior = [group_line.shift(i) for i in range(1, 6)]
+                for streak in FALLING_LENGTHS:
+                    # Require k consecutive down moves, including the signal day.
+                    checks = line.gt(0)
+                    for off in range(streak):
+                        newer = line if off == 0 else prior[off-1]
+                        older = prior[off]
+                        checks = checks & older.gt(0) & newer.lt(older)
+                    checks = checks & contiguous_lookback(
+                        d.session_index, d.code, n+SHIFT+streak)
+                    flag = f'{{prefix}}_{{streak}}D'
+                    d[flag] = (d[base] & checks).fillna(False).astype(bool)
+                    specs.append(dict(flag=flag, period=n, basis=basis,
+                                      band=band, falling_moves=streak,
+                                      multiplier=MULTIPLIER, shift=SHIFT))
+                    descriptions[flag] = (
+                        f'{{streak}} consecutive STRICTLY decreasing daily line moves; '
+                        f'{{basis}} shifted BB {{band}} {{n}}/2/26; '
+                        'prior close<=prior line, open<line<close, bullish; '
+                        'complete historical issuer sessions; model only')
+                if (d[f'{{prefix}}_5D'] & ~d[f'{{prefix}}_3D']).any():
+                    raise ValueError('FALL5_NOT_SUBSET_OF_FALL3')
+                if (d[f'{{prefix}}_3D'] & ~d[base]).any():
+                    raise ValueError('FALL3_NOT_SUBSET_OF_ORIGINAL_A')
+    if len(specs) != 24:
+        raise ValueError('FALLING_COHORT_SPEC_COUNT_MISMATCH')
+    return specs, descriptions, line_cols
+
+
+def strict_falling_report(d: pd.DataFrame, sessions: list[pd.Timestamp]) -> dict:
+    """Non-production first-touch study plus explicit prior-failure audit."""
+    specs, defs, lines = falling_streak_flags(d)
+    raw = evaluate(d, sessions,
+        stage_flags={x['flag']: x['flag'] for x in specs},
+        pattern_definitions=defs,
+        policies=((2.5, 4.5),), horizons=(5,),
+        expose_risk_examples=True,
+        output_schema='BLUE_DOT_FALLING_3_5_RESEARCH_ONLY_V1')
+    patterns = raw['results'][0]['patterns']
+    by_code = {code: h.reset_index(drop=True)
+               for code, h in d.groupby('code', sort=False)}
+    index = {code: {r.date.strftime('%Y-%m-%d'): i
+                    for i, r in enumerate(h.itertuples(index=False))}
+             for code, h in by_code.items()}
+    audit_rows = []
+    for code, date, n, label in PREVIOUS_MODEL_STOP_AUDIT:
+        h = by_code.get(code)
+        idx = index.get(code, {}).get(date)
+        if h is None or idx is None:
+            audit_rows.append(dict(code=code, label=label, date=date,
+                                   period=n, status='NOT_FOUND_IN_PINNED_DATA'))
+            continue
+        row = h.iloc[idx]
+        prefix = f'FALL_{{n}}_H_L'
+        # d is ordered by code/date; use direct d row to retrieve global line.
+        target = d.loc[d.code.eq(code) & d.date.eq(pd.Timestamp(date))]
+        if len(target) != 1:
+            raise ValueError('PRIOR_FAILURE_AUDIT_DUPLICATE')
+        target_idx = target.index[0]
+        original = bool(target.iloc[0][f'DIR_{{n}}_H_LA'])
+        passes3 = bool(target.iloc[0][prefix+'_3D'])
+        passes5 = bool(target.iloc[0][prefix+'_5D'])
+        # The actual shifted line is calculated on the full source, never on
+        # the filtered failure sample (which would corrupt the rolling window).
+        series = lines[prefix]
+        vals = series.loc[d.loc[d.code.eq(code)].index]
+        pos = list(vals.index).index(target_idx)
+        last6 = list(vals.iloc[max(0,pos-5):pos+1])
+        audit_rows.append(dict(code=code, name_at_date=str(row.Name),
+            originally_reported_name=label, signal_day=date, period=n,
+            original_one_day_A_model=original,
+            meets_strict_3_declines=passes3,
+            meets_strict_5_declines=passes5,
+            excluded_by_3=not passes3,
+            excluded_by_5=not passes5,
+            trailing_six_modeled_line_values_krw=[
+                round(float(x),3) if pd.notna(x) else None for x in last6],
+            broker_verified=False))
+    models = []
+    for s in specs:
+        p = patterns[s['flag']]
+        examples={}
+        for tag, source in (
+            ('first_stop', 'holdout_latest_first_stop_examples'),
+            ('first_take', 'holdout_latest_first_take_examples'),
+            ('stop_gap', 'holdout_latest_stop_gap_examples')):
+            items=[]
+            for example in p[source]:
+                ex=dict(example)
+                h = by_code[ex['code']]
+                idx = index[ex['code']][ex['signal_day']]
+                row = h.iloc[idx]
+                prefix=f'FALL_{{s["period"]}}_{{"C" if s["basis"]=="close" else "H"}}_{{"U" if s["band"]=="upper" else "L"}}'
+                subset = d.loc[d.code.eq(ex['code'])]
+                gidx = subset.index[idx]
+                v = lines[prefix].loc[subset.index].iloc[max(0,idx-5):idx+1]
+                values=list(v)
+                if len(values)<s['falling_moves']+1 or not all(
+                    values[-1-off] < values[-2-off]
+                    for off in range(s['falling_moves'])):
+                    raise ValueError('FALLING_MODEL_EXAMPLE_DID_NOT_DESCEND')
+                if not bool(d.loc[gidx,s['flag']]):
+                    raise ValueError('FALLING_MODEL_EXAMPLE_NOT_CROSS')
+                ex.update(model_line_last_six_krw=[
+                    round(float(x),3) for x in values],
+                    signal_open_krw=float(row.open),
+                    signal_close_krw=float(row.close),
+                    prior_close_krw=float(row.prior_close),
+                    validated_descending_model_only=True,
+                    broker_signal_verified=False)
+                items.append(ex)
+            examples[tag]=items
+        models.append({**s, 'signals':p['signal_events'],
+            'train':p['train'], 'holdout':p['holdout'],
+            'examples': examples})
+    return dict(schema='BLUE_DOT_FALLING_3_5_MODEL_ONLY_V1',
+       required_declines=[3,5],
+       comparisons_include_signal_day=True,
+       required_line_values={'3_day':4,'5_day':6},
+       original_A_B_study_untouched=True,
+       only_downward_streaks_and_upward_candle_cross=True,
+       holdout_reused_not_independent=True,
+       source_sha256=raw['source_2025_2026_hashes'],
+       policy={'first_touch_observation_days':5,'tp_pct':2.5,'sl_pct':4.5,
+               'assumed_round_trip_cost_pct_points':0.3},
+       all_models_not_broker_verified=True,
+       previous_reported_A_failures_audit=audit_rows,
+       previously_reported_B_excluded_by_definition=True,
+       models=models, recommendation_allowed=False)
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--mode', choices=('plan', 'study'), default='plan')
@@ -289,6 +460,7 @@ def main():
     annotate_chart_examples(report, d)
     report['supply_interaction'] = analyze_supply_interaction(d, sessions)
     assert_supply_reconciles(report)
+    report['strict_falling_3_5'] = strict_falling_report(d, sessions)
     path = Path(args.out)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(report, ensure_ascii=False, indent=2)+'\n',
