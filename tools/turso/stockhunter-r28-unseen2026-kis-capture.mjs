@@ -192,7 +192,7 @@ export async function capture(outDir,env=process.env,{
     source_commit:/^[a-f0-9]{40}$/.test(env.GITHUB_SHA??'')?env.GITHUB_SHA:null,
     capture_run_id:/^\d+$/.test(env.GITHUB_RUN_ID??'')?env.GITHUB_RUN_ID:null,
     current_2026_returns_inspected_for_selection:false,
-    30_codes_not_random_full_market_sample:true,
+    thirty_codes_not_random_full_market_sample:true,
     adjusted_prices:false,PIT_corporate_action_certified:false,
     historic_prelisted_delisted_included:false,
     eligible_for_live_trading:false,
