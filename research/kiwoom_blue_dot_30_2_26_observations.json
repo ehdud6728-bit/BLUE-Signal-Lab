@@ -6,5 +6,16 @@
     "multiplier": 2,
     "shift": 26
   },
-  "observations": []
+  "observations": [
+    {
+      "code": "352820",
+      "date": "2026-11-12",
+      "line_value_krw": 153078.28,
+      "display_decimals": 2,
+      "source": "USER_PROVIDED_KIWOOM_MTS_SCREENSHOT",
+      "market_session": "UNKNOWN",
+      "adjusted_prices": null,
+      "evidence_note": "User-submitted MTS daily chart screenshot 2026-11-23: selected 2026-11-12, indicator section title '파란점선', numeric row '파란점선 153,078.28 (-1.62%)'. The header quote 171,600 is not the selected-day close. Numeric plot-to-formula mapping remains unverified."
+    }
+  ]
 }

@@ -48,6 +48,12 @@ def _one(date='2026-11-12',price=99.60,code='352820'):
             'market_session':'KRX','adjusted_prices':True}
 
 
+def _baseline_with_case(case):
+    baseline=_baseline()
+    baseline['screenshots_four_cases_30_period_reclassified']=[case]
+    return baseline
+
+
 class BrokerManualLineValuesTest(unittest.TestCase):
     def test_empty_input_does_not_manufacture_confirmed_broker_values(self):
         actual=check_model_pairs(_baseline(),_payload([]))
@@ -83,6 +89,44 @@ class BrokerManualLineValuesTest(unittest.TestCase):
         self.assertTrue(a['observed_3_consecutive_declines'])
         self.assertFalse(a['formula_identity_confirmed'])
         self.assertEqual(a['paired_day_count'],6)
+
+    def test_actual_hybe_screenshot_broker_value_is_not_model_parity(self):
+        from pathlib import Path
+        payload=json.loads(Path(
+            'research/kiwoom_blue_dot_30_2_26_observations.json'
+        ).read_text(encoding='utf-8'))
+        self.assertEqual(payload['observations'][0]['line_value_krw'],
+                         153078.28)
+        self.assertEqual(payload['observations'][0]['date'],'2026-11-12')
+        case=_baseline()['screenshots_four_cases_30_period_reclassified'][0]
+        case['screenshot_ohlc_krw']={
+            'open':152400,'high':157700,'low':150200,'close':155600}
+        expected={
+            'HLC3_LOWER_PRIMARY_UNVERIFIED':152862.20516,
+            'CLOSE_LOWER_ALTERNATIVE':152238.97285,
+            'HLC3_UPPER_ALTERNATIVE':187233.35039,
+            'CLOSE_UPPER_ALTERNATIVE':187234.36048}
+        for name,line in expected.items():
+            case['basis_and_band_hypotheses'][name][
+                'model_line_last_six_by_date'][-1]['model_line_krw']=line
+        result=check_model_pairs(_baseline_with_case(case),payload)
+        self.assertEqual(result['observed_value_count'],1)
+        self.assertTrue(result['cases'][0][
+            'signal_day_blue_line_within_screen_bull_body'])
+        self.assertFalse(result['broker_verified_strategy_or_live_fill'])
+        self.assertTrue(result['cases'][0][
+            'full_strict_downline_upcross_unverified_without_prior_blue_line'])
+        models=result['cases'][0]['price_basis_hypothesis_comparison']
+        self.assertTrue(all(x['paired_day_count']==1 for x in models))
+        self.assertTrue(all(x['matching_day_count']==0 for x in models))
+        self.assertTrue(all(x['observed_3_consecutive_declines'] is None
+                            for x in models))
+        self.assertAlmostEqual(models[0]['model_line_30_2_26_values'][-1][
+            'model_minus_broker_krw'],-216.07484,places=5)
+        self.assertAlmostEqual(models[0]['model_line_30_2_26_values'][-1][
+            'model_minus_broker_pct'],-0.141153,places=5)
+        self.assertEqual(models[0]['model_line_30_2_26_values'][-1][
+            'observation_source'],'USER_PROVIDED_KIWOOM_MTS_SCREENSHOT')
 
     def test_invalid_duplicate_precision_and_unsourced_value_fail(self):
         for entries,pattern in [
