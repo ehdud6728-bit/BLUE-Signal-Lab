@@ -1,0 +1,10 @@
+{
+  "schema": "USER_KIWOOM_BLUE_DOTTED_30_2_26_VALUES_V1",
+  "visual_target": "THICK_BLUE_DOTTED_LINE",
+  "settings": {
+    "period": 30,
+    "multiplier": 2,
+    "shift": 26
+  },
+  "observations": []
+}

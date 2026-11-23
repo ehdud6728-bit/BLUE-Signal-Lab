@@ -15,6 +15,9 @@ on:
       - 'tests/test_blue_dot_breakout_context_study.py'
       - 'scripts/blue_dot_30_2_26_parity_audit.py'
       - 'tests/test_blue_dot_30_2_26_parity_audit.py'
+      - 'scripts/blue_dot_30_2_26_observed_line_match.py'
+      - 'tests/test_blue_dot_30_2_26_observed_line_match.py'
+      - 'research/kiwoom_blue_dot_30_2_26_observations.json'
   workflow_dispatch:
     inputs:
       mode:
@@ -53,6 +56,7 @@ jobs:
           python -m unittest tests.test_blue_dot_slope_study -v
           python -m unittest tests.test_blue_dot_breakout_context_study -v
           python -m unittest tests.test_blue_dot_30_2_26_parity_audit -v
+          python -m unittest tests.test_blue_dot_30_2_26_observed_line_match -v
           python -m unittest tests.test_blue_dot_supply_interaction -v
           python -m unittest discover -s tests -p 'test_supply_profile_r15110.py' -v
           python -m unittest tests.test_blue_dot_triple_period_parity -v
@@ -104,6 +108,13 @@ jobs:
             --slope-report output/blue_dot_direction/slope_report.json \
             --context-report output/blue_dot_direction/breakout_context_report.json \
             --out output/blue_dot_direction/kiwoom_30_2_26_audit.json
+      - name: Compare user-supplied Kiwoom thick-blue-dotted-line values to four model formulas
+        if: env.MODE == 'study'
+        run: |
+          python scripts/blue_dot_30_2_26_observed_line_match.py \
+            --audit output/blue_dot_direction/kiwoom_30_2_26_audit.json \
+            --observations research/kiwoom_blue_dot_30_2_26_observations.json \
+            --out output/blue_dot_direction/kiwoom_30_2_26_observed_match.json
       - name: Archive model-only direction, supply, and market interaction aggregates
         if: always()
         uses: actions/upload-artifact@v4
@@ -114,5 +125,6 @@ jobs:
             output/blue_dot_direction/slope_report.json
             output/blue_dot_direction/breakout_context_report.json
             output/blue_dot_direction/kiwoom_30_2_26_audit.json
+            output/blue_dot_direction/kiwoom_30_2_26_observed_match.json
           if-no-files-found: ignore
           retention-days: 14
