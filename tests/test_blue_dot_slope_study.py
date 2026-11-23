@@ -68,5 +68,40 @@ class BlueDotSlopeTest(unittest.TestCase):
                   'models':[]}})
 
 
+    def test_missing_prior_lines_keep_current_3_day_streak(self):
+        import math
+        # Missing old reference price and older lines are not a failed
+        # latest-three-day signal: only acceleration becomes UNKNOWN.
+        prices=[float('nan'),float('nan'),float('nan'),
+                100.0,99.0,98.0,97.0]
+        got=slope_context(prices,3,previous_contiguous=False)
+        self.assertEqual(got['slope_bin'],'STEEP')
+        self.assertEqual(got['trend_bin'],'UNKNOWN')
+        self.assertIsNone(got['previous_slope_pct_per_session'])
+        # Even a mistaken "contiguous" flag must not serialize NaN returns.
+        got=slope_context(prices,3,previous_contiguous=True)
+        self.assertEqual(got['trend_bin'],'UNKNOWN')
+
+    def test_missing_prior_lines_keep_current_5_day_streak(self):
+        import math
+        prices=[float('nan')]*5+[200.0,199.0,198.0,197.0,196.0,195.0]
+        got=slope_context(prices,5,previous_contiguous=False)
+        self.assertEqual(got['trend_bin'],'UNKNOWN')
+        self.assertTrue(got['slope_pct_per_session']<0)
+        # Invalid latest window remains a genuine error, not UNKNOWN.
+        prices[-1]=float('nan')
+        with self.assertRaisesRegex(ValueError,'SLOPE_CURRENT_WINDOW_INVALID'):
+            slope_context(prices,5,previous_contiguous=False)
+
+    def test_current_flat_or_rebounding_line_cannot_pass(self):
+        with self.assertRaises(ValueError):
+            slope_context([100,99,98,97,96,96,94],3,
+                          previous_contiguous=False)
+        with self.assertRaises(ValueError):
+            slope_context([100,99,98,97,96,float('nan'),94],3,
+                          previous_contiguous=False)
+
+
+
 if __name__=='__main__':
     unittest.main()

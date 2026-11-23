@@ -41,15 +41,23 @@ def slope_context(prices, k, previous_contiguous=True):
     """Use last 2*k+1 chronological line values, no future prices."""
     if k not in MOVES or len(prices) != 2*k+1:
         raise ValueError('SLOPE_WINDOW_SIZE')
-    if any(not math.isfinite(float(x)) or float(x) <= 0 for x in prices):
-        raise ValueError('SLOPE_INVALID_VALUE')
-    if not all(prices[-i] < prices[-i-1] for i in range(1,k+1)):
+    # The latest k descending moves MUST have valid line prices. The
+    # preceding k moves are optional context and may cross a missing/invalid
+    # prehistory window. Do not discard a valid signal because its earlier
+    # comparison is unavailable.
+    recent=prices[-k-1:]
+    if any(not math.isfinite(float(x)) or float(x) <= 0 for x in recent):
+        raise ValueError('SLOPE_CURRENT_WINDOW_INVALID')
+    if not all(recent[i] < recent[i-1] for i in range(1,k+1)):
         raise ValueError('SLOPE_LINE_NOT_CONSECUTIVELY_DECLINING')
-    current=100*(prices[-1]/prices[-k-1]-1)/k
+    current=100*(recent[-1]/recent[0]-1)/k
     if current >= 0:
         raise ValueError('SLOPE_NONNEGATIVE')
-    previous=(100*(prices[-k-1]/prices[0]-1)/k
-              if previous_contiguous else None)
+    prior_start=prices[0]
+    prior_valid=(previous_contiguous and
+                 math.isfinite(float(prior_start)) and float(prior_start)>0)
+    previous=(100*(recent[0]/prior_start-1)/k
+              if prior_valid else None)
     delta=current-previous if previous is not None else None
     b=('STEEP' if current <= SLOPE_THRESHOLDS[0]
        else 'MODERATE' if current <= SLOPE_THRESHOLDS[1]
@@ -217,7 +225,7 @@ def study(d, sessions, baseline):
                 safe=older>=0 and (
                     idx-int(h.iloc[older].session_index)==n+SHIFT+2*k)
                 metrics=slope_context(vals,k,previous_contiguous=safe)
-                if not safe:
+                if metrics['trend_bin']=='UNKNOWN':
                     audit['previous_window_unknown']+=1
                 grouped[(n,k,part)].append({
                     'day':row.date.strftime('%Y-%m-%d'),
@@ -226,7 +234,9 @@ def study(d, sessions, baseline):
                     'full':idx+HORIZON<=last,
                     'market5':market.get((row.date,5),'UNKNOWN'),
                     'supply_bin':supply_bin,
-                    'line_last_six_krw':[round(v,3) for v in vals[-6:]],
+                    'line_last_six_krw':[
+                        round(v,3) if math.isfinite(v) and v>0 else None
+                        for v in vals[-6:]],
                     'signal_open':float(row.open),
                     'signal_close':float(row.close),
                     **metrics})
@@ -295,7 +305,8 @@ def main():
     result=study(d,sessions,original)
     target=Path(args.out)
     target.parent.mkdir(parents=True,exist_ok=True)
-    target.write_text(json.dumps(result,ensure_ascii=False,indent=2)+'\n',
+    target.write_text(json.dumps(result,ensure_ascii=False,indent=2,
+                                 allow_nan=False)+'\n',
                       encoding='utf-8')
     print('BLUE_DOT_SLOPE_STUDY', 'cohorts=6','STRICT_PARITY=TRUE',
           'BROKER_PARITY=FALSE','D1=0','TURSO=0','TRADES=0')
