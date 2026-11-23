@@ -71,6 +71,9 @@ def shifted_bollinger_candidate_series(frame, period, multiplier, shift):
     for basis,prices in bases.items():
         avg=prices.rolling(period,min_periods=period).mean()
         sd=prices.rolling(period,min_periods=period).std(ddof=0)
+        # Positive Kiwoom SHIFT rightwards by N bars: displayed t = model t-N.
+        # This direction is explicitly regression-tested, not a vendor-side
+        # confirmation that this numeric series is the actual blue plot.
         result[basis+'_LOWER']=(avg-multiplier*sd).shift(shift)
         result[basis+'_UPPER']=(avg+multiplier*sd).shift(shift)
     return result

@@ -95,6 +95,31 @@ class OriginalKiwoomFormulaAuditTest(unittest.TestCase):
         self.assertEqual(first['candidate_model_comparisons'],
                          second['candidate_model_comparisons'])
 
+    def test_positive_shift_26_displays_values_from_26_bars_ago(self):
+        # Kiwoom SHIFT(A,+26) plots to the RIGHT. At chart bar t, we
+        # must use an upper/lower band computed from data ending t-26.
+        close=pd.Series([1200+i*1.25+(i%7)*0.6 for i in range(100)],
+                        dtype=float)
+        frame=pd.DataFrame({'close':close,'high':close+8,
+                            'low':close-4})
+        lines=shifted_bollinger_candidate_series(frame,30,2,26)
+        typical=(frame.high+frame.low+frame.close)/3
+        mean=typical.rolling(30,min_periods=30).mean()
+        sd=typical.rolling(30,min_periods=30).std(ddof=0)
+        t=90
+        self.assertAlmostEqual(
+            float(lines['HLC3_UPPER'].iloc[t]),
+            float((mean+2*sd).iloc[t-26]),places=8)
+        self.assertAlmostEqual(
+            float(lines['HLC3_LOWER'].iloc[t]),
+            float((mean-2*sd).iloc[t-26]),places=8)
+        self.assertNotAlmostEqual(
+            float(lines['HLC3_UPPER'].iloc[t]),
+            float((mean+2*sd).iloc[t]),places=5)
+        self.assertTrue(
+            float(lines['HLC3_UPPER'].iloc[t])>
+            float(lines['HLC3_LOWER'].iloc[t]))
+
     def test_no_market_download_in_plan(self):
         out=io.StringIO()
         with mock.patch('scripts.blue_dot_original_formula_audit.load_marcap',
