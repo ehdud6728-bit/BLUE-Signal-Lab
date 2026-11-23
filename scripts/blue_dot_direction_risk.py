@@ -251,6 +251,15 @@ def assert_supply_reconciles(report: dict) -> None:
             if any(expected[field] != actual[field] for field in fields):
                 raise ValueError('SUPPLY_BASE_SIGNAL_OUTCOME_MISMATCH_' +
                                  row['flag'] + '_' + side)
+        for lag in (1, 5):
+            market = row['holdout'][f'by_supply_and_market_breadth_{lag}d']
+            baseline = by_flag[row['flag']][f'holdout_market_{lag}d']
+            if set(market) != set(baseline) or any(
+                    any(market[state]['total'][key] != baseline[state][key]
+                        for key in fields)
+                    for state in market):
+                raise ValueError('SUPPLY_MARKET_BREADTH_OUTCOME_MISMATCH_' +
+                                 row['flag'] + '_' + str(lag))
 
 
 def main():

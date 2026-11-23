@@ -5,8 +5,11 @@ import pandas as pd
 
 from scripts.blue_dot_direction_risk import build_direction_signals
 from scripts.blue_dot_supply_interaction import (
-    BUCKETS, analyze_supply_interaction, asof_supply_context,
+    BUCKETS, MARKET_STATES, analyze_supply_interaction, asof_supply_context,
+    by_market_supply_interaction, equal_stake_resolved_ledger,
+    hypothetical_near_filter,
 )
+from scripts.env20_rebound_comparison import market_breadth
 from tests.test_blue_dot_direction_risk import fixture
 
 
@@ -80,6 +83,83 @@ class BlueDotSupplyInteractionTest(unittest.TestCase):
         self.assertEqual(excluded['first_takes_missed'], 0)
         self.assertEqual(excluded['first_stops_excluded'], 1)
         self.assertEqual(excluded['stop_gaps_excluded'], 1)
+
+    def test_equal_stake_ledger_separates_money_from_win_loss_counts(self):
+        cases = [
+            {'reason': 'TAKE', 'net': 2.2, 'bucket': 'INSIDE'},
+            {'reason': 'TAKE_GAP', 'net': 2.2, 'bucket': 'NEAR_0_3'},
+            {'reason': 'STOP', 'net': -4.8, 'bucket': 'INSIDE'},
+            {'reason': 'STOP_GAP', 'net': -14.3, 'bucket': 'NEAR_0_3'},
+            {'reason': 'NO_TOUCH', 'net': None, 'bucket': 'INSIDE'},
+            {'reason': 'TAKE', 'net': 2.2, 'bucket': 'FAR_OVER_8'},
+        ]
+        ledger = equal_stake_resolved_ledger(cases)
+        self.assertEqual(ledger['first_take_resolved_count'], 3)
+        self.assertEqual(ledger['first_stop_resolved_count'], 2)
+        self.assertEqual(ledger['unresolved_or_review_count'], 1)
+        self.assertAlmostEqual(ledger['modeled_total_resolved_net_pct_points_equal_stakes'], -12.5)
+        near = hypothetical_near_filter(cases)
+        self.assertEqual(near['first_takes_missed'], 2)
+        self.assertEqual(near['first_stops_excluded'], 2)
+        self.assertEqual(near['missed_first_take_net_pct_points_equal_stakes'], 4.4)
+        self.assertEqual(near['avoided_first_stop_net_loss_abs_pct_points_equal_stakes'], 19.1)
+        self.assertEqual(near['excluded_resolved_total_net_pct_points_equal_stakes'], -14.7)
+        self.assertEqual(near['retained_resolved_total_net_pct_points_equal_stakes'], 2.2)
+        self.assertEqual(near['unresolved_excluded_not_assigned_a_return'], 1)
+
+    def test_market_distance_density_three_way_partition_preserves_events(self):
+        cases = [
+            {'day': '2026-10-21', 'reason': 'TAKE', 'net': 2.2,
+             'bucket': 'INSIDE', 'strength': 'STRONG', 'market1': 'UP', 'market5': 'DOWN',
+             'full': True},
+            {'day': '2026-10-22', 'reason': 'STOP_GAP', 'net': -12.3,
+             'bucket': 'NEAR_0_3', 'strength': 'OTHER', 'market1': 'UP', 'market5': 'DOWN',
+             'full': True},
+            {'day': '2026-10-23', 'reason': 'NO_TOUCH', 'net': None,
+             'bucket': 'UNKNOWN', 'strength': 'UNKNOWN', 'market1': 'UNKNOWN',
+             'market5': 'UNKNOWN', 'full': False},
+            {'day': '2026-10-23', 'reason': 'STOP', 'net': -4.8,
+             'bucket': 'MID_3_8', 'strength': 'STRONG', 'market1': 'DOWN', 'market5': 'UP',
+             'full': True},
+        ]
+        for lag in (1, 5):
+            grouped = by_market_supply_interaction(cases, lag)
+            self.assertEqual(set(grouped), set(MARKET_STATES))
+            self.assertEqual(sum(v['total']['n'] for v in grouped.values()), len(cases))
+            for group in grouped.values():
+                cells = group['by_supply_distance_and_density_nonempty']
+                self.assertEqual(sum(c['outcomes']['n'] for c in cells),
+                                 group['total']['n'])
+                self.assertAlmostEqual(sum(c['resolved_unit_stakes'][
+                    'modeled_total_resolved_net_pct_points_equal_stakes']
+                    for c in cells), group['resolved_unit_stakes'][
+                    'modeled_total_resolved_net_pct_points_equal_stakes'])
+                excluded = group['hypothetical_exclude_near_overhead']
+                self.assertEqual(excluded['excluded_event_count'] +
+                                 excluded['retained_event_count'], group['total']['n'])
+
+    def test_future_bars_do_not_change_prior_day_market_breadth(self):
+        dates = pd.bdate_range('2026-10-07', periods=10)
+        rows = []
+        for i, day in enumerate(dates):
+            for code in range(40):
+                rows.append({'date': day, 'code': str(code).zfill(6),
+                             'close': 100+i})
+        history = pd.DataFrame(rows)
+        initial = market_breadth(history)
+        self.assertEqual(initial[(dates[6], 1)], 'UP')
+        self.assertEqual(initial[(dates[6], 5)], 'UP')
+        history.loc[history.date.ge(dates[7]), 'close'] = 1
+        changed = market_breadth(history)
+        for lag in (1, 5):
+            self.assertEqual(initial[(dates[6], lag)], changed[(dates[6], lag)])
+
+    def test_ledger_rejects_impossible_or_unresolved_fake_profits(self):
+        for event in ({'reason': 'NO_TOUCH', 'net': 7},
+                      {'reason': 'STOP', 'net': 2.2},
+                      {'reason': 'TAKE', 'net': None}):
+            with self.subTest(event=event), self.assertRaises(ValueError):
+                equal_stake_resolved_ledger([event])
 
 
 if __name__ == '__main__':
