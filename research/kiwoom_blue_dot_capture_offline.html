@@ -211,7 +211,7 @@ function importValues(payload){
  values=next;render();
  reportStatus("저장한 JSON "+payload.observations.length+"건을 불러왔습니다. 이전 하이브 실제값도 보존됩니다.",false);
 }
-document.getElementById("cards").addEventListener("input",function(ev){
+document.getElementById("cards").addEventListener("change",function(ev){
  var node=ev.target;
  if (!node.dataset.key) return;
  var key=node.dataset.key, parts=key.split("|"), code=parts[0],day=parts[1], idx=MODELS[code].dates.indexOf(day);
@@ -229,9 +229,7 @@ document.getElementById("cards").addEventListener("input",function(ev){
    market_session:session,adjusted_prices:adjusted==="unknown"?null:adjusted==="true",
    evidence_note:"Manual transcription from Kiwoom chart; verify screenshot and selected plot."
  };
- var diff=document.querySelector('[data-diff="'+key+'"]');
- if(diff)diff.textContent=pairDiff(code,idx,values[key]);
- fillProgress();
+ render();
  reportStatus("저장 전 미리보기입니다. JSON을 내려받아 별도로 보관하세요.",false);
 });
 document.getElementById("export").addEventListener("click",function(){try{exportValues();}catch(err){reportStatus(err.message,true);}});
