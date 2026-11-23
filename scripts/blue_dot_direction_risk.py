@@ -296,8 +296,8 @@ def falling_streak_flags(d: pd.DataFrame):
             for band, sign in (('upper', 1), ('lower', -1)):
                 letter = ('C' if basis == 'close' else 'H')
                 side = ('U' if band == 'upper' else 'L')
-                prefix = f'FALL_{{n}}_{{letter}}_{{side}}'
-                base = f'DIR_{{n}}_{{letter}}_{{side}}A'
+                prefix = f'FALL_{n}_{letter}_{side}'
+                base = f'DIR_{n}_{letter}_{side}A'
                 line = (ma + sign*MULTIPLIER*std).groupby(
                     d.code, sort=False).shift(SHIFT)
                 line_cols[prefix] = line
@@ -312,19 +312,19 @@ def falling_streak_flags(d: pd.DataFrame):
                         checks = checks & older.gt(0) & newer.lt(older)
                     checks = checks & contiguous_lookback(
                         d.session_index, d.code, n+SHIFT+streak)
-                    flag = f'{{prefix}}_{{streak}}D'
+                    flag = f'{prefix}_{streak}D'
                     d[flag] = (d[base] & checks).fillna(False).astype(bool)
                     specs.append(dict(flag=flag, period=n, basis=basis,
                                       band=band, falling_moves=streak,
                                       multiplier=MULTIPLIER, shift=SHIFT))
                     descriptions[flag] = (
-                        f'{{streak}} consecutive STRICTLY decreasing daily line moves; '
-                        f'{{basis}} shifted BB {{band}} {{n}}/2/26; '
+                        f'{streak} consecutive STRICTLY decreasing daily line moves; '
+                        f'{basis} shifted BB {band} {n}/2/26; '
                         'prior close<=prior line, open<line<close, bullish; '
                         'complete historical issuer sessions; model only')
-                if (d[f'{{prefix}}_5D'] & ~d[f'{{prefix}}_3D']).any():
+                if (d[f'{prefix}_5D'] & ~d[f'{prefix}_3D']).any():
                     raise ValueError('FALL5_NOT_SUBSET_OF_FALL3')
-                if (d[f'{{prefix}}_3D'] & ~d[base]).any():
+                if (d[f'{prefix}_3D'] & ~d[base]).any():
                     raise ValueError('FALL3_NOT_SUBSET_OF_ORIGINAL_A')
     if len(specs) != 24:
         raise ValueError('FALLING_COHORT_SPEC_COUNT_MISMATCH')
@@ -355,13 +355,13 @@ def strict_falling_report(d: pd.DataFrame, sessions: list[pd.Timestamp]) -> dict
                                    period=n, status='NOT_FOUND_IN_PINNED_DATA'))
             continue
         row = h.iloc[idx]
-        prefix = f'FALL_{{n}}_H_L'
+        prefix = f'FALL_{n}_H_L'
         # d is ordered by code/date; use direct d row to retrieve global line.
         target = d.loc[d.code.eq(code) & d.date.eq(pd.Timestamp(date))]
         if len(target) != 1:
             raise ValueError('PRIOR_FAILURE_AUDIT_DUPLICATE')
         target_idx = target.index[0]
-        original = bool(target.iloc[0][f'DIR_{{n}}_H_LA'])
+        original = bool(target.iloc[0][f'DIR_{n}_H_LA'])
         passes3 = bool(target.iloc[0][prefix+'_3D'])
         passes5 = bool(target.iloc[0][prefix+'_5D'])
         # The actual shifted line is calculated on the full source, never on
@@ -394,7 +394,7 @@ def strict_falling_report(d: pd.DataFrame, sessions: list[pd.Timestamp]) -> dict
                 h = by_code[ex['code']]
                 idx = index[ex['code']][ex['signal_day']]
                 row = h.iloc[idx]
-                prefix=f'FALL_{{s["period"]}}_{{"C" if s["basis"]=="close" else "H"}}_{{"U" if s["band"]=="upper" else "L"}}'
+                prefix=f'FALL_{s["period"]}_{"C" if s["basis"]=="close" else "H"}_{"U" if s["band"]=="upper" else "L"}'
                 subset = d.loc[d.code.eq(ex['code'])]
                 gidx = subset.index[idx]
                 v = lines[prefix].loc[subset.index].iloc[max(0,idx-5):idx+1]
