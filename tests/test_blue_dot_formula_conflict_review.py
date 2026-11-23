@@ -87,6 +87,22 @@ class FormulaConflictReviewTests(unittest.TestCase):
             self.assertFalse(b['model_line_in_screenshot_day_high_low'])
             self.assertTrue(x['visually_same_line_not_proven'])
 
+    def test_mts_blue_second_row_5pt_selected_red_third_unchecked(self):
+        report=analyze_discrepancy(*examples())
+        evidence=report['user_mts_line_settings_visual_evidence']
+        self.assertEqual(evidence['row_1']['checked'],False)
+        self.assertEqual(evidence['row_2']['color'],'BLUE')
+        self.assertEqual(evidence['row_2']['width_pt'],5)
+        self.assertTrue(evidence['row_2']['checked'])
+        self.assertEqual(evidence['row_3']['color'],'RED')
+        self.assertFalse(evidence['row_3']['checked'])
+        self.assertEqual(evidence['blue_formula_2_user_reported'],
+                         'SHIFT(BBandsUp(30,2),26)')
+        self.assertFalse(evidence['blue_indicator_numeric_value_visible'])
+        self.assertFalse(report['formula_identity_proven'])
+        self.assertEqual(report['next_validation_gate'],
+                         'VERIFY_BBANDSUP_PLOT_NUMERIC_VALUE_AND_PRICE_BASIS')
+
     def test_hash_period_or_model_missing_fails(self):
         for version in ('hash','period','model'):
             o,f,v=examples()
