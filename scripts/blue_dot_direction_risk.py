@@ -297,7 +297,7 @@ def falling_streak_flags(d: pd.DataFrame):
                 letter = ('C' if basis == 'close' else 'H')
                 side = ('U' if band == 'upper' else 'L')
                 prefix = f'FALL_{n}_{letter}_{side}'
-                base = f'DIR_{n}_{letter}_{side}A'
+                base = f'DIR_{n}_{letter}_{side}_A'
                 line = (ma + sign*MULTIPLIER*std).groupby(
                     d.code, sort=False).shift(SHIFT)
                 line_cols[prefix] = line
