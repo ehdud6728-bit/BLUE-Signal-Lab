@@ -1,0 +1,77 @@
+name: BLUE Dotted A-B Direction Risk Study (MANUAL / READ ONLY)
+
+on:
+  pull_request:
+    paths:
+      - 'scripts/blue_dot_direction_risk.py'
+      - 'tests/test_blue_dot_direction_risk.py'
+      - '.github/workflows/blue_dot_direction_risk_study.yml'
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: 'plan (no downloads) or study (pinned public EOD)'
+        type: choice
+        options: [plan, study]
+        default: plan
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: blue-dot-direction-risk-research
+  cancel-in-progress: false
+
+jobs:
+  read_only_research:
+    if: github.event_name == 'pull_request' || github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      MODE: ${{ github.event_name == 'pull_request' && 'plan' || inputs.mode }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install pinned market calendar and offline numeric dependencies
+        run: |
+          python -m pip install 'pandas>=2,<3' 'numpy>=1.24,<3' \
+            'pyarrow>=17,<24' 'exchange_calendars==4.13.3'
+      - name: Verify slope separation and no-lookahead safeguards
+        run: |
+          python -m unittest tests.test_blue_dot_direction_risk -v
+          python -m unittest tests.test_blue_dot_triple_period_parity -v
+          python -m unittest tests.test_blue_dot_broker_parity -v
+      - name: Show immutable research plan without market downloads
+        if: env.MODE == 'plan'
+        run: python scripts/blue_dot_direction_risk.py --mode=plan
+      - name: Require explicit manual study on repository main only
+        if: env.MODE == 'study'
+        run: |
+          test "$GITHUB_REPOSITORY" = 'ehdud6728-bit/BLUE-Signal-Lab'
+          test "$GITHUB_REF" = 'refs/heads/main'
+      - name: Retrieve pinned public 2025-2026 unadjusted EOD snapshots
+        if: env.MODE == 'study'
+        run: |
+          set -euo pipefail
+          mkdir -p output/blue_dot_direction/sources
+          for YEAR in 2025 2026; do
+            curl --fail --location --retry 2 --silent --show-error \
+              --output "output/blue_dot_direction/sources/marcap-$YEAR.parquet" \
+              "https://raw.githubusercontent.com/FinanceData/marcap/master/data/marcap-$YEAR.parquet"
+          done
+      - name: Compare A and B first-touch risk without publishing trades
+        if: env.MODE == 'study'
+        run: |
+          python scripts/blue_dot_direction_risk.py --mode=study \
+            --source-dir output/blue_dot_direction/sources \
+            --out output/blue_dot_direction/report.json
+      - name: Archive model-only aggregates and chart-check examples
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: BLUE_DOT_DIRECTION_RISK_${{ github.run_id }}
+          path: output/blue_dot_direction/report.json
+          if-no-files-found: ignore
+          retention-days: 14
