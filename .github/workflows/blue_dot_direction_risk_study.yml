@@ -11,6 +11,8 @@ on:
       - '.github/workflows/blue_dot_direction_risk_study.yml'
       - 'scripts/blue_dot_slope_study.py'
       - 'tests/test_blue_dot_slope_study.py'
+      - 'scripts/blue_dot_breakout_context_study.py'
+      - 'tests/test_blue_dot_breakout_context_study.py'
   workflow_dispatch:
     inputs:
       mode:
@@ -47,6 +49,7 @@ jobs:
         run: |
           python -m unittest tests.test_blue_dot_direction_risk -v
           python -m unittest tests.test_blue_dot_slope_study -v
+          python -m unittest tests.test_blue_dot_breakout_context_study -v
           python -m unittest tests.test_blue_dot_supply_interaction -v
           python -m unittest discover -s tests -p 'test_supply_profile_r15110.py' -v
           python -m unittest tests.test_blue_dot_triple_period_parity -v
@@ -82,6 +85,13 @@ jobs:
             --source-dir output/blue_dot_direction/sources \
             --base-report output/blue_dot_direction/report.json \
             --out output/blue_dot_direction/slope_report.json
+      - name: Study slope, bullish breakout depth, turnover and overhead supply
+        if: env.MODE == 'study'
+        run: |
+          python scripts/blue_dot_breakout_context_study.py --mode=study \
+            --source-dir output/blue_dot_direction/sources \
+            --slope-report output/blue_dot_direction/slope_report.json \
+            --out output/blue_dot_direction/breakout_context_report.json
       - name: Archive model-only direction, supply, and market interaction aggregates
         if: always()
         uses: actions/upload-artifact@v4
@@ -90,5 +100,6 @@ jobs:
           path: |
             output/blue_dot_direction/report.json
             output/blue_dot_direction/slope_report.json
+            output/blue_dot_direction/breakout_context_report.json
           if-no-files-found: ignore
           retention-days: 14
