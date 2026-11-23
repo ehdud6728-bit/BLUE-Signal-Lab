@@ -19,6 +19,8 @@ on:
       - 'tests/test_blue_dot_30_2_26_observed_line_match.py'
       - 'scripts/blue_dot_original_formula_audit.py'
       - 'tests/test_blue_dot_original_formula_audit.py'
+      - 'scripts/blue_dot_formula_conflict_review.py'
+      - 'tests/test_blue_dot_formula_conflict_review.py'
       - 'research/blue_dot_broker_samples.json'
       - 'research/kiwoom_blue_dot_30_2_26_observations.json'
   workflow_dispatch:
@@ -61,6 +63,7 @@ jobs:
           python -m unittest tests.test_blue_dot_30_2_26_parity_audit -v
           python -m unittest tests.test_blue_dot_30_2_26_observed_line_match -v
           python -m unittest tests.test_blue_dot_original_formula_audit -v
+          python -m unittest tests.test_blue_dot_formula_conflict_review -v
           python -m unittest tests.test_blue_dot_supply_interaction -v
           python -m unittest discover -s tests -p 'test_supply_profile_r15110.py' -v
           python -m unittest tests.test_blue_dot_triple_period_parity -v
@@ -126,6 +129,14 @@ jobs:
             --source-dir output/blue_dot_direction/sources \
             --sample research/blue_dot_broker_samples.json \
             --out output/blue_dot_direction/original_formula_comparison.json
+      - name: Audit original BBandsUp label versus contradictory user numeric readings
+        if: env.MODE == 'study'
+        run: |
+          python scripts/blue_dot_formula_conflict_review.py --mode=study \
+            --original output/blue_dot_direction/original_formula_comparison.json \
+            --focus output/blue_dot_direction/kiwoom_30_2_26_audit.json \
+            --observed output/blue_dot_direction/kiwoom_30_2_26_observed_match.json \
+            --out output/blue_dot_direction/formula_conflict_report.json
       - name: Archive model-only direction, supply, and market interaction aggregates
         if: always()
         uses: actions/upload-artifact@v4
@@ -138,5 +149,6 @@ jobs:
             output/blue_dot_direction/kiwoom_30_2_26_audit.json
             output/blue_dot_direction/kiwoom_30_2_26_observed_match.json
             output/blue_dot_direction/original_formula_comparison.json
+            output/blue_dot_direction/formula_conflict_report.json
           if-no-files-found: ignore
           retention-days: 14
