@@ -91,6 +91,7 @@ class FormulaConflictReviewTests(unittest.TestCase):
         for version in ('hash','period','model'):
             o,f,v=examples()
             if version=='hash':
+                f['source_sha256']=dict(f['source_sha256'])
                 f['source_sha256']['2026']='XXX'
             elif version=='period':
                 o['cases'][1]['settings']['period']=30
