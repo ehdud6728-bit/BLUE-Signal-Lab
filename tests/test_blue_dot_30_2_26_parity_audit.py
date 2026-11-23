@@ -47,13 +47,45 @@ class KiwoomThirtyFocusTest(unittest.TestCase):
         got=audit_screen_examples(d,lines,s)[0]
         primary=got['basis_and_band_hypotheses'][
             'HLC3_LOWER_PRIMARY_UNVERIFIED']
-        self.assertTrue(primary['falls_3_consecutive_moves'])
-        self.assertTrue(primary['falls_5_consecutive_moves'])
+        self.assertTrue(primary['qualifies_3_day_downline_upcross_model'])
+        self.assertTrue(primary['qualifies_5_day_downline_upcross_model'])
         self.assertTrue(primary['geometry_from_model_source_ohlc'][
             'geometry_cross'])
         self.assertFalse(primary['broker_confirmed'])
         self.assertTrue(got['marcap_ohlc_matches_screenshot_exactly'])
         json.dumps(got,allow_nan=False)
+
+
+    def test_line_descending_does_not_imply_a_bullish_upcross(self):
+        from scripts.blue_dot_30_2_26_parity_audit import _line_strict_declines
+        self.assertTrue(_line_strict_declines(
+            [1203.731,1201.467,1200.59,1196.666,1193.897,1191.569],5))
+        self.assertTrue(_line_strict_declines(
+            [1203.731,1201.467,1200.59,1196.666,1193.897,1191.569],3))
+        self.assertFalse(_line_strict_declines([110,111,109,108,107,106],5))
+        self.assertFalse(_line_strict_declines([110,109,108,107,107,106],5))
+        self.assertFalse(_line_strict_declines([110,109,108,float('nan'),107,106],5))
+
+        # Synthetic ticker has a descending 30 HLC3 lower line, but on
+        # this day its bullish body remains entirely under that line.
+        raw=fixture(descending=True)
+        raw.loc[raw.Date.eq('2026-10-22'),
+                ['Open','High','Low','Close']]=[1200,1300,1200,1300]
+        d,_,_,_=build_direction_signals(raw,min_history=70)
+        _,_,lines=falling_streak_flags(d)
+        s=[('013810','스페코','2026-10-22',
+            1200,1300,1200,1300,'SYNTHETIC')]
+        got=audit_screen_examples(d,lines,s)[0]
+        p=got['basis_and_band_hypotheses'][
+            'HLC3_LOWER_PRIMARY_UNVERIFIED']
+        self.assertTrue(p['line_falls_3_consecutive_moves'])
+        self.assertTrue(p['line_falls_5_consecutive_moves'])
+        self.assertFalse(p['qualifies_3_day_downline_upcross_model'])
+        self.assertFalse(p['qualifies_5_day_downline_upcross_model'])
+        self.assertFalse(p['geometry_from_model_source_ohlc']['geometry_cross'])
+        self.assertEqual(got['primary_30_hlc3_lower_model_result']['status'],
+                         'NO_30_3D_MODEL_SIGNAL')
+
 
     def test_model_30_results_reconcile_prior_studies(self):
         stats={'n':1,'first_take_count':1,'first_stop_count':0,
