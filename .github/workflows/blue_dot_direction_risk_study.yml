@@ -20,6 +20,8 @@ on:
       - 'scripts/blue_dot_original_formula_audit.py'
       - 'tests/test_blue_dot_original_formula_audit.py'
       - 'scripts/blue_dot_formula_conflict_review.py'
+      - 'scripts/blue_dot_broker_evidence_gate.py'
+      - 'tests/test_blue_dot_broker_evidence_gate.py'
       - 'tests/test_blue_dot_formula_conflict_review.py'
       - 'research/blue_dot_broker_samples.json'
       - 'research/kiwoom_blue_dot_30_2_26_observations.json'
@@ -64,6 +66,7 @@ jobs:
           python -m unittest tests.test_blue_dot_30_2_26_observed_line_match -v
           python -m unittest tests.test_blue_dot_original_formula_audit -v
           python -m unittest tests.test_blue_dot_formula_conflict_review -v
+          python -m unittest tests.test_blue_dot_broker_evidence_gate -v
           python -m unittest tests.test_blue_dot_supply_interaction -v
           python -m unittest discover -s tests -p 'test_supply_profile_r15110.py' -v
           python -m unittest tests.test_blue_dot_triple_period_parity -v
@@ -137,6 +140,14 @@ jobs:
             --focus output/blue_dot_direction/kiwoom_30_2_26_audit.json \
             --observed output/blue_dot_direction/kiwoom_30_2_26_observed_match.json \
             --out output/blue_dot_direction/formula_conflict_report.json
+      - name: Assess broker evidence completeness (fail-closed / no live promotion)
+        if: env.MODE == 'study'
+        run: |
+          python scripts/blue_dot_broker_evidence_gate.py \
+            --audit output/blue_dot_direction/kiwoom_30_2_26_audit.json \
+            --match output/blue_dot_direction/kiwoom_30_2_26_observed_match.json \
+            --conflict output/blue_dot_direction/formula_conflict_report.json \
+            --out output/blue_dot_direction/broker_evidence_gate.json
       - name: Archive model-only direction, supply, and market interaction aggregates
         if: always()
         uses: actions/upload-artifact@v4
@@ -150,5 +161,6 @@ jobs:
             output/blue_dot_direction/kiwoom_30_2_26_observed_match.json
             output/blue_dot_direction/original_formula_comparison.json
             output/blue_dot_direction/formula_conflict_report.json
+            output/blue_dot_direction/broker_evidence_gate.json
           if-no-files-found: ignore
           retention-days: 14
