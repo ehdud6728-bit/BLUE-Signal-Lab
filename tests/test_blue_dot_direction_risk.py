@@ -171,10 +171,16 @@ class BlueDotDirectionRiskTest(unittest.TestCase):
     def test_falling_missing_market_session_rejected(self):
         from scripts.blue_dot_direction_risk import falling_streak_flags
         raw=fixture(descending=True)
-        raw=raw[raw.Date.ne(pd.Timestamp('2026-10-21'))].copy()
+        # Keep the full market calendar via another issuer. Otherwise the
+        # missing date would disappear globally and could not be detected.
+        other=raw.copy()
+        other['Code']='999999'
+        raw=pd.concat([raw[raw.Date.ne(pd.Timestamp('2026-10-21'))],other],
+                      ignore_index=True)
         d,_,_,_=build_direction_signals(raw,min_history=70)
         specs,_,_=falling_streak_flags(d)
-        row=d[d.date.eq(pd.Timestamp('2026-10-22'))].iloc[0]
+        row=d[(d.code.eq('013810')) &
+              d.date.eq(pd.Timestamp('2026-10-22'))].iloc[0]
         self.assertFalse(any(bool(row[s['flag']]) for s in specs))
 
     def test_audit_references_fixed_9_old_failure_cases(self):
