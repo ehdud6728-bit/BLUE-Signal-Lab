@@ -124,5 +124,33 @@ class BlueDotBreakoutContextTest(unittest.TestCase):
         self.assertIn('no_market_download_or_database_write',stdout.getvalue())
 
 
+    def test_end_to_end_aggregate_path_on_complete_synthetic_bars(self):
+        """A real study() pass caught earlier full-run-only bugs."""
+        import json
+        from tests.test_blue_dot_direction_risk import fixture
+        from scripts.blue_dot_direction_risk import (
+            build_direction_signals, falling_streak_flags,
+        )
+        from scripts.blue_dot_breakout_context_study import run_context_study
+        d,sessions,_,_=build_direction_signals(
+            fixture(descending=True),min_history=70)
+        falling_streak_flags(d)
+        baseline={'source_sha256':{'2025':'TEST','2026':'TEST'},
+                  'holdout_start':'2026-09-01'}
+        with mock.patch(
+            'scripts.blue_dot_breakout_context_study.check_against_slope'
+        ) as reconcile:
+            report=run_context_study(d,sessions,baseline)
+        reconcile.assert_called_once()
+        self.assertEqual(len(report['results']),6)
+        self.assertEqual(report['schema'],
+            'BLUE_DOT_SLOPE_BREAKOUT_AMOUNT_SUPPLY_MODEL_ONLY_V1')
+        n=sum(row['holdout']['all']['outcomes']['n']
+              for row in report['results'])
+        self.assertGreater(n,0)
+        self.assertTrue(report['no_broker_chart_line_or_trade_fill_verified'])
+        json.dumps(report,allow_nan=False)
+
+
 if __name__=='__main__':
     unittest.main()
