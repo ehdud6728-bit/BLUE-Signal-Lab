@@ -1,0 +1,252 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light">
+<title>BLUE Signal Lab · 키움 파란점선 실측 입력 (연구 전용)</title>
+<style>
+:root{font-family:system-ui,-apple-system,"Noto Sans KR",sans-serif;color:#172438;background:#f2f6fc}
+*{box-sizing:border-box}body{max-width:960px;margin:auto;padding:24px 14px 48px}
+h1{font-size:1.65rem;margin:0 0 8px;color:#1244af}h2{font-size:1.15rem;margin:0}
+p{line-height:1.65}small,.muted{color:#61728a}small{display:block}
+.panel{background:white;border:1px solid #dbe4f3;border-radius:16px;padding:18px;margin-top:16px;box-shadow:0 3px 14px #1234610b}
+.banner{border-left:4px solid #c8820b;padding:10px 14px;background:#fff8e9;border-radius:8px}
+.toolbar{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+label{font-weight:600;font-size:.9rem}select,input[type="number"]{font:inherit;background:white;padding:10px;border:1px solid #a8bad6;border-radius:9px}
+button,.file-label{font:inherit;font-weight:650;padding:10px 14px;border:1px solid #2556b1;background:#2556b1;color:white;border-radius:9px;cursor:pointer;display:inline-flex;align-items:center;justify-content:center}
+button.secondary,.file-label{background:white;color:#2556b1}button:focus-visible,input:focus-visible,select:focus-visible{outline:3px solid #88aafa}
+#file{display:none}.metric{font-size:1.85rem;font-weight:750;color:#174ab1}
+progress{width:100%;height:16px;accent-color:#2556b1}
+.field{display:flex;gap:5px;flex-direction:column}
+.cards{display:grid;grid-template-columns:1fr;gap:16px}
+table{border-collapse:collapse;width:100%}th,td{padding:10px 7px;border-bottom:1px solid #e7edf7;text-align:left;vertical-align:middle}th{background:#f2f6fc;font-size:.82rem}td{font-size:.9rem}
+.value{width:135px;max-width:100%}.diff{font-size:.77rem;color:#61728a;margin-top:4px;white-space:normal}.diff.bad{color:#9a3a2e}
+.nowrap{white-space:nowrap}.source{color:#116244;font-size:.75rem}
+.card-scroll{overflow-x:auto}details{margin-top:10px}summary{color:#2556b1;cursor:pointer}
+.footer-actions{position:sticky;bottom:0;padding:12px;background:#f2f6fceF;border-top:1px solid #dbe4f3;backdrop-filter:blur(8px);margin-top:16px;z-index:1}
+.status{min-height:1.4em;color:#244a7b;margin-top:8px}.problem{color:#ad2f24;font-weight:700}
+@media(max-width:520px){body{padding:14px 8px 40px}.panel{padding:12px}.value{width:120px}h1{font-size:1.3rem}th,td{padding:8px 5px}}
+</style>
+</head>
+<body>
+<header>
+<h1>BLUE Signal Lab · 파란점선 실측 기록</h1>
+<p class="muted">키움 굵은 파란 점선 · 설정 <strong>30·2·26</strong> · 2026년 11월 5·6·9·10·11·12일</p>
+<p class="banner"><strong>연구 전용 · 실전 적용 금지.</strong> 표에 표시하는 모델 숫자는 실제 키움 지표값이 아닙니다. 실제 값을 직접 확인한 날짜만 입력하세요. 이 화면은 키움 API에 접속하지 않으며 정보를 서버로 보내지 않습니다.</p>
+</header>
+<section class="panel" aria-label="기록 현황">
+<div class="metric" id="progress-count">1 / 12건</div>
+<progress id="progress" max="12" value="1"></progress>
+<p class="muted" id="progress-note">하이브 1건 기록 · 나머지 11건 비어 있음</p>
+</section>
+<section class="panel">
+<h2>새로 입력할 값의 차트 설정</h2>
+<p class="muted">차트에서 확인한 경우에만 선택하세요. 모르겠으면 미확인으로 두세요. 아래 설정은 새로 입력하거나 수정하는 값에만 적용됩니다.</p>
+<div class="toolbar">
+ <div class="field"><label for="session">시세 기준</label><select id="session"><option value="UNKNOWN">미확인</option><option value="KRX">KRX</option><option value="NXT">NXT</option></select></div>
+ <div class="field"><label for="adjusted">수정주가</label><select id="adjusted"><option value="unknown">미확인</option><option value="true">사용</option><option value="false">미사용</option></select></div>
+ <div class="field"><label for="precision">표시 소수 자리</label><select id="precision"><option value="2">2자리</option><option value="0">정수</option><option value="1">1자리</option><option value="3">3자리</option><option value="4">4자리</option></select></div>
+</div>
+</section>
+<main id="cards" class="cards" aria-label="종목별 실제값 입력"></main>
+<section class="panel">
+<h2>기록 저장과 이어서 작업</h2>
+<p>값을 입력한 뒤 <strong>JSON 내려받기</strong>를 누르면 기존 연구의 <code>research/kiwoom_blue_dot_30_2_26_observations.json</code>과 호환되는 파일이 생성됩니다. 다음에 이어 입력할 때는 저장한 파일을 다시 불러오면 됩니다. 빈 날짜를 임의로 0이나 모델값으로 채우지 않습니다.</p>
+<div class="toolbar">
+ <button id="export">JSON 내려받기</button>
+ <label for="file" class="file-label">저장한 JSON 불러오기</label>
+ <input id="file" type="file" accept=".json,application/json">
+ <button class="secondary" id="reset">기존 1건만 남기고 초기화</button>
+</div>
+<p class="status" id="status" role="status" aria-live="polite"></p>
+</section>
+<section class="panel">
+<h2>현재 숫자만으로 확정할 수 없는 사항</h2>
+<p>실제 값 6개가 모이면 <em>그 선의 연속 하락 여부</em>는 확인할 수 있지만, 원본 <code>SHIFT(BBandsUp(30,2),26)</code>와 같은 함수인지, 수정주가·KRX/NXT 가격이 일치하는지, 실제 거래에서 수익이 나는지는 별도 검증해야 합니다. 따라서 입력을 완료해도 자동 추천이나 매매 신호가 활성화되지 않습니다.</p>
+</section>
+<script type="application/json" id="pinned-models">
+{
+  "352820": {
+    "name": "하이브",
+    "dates": ["2026-11-05","2026-11-06","2026-11-09","2026-11-10","2026-11-11","2026-11-12"],
+    "models": {
+      "HLC3_LOWER_PRIMARY_UNVERIFIED": [159942.10209,158568.86339,157110.26009,155464.66606,154023.49619,152862.20516],
+      "CLOSE_LOWER_ALTERNATIVE": [159334.48116,157911.2822,156371.4378,154896.09858,153397.43521,152238.97285],
+      "HLC3_UPPER_ALTERNATIVE": [186044.56458,186220.02549,186240.85102,186688.66727,187203.17047,187233.35039],
+      "CLOSE_UPPER_ALTERNATIVE": [186098.85217,186342.05113,186361.89554,186797.23475,187169.23146,187234.36048]
+    }
+  },
+  "071850": {
+    "name": "캐스텍코리아",
+    "dates": ["2026-11-05","2026-11-06","2026-11-09","2026-11-10","2026-11-11","2026-11-12"],
+    "models": {
+      "HLC3_LOWER_PRIMARY_UNVERIFIED": [1203.73141,1201.46717,1200.59032,1196.66584,1193.89708,1191.56892],
+      "CLOSE_LOWER_ALTERNATIVE": [1198.50322,1197.03802,1197.589,1192.73912,1191.3256,1188.68955],
+      "HLC3_UPPER_ALTERNATIVE": [1376.66859,1370.48838,1360.67635,1356.28972,1352.61404,1347.56442],
+      "CLOSE_UPPER_ALTERNATIVE": [1386.83012,1379.36198,1369.27766,1365.72755,1360.80774,1355.91045]
+    }
+  }
+}
+</script>
+<script>
+(function () {
+"use strict";
+var MODELS = JSON.parse(document.getElementById("pinned-models").textContent);
+var BASE = {
+ "352820|2026-11-12": {
+    code: "352820", date: "2026-11-12", line_value_krw: 153078.28,
+    display_decimals: 2, source: "USER_PROVIDED_KIWOOM_MTS_SCREENSHOT",
+    market_session: "UNKNOWN", adjusted_prices: null,
+    evidence_note: "User-provided MTS screenshot 2026-11-23; selected date 2026-11-12, blue plot 153078.28. Formula/price session unverified."
+ }
+};
+var values = JSON.parse(JSON.stringify(BASE));
+var keys = Object.keys(MODELS);
+function el(tag, className, text) {
+ var e = document.createElement(tag);
+ if (className) e.className = className;
+ if (text !== undefined) e.textContent = text;
+ return e;
+}
+function fmt(n, decimals) { return Number(n).toLocaleString("ko-KR",{minimumFractionDigits:decimals,maximumFractionDigits:decimals}); }
+function numeric(s) { var n=Number(s); return s.trim()!==""&&Number.isFinite(n)&&n>0?n:null; }
+function validPrecision(n,decimals) { return Math.abs(n-Number(n.toFixed(decimals))) <= 0.000001; }
+function pairDiff(code, idx, record) {
+ if (!record) return "키움 실측값 미입력";
+ var model = MODELS[code].models.HLC3_LOWER_PRIMARY_UNVERIFIED[idx];
+ var delta = model-record.line_value_krw;
+ return "HLC3 하단 모형과 차이: " + fmt(delta,2) + "원 (" + fmt(100*delta/record.line_value_krw,3) +"%) · 원수식 일치 아님";
+}
+function reportStatus(msg, isProblem) {
+ var node=document.getElementById("status");
+ node.textContent=msg; node.className=isProblem?"status problem":"status";
+}
+function fillProgress() {
+ var count=Object.keys(values).length;
+ document.getElementById("progress-count").textContent=count+" / 12건";
+ document.getElementById("progress").value=count;
+ document.getElementById("progress-note").textContent="실제값 "+count+"건 기록 · 미입력 "+(12-count)+"건 · 브로커 수식 검증 전까지 실전 적용 금지";
+}
+function render() {
+ var root=document.getElementById("cards");
+ root.replaceChildren();
+ keys.forEach(function(code){
+    var info=MODELS[code], panel=el("section","panel");
+    var head=el("h2","",info.name+" ("+code+")");
+    panel.append(head);
+    var caption=el("p","muted","파란 점선의 실제 수치만 입력하세요. 하단의 회색 차이는 가설 모델과의 비교입니다.");
+    panel.append(caption);
+    var wrap=el("div","card-scroll");
+    var table=el("table"), thead=el("thead"), hr=el("tr");
+    ["날짜","키움 실제 파란점선 (원)","모델 비교 (참고만)"].forEach(function(t){hr.append(el("th","",t));});
+    thead.append(hr);table.append(thead);
+    var tbody=el("tbody");
+    info.dates.forEach(function(day, idx){
+       var tr=el("tr"); var cellDay=el("td","nowrap",day.slice(5).replace("-","/"));
+       var inputCell=el("td");
+       var inp=el("input","value");
+       inp.type="number";inp.min="0.0001";inp.step="any";inp.inputMode="decimal";
+       inp.setAttribute("aria-label", info.name+" "+day+" 키움 실제 파란점선 값");
+       inp.dataset.key=code+"|"+day;
+       inp.value=values[inp.dataset.key]?String(values[inp.dataset.key].line_value_krw):"";
+       inputCell.append(inp);
+       if (values[inp.dataset.key] && values[inp.dataset.key].source ==="USER_PROVIDED_KIWOOM_MTS_SCREENSHOT")
+         inputCell.append(el("small","source","기존 실제 캡처 값 · 2026-11-12"));
+       var comparison=el("td","diff",pairDiff(code,idx,values[inp.dataset.key]));
+       comparison.dataset.diff=inp.dataset.key;
+       tr.append(cellDay,inputCell,comparison);tbody.append(tr);
+    });
+    table.append(tbody);wrap.append(table);panel.append(wrap);
+    var details=el("details"),summary=el("summary","","모델 4종의 날짜별 수치 보기 (실측 아님)");
+    details.append(summary);
+    var mini=el("div","card-scroll"),t=el("table"),trh=el("tr");
+    ["가설 모델"].concat(info.dates.map(function(d){return d.slice(5).replace("-","/");})).forEach(function(s){trh.append(el("th","",s));});
+    t.append(trh);
+    Object.keys(info.models).forEach(function(name){var row=el("tr"); row.append(el("td","",name));info.models[name].forEach(function(n){row.append(el("td","nowrap",fmt(n,3)));});t.append(row);});
+    mini.append(t);details.append(mini);panel.append(details);root.append(panel);
+ });
+ fillProgress();
+}
+function exportValues(){
+ var records=Object.values(values).sort(function(a,b){return a.code.localeCompare(b.code)||a.date.localeCompare(b.date);});
+ records.forEach(function(r){
+   if(!numeric(String(r.line_value_krw)) || !validPrecision(r.line_value_krw,r.display_decimals)) throw Error("실측 수치의 표시 자릿수를 확인하세요: "+r.code+" "+r.date);
+ });
+ var payload={
+  schema:"USER_KIWOOM_BLUE_DOTTED_30_2_26_VALUES_V1",
+  visual_target:"THICK_BLUE_DOTTED_LINE",
+  settings:{period:30,multiplier:2,shift:26},
+  observations:records
+ };
+ var blob=new Blob([JSON.stringify(payload,null,2)+"\n"],{type:"application/json"});
+ var url=URL.createObjectURL(blob),link=document.createElement("a");
+ link.href=url;link.download="kiwoom_blue_dot_30_2_26_observations.json";
+ document.body.append(link);link.click();link.remove();
+ setTimeout(function(){URL.revokeObjectURL(url);},2000);
+ reportStatus("JSON 파일을 만들었습니다. 화면에 표시한 모델 숫자는 실측값에 포함되지 않습니다.",false);
+}
+function importValues(payload){
+ if (!payload || payload.schema!=="USER_KIWOOM_BLUE_DOTTED_30_2_26_VALUES_V1" ||
+      payload.visual_target!=="THICK_BLUE_DOTTED_LINE" ||
+      !payload.settings || payload.settings.period!==30||payload.settings.multiplier!==2||payload.settings.shift!==26 ||
+      !Array.isArray(payload.observations)) throw Error("지원하지 않는 연구 파일 형식입니다.");
+ var next={}, seen={};
+ payload.observations.forEach(function(record){
+    if (!record || !MODELS[record.code] || MODELS[record.code].dates.indexOf(record.date)<0) throw Error("대상 외 종목이나 날짜가 포함되어 있습니다.");
+    var key=record.code+"|"+record.date;
+    if (seen[key]) throw Error("종목·날짜가 중복됐습니다: "+key);
+    seen[key]=true;
+    var n=record.line_value_krw,dp=record.display_decimals;
+    if(typeof n!=="number"||!Number.isFinite(n)||n<=0||!Number.isInteger(dp)||dp<0||dp>4||!validPrecision(n,dp)) throw Error("유효하지 않은 실측 가격입니다: "+key);
+    if(["USER_PROVIDED_KIWOOM_MTS_SCREENSHOT","USER_REPORTED_KIWOOM_INDICATOR"].indexOf(record.source)<0) throw Error("출처가 확인되지 않았습니다: "+key);
+    if(["UNKNOWN","KRX","NXT"].indexOf(record.market_session)<0||![true,false,null].includes(record.adjusted_prices)) throw Error("시장 세션이나 수정주가 설정이 올바르지 않습니다: "+key);
+    if(record.evidence_note!=null && (typeof record.evidence_note!=="string"||record.evidence_note.length>1200)) throw Error("근거 메모 형식이 올바르지 않습니다.");
+    next[key]={code:record.code,date:record.date,line_value_krw:n,display_decimals:dp,source:record.source,
+     market_session:record.market_session,adjusted_prices:record.adjusted_prices,evidence_note:record.evidence_note || null};
+ });
+ if(!next["352820|2026-11-12"]){
+   next["352820|2026-11-12"]=JSON.parse(JSON.stringify(BASE["352820|2026-11-12"]));
+ }
+ values=next;render();
+ reportStatus("저장한 JSON "+payload.observations.length+"건을 불러왔습니다. 이전 하이브 실제값도 보존됩니다.",false);
+}
+document.getElementById("cards").addEventListener("input",function(ev){
+ var node=ev.target;
+ if (!node.dataset.key) return;
+ var key=node.dataset.key, parts=key.split("|"), code=parts[0],day=parts[1], idx=MODELS[code].dates.indexOf(day);
+ var raw=node.value.trim();
+ if(raw===""){delete values[key];render();reportStatus("빈칸은 미관측값으로 유지됩니다.",false);return;}
+ var num=numeric(raw), precision=Number(document.getElementById("precision").value);
+ if (num===null||!validPrecision(num,precision)){
+   reportStatus("양수 가격을 정확한 표시 자릿수로 입력하세요. 아직 이 날짜는 저장하지 않았습니다.",true);return;
+ }
+ var session=document.getElementById("session").value;
+ var adjusted=document.getElementById("adjusted").value;
+ values[key]={
+   code:code,date:day,line_value_krw:num,display_decimals:precision,
+   source:"USER_REPORTED_KIWOOM_INDICATOR",
+   market_session:session,adjusted_prices:adjusted==="unknown"?null:adjusted==="true",
+   evidence_note:"Manual transcription from Kiwoom chart; verify screenshot and selected plot."
+ };
+ var diff=document.querySelector('[data-diff="'+key+'"]');
+ if(diff)diff.textContent=pairDiff(code,idx,values[key]);
+ fillProgress();
+ reportStatus("저장 전 미리보기입니다. JSON을 내려받아 별도로 보관하세요.",false);
+});
+document.getElementById("export").addEventListener("click",function(){try{exportValues();}catch(err){reportStatus(err.message,true);}});
+document.getElementById("file").addEventListener("change",async function(ev){
+ var file=ev.target.files && ev.target.files[0];if(!file)return;
+ try{if(file.size>1000000)throw Error("1MB 이하 JSON만 읽을 수 있습니다.");importValues(JSON.parse(await file.text()));}
+ catch(err){reportStatus("불러오기 실패: "+err.message,true);}
+ finally{ev.target.value="";}
+});
+document.getElementById("reset").addEventListener("click",function(){
+ if(!confirm("직접 입력한 숫자를 지우고 하이브 기존 1건으로 되돌릴까요?"))return;
+ values=JSON.parse(JSON.stringify(BASE));render();reportStatus("기존 하이브 실제 캡처 1건으로 되돌렸습니다.",false);
+});
+render();
+})();
+</script>
+</body>
+</html>
