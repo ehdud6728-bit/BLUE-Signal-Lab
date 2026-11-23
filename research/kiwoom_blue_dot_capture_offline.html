@@ -114,9 +114,18 @@ function numeric(s) { var n=Number(s); return s.trim()!==""&&Number.isFinite(n)&
 function validPrecision(n,decimals) { return Math.abs(n-Number(n.toFixed(decimals))) <= 0.000001; }
 function pairDiff(code, idx, record) {
  if (!record) return "키움 실측값 미입력";
- var model = MODELS[code].models.HLC3_LOWER_PRIMARY_UNVERIFIED[idx];
- var delta = model-record.line_value_krw;
- return "HLC3 하단 모형과 차이: " + fmt(delta,2) + "원 (" + fmt(100*delta/record.line_value_krw,3) +"%) · 원수식 일치 아님";
+ var labels = {
+   "HLC3_LOWER_PRIMARY_UNVERIFIED":"HLC3하단",
+   "CLOSE_LOWER_ALTERNATIVE":"종가하단",
+   "HLC3_UPPER_ALTERNATIVE":"HLC3상단",
+   "CLOSE_UPPER_ALTERNATIVE":"종가상단"
+ };
+ var models = MODELS[code].models;
+ var pieces = Object.keys(labels).map(function(name) {
+   var delta = models[name][idx] - record.line_value_krw;
+   return labels[name]+" "+(delta>0?"+":"")+fmt(delta,2)+"원";
+ });
+ return pieces.join(" · ")+" · 모델-실측 차이(원수식 인증 아님)";
 }
 function reportStatus(msg, isProblem) {
  var node=document.getElementById("status");
