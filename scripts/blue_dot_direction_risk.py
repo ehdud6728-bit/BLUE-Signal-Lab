@@ -361,7 +361,7 @@ def strict_falling_report(d: pd.DataFrame, sessions: list[pd.Timestamp]) -> dict
         if len(target) != 1:
             raise ValueError('PRIOR_FAILURE_AUDIT_DUPLICATE')
         target_idx = target.index[0]
-        original = bool(target.iloc[0][f'DIR_{n}_H_LA'])
+        original = bool(target.iloc[0][f'DIR_{n}_H_L_A'])
         passes3 = bool(target.iloc[0][prefix+'_3D'])
         passes5 = bool(target.iloc[0][prefix+'_5D'])
         # The actual shifted line is calculated on the full source, never on

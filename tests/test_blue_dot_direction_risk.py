@@ -189,5 +189,80 @@ class BlueDotDirectionRiskTest(unittest.TestCase):
         self.assertEqual({row[2] for row in PREVIOUS_MODEL_STOP_AUDIT},{20,30,40})
 
 
+    def test_full_strict_streak_audit_uses_actual_one_day_flag_and_dates(self):
+        """The full report path previously failed only after heavy evaluation."""
+        from scripts.blue_dot_direction_risk import (
+            strict_falling_report, falling_streak_flags,
+        )
+        d, sessions, _, _ = build_direction_signals(
+            fixture(descending=True), min_history=70)
+        specs, _, _ = falling_streak_flags(d)
+        bare = {
+            'signal_events': 1,
+            'train': {}, 'holdout': {},
+            'holdout_latest_first_stop_examples': [],
+            'holdout_latest_first_take_examples': [],
+            'holdout_latest_stop_gap_examples': [],
+        }
+        synthetic = {
+            'results': [{'patterns': {s['flag']: dict(bare) for s in specs}}],
+            'source_2025_2026_hashes': {},
+        }
+        observed = (
+            ('013810', '2026-10-22', 20, '스페코'),
+        )
+        with mock.patch('scripts.blue_dot_direction_risk.evaluate',
+                        return_value=synthetic):
+            with mock.patch('scripts.blue_dot_direction_risk.'
+                            'PREVIOUS_MODEL_STOP_AUDIT', observed):
+                result = strict_falling_report(d, sessions)
+        self.assertEqual(len(result['models']), 24)
+        entry = result['previous_reported_A_failures_audit'][0]
+        self.assertTrue(entry['original_one_day_A_model'])
+        self.assertTrue(entry['meets_strict_3_declines'])
+        self.assertTrue(entry['meets_strict_5_declines'])
+        self.assertEqual(entry['signal_day'], '2026-10-22')
+        self.assertEqual(len(entry['trailing_six_modeled_line_values_krw']), 6)
+        self.assertFalse(entry['broker_verified'])
+
+    def test_full_strict_streak_report_stop_examples_are_checked_again(self):
+        from scripts.blue_dot_direction_risk import (
+            strict_falling_report, falling_streak_flags,
+        )
+        d, sessions, _, _ = build_direction_signals(
+            fixture(descending=True), min_history=70)
+        specs, _, _ = falling_streak_flags(d)
+        selected = next(s for s in specs if
+                        s['period'] == 20 and s['basis'] == 'hlc3' and
+                        s['band'] == 'lower' and s['falling_moves'] == 5)
+        bare = {
+            'signal_events': 1,
+            'train': {}, 'holdout': {},
+            'holdout_latest_first_stop_examples': [],
+            'holdout_latest_first_take_examples': [],
+            'holdout_latest_stop_gap_examples': [],
+        }
+        patterns = {s['flag']: dict(bare) for s in specs}
+        patterns[selected['flag']]['holdout_latest_first_stop_examples'] = [
+            {'code': '013810', 'signal_day': '2026-10-22',
+             'first_touch_day': '2026-10-23', 'assumed_net_return_pct': -4.8}
+        ]
+        synthetic = {
+            'results': [{'patterns': patterns}],
+            'source_2025_2026_hashes': {},
+        }
+        with mock.patch('scripts.blue_dot_direction_risk.evaluate',
+                        return_value=synthetic):
+            with mock.patch('scripts.blue_dot_direction_risk.'
+                            'PREVIOUS_MODEL_STOP_AUDIT', ()):
+                report = strict_falling_report(d, sessions)
+        row = next(s for s in report['models'] if
+                   s['flag'] == selected['flag'])['examples']['first_stop'][0]
+        self.assertTrue(row['validated_descending_model_only'])
+        self.assertEqual(row['signal_day'], '2026-10-22')
+        self.assertEqual(len(row['model_line_last_six_krw']), 6)
+        self.assertFalse(row['broker_signal_verified'])
+
+
 if __name__ == '__main__':
     unittest.main()
