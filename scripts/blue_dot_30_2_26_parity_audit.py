@@ -100,14 +100,29 @@ def check_30_report_baselines(main_report, context_report, slope_report):
     return groups
 
 
+def _line_strict_declines(raw_values, moves):
+    """Only line direction, independent of bullish-body cross."""
+    recent=raw_values[-moves-1:]
+    return (len(recent)==moves+1 and
+            all(math.isfinite(float(v)) and float(v)>0 for v in recent) and
+            all(float(recent[j])<float(recent[j-1])
+                for j in range(1,len(recent))))
+
+
 def _model_line_check(history, idx, source_lines, prefix):
     values=source_lines[prefix].loc[
         history.original_index.iloc[max(0,idx-5):idx+1]]
-    last_six=[_finite_or_none(x) for x in values]
-    line=last_six[-1] if last_six else None
-    prior=last_six[-2] if len(last_six)>1 else None
-    return {'last_six_values_krw':last_six,
-            'current_line_krw':line,'prior_line_krw':prior}
+    raw=[float(x) for x in values]
+    last_six=[_finite_or_none(x) for x in raw]
+    return {
+        'last_six_values_krw':last_six,
+        'current_line_krw':last_six[-1] if last_six else None,
+        'prior_line_krw':last_six[-2] if len(last_six)>1 else None,
+        'line_falls_3_consecutive_moves':_line_strict_declines(raw,3),
+        'line_falls_5_consecutive_moves':_line_strict_declines(raw,5),
+        'raw_current_line':raw[-1] if raw else None,
+        'raw_previous_line':raw[-2] if len(raw)>1 else None,
+    }
 
 
 def _hypotheses_at_date(d, source_lines, code, date):
@@ -121,32 +136,40 @@ def _hypotheses_at_date(d, source_lines, code, date):
     for suffix, desc in MODEL_HYPOTHESES:
         prefix=f'FALL_30_{suffix}'
         prices=_model_line_check(h,i,source_lines,prefix)
-        line,prior=prices['current_line_krw'],prices['prior_line_krw']
-        if line is None or prior is None:
+        line,prior=prices['raw_current_line'],prices['raw_previous_line']
+        if (line is None or prior is None or
+                not math.isfinite(line) or not math.isfinite(prior)):
             crossed=None
         else:
             crossed=classify_cross(
                 float(r.open),float(r.close),float(r.prior_close),
                 prior,line)
+        model3=bool(r[f'{prefix}_3D'])
+        model5=bool(r[f'{prefix}_5D'])
         scenarios[desc]={
             'line_krw':prices['current_line_krw'],
             'previous_line_krw':prices['prior_line_krw'],
             'model_line_last_six_krw':prices['last_six_values_krw'],
-            'falls_3_consecutive_moves':
-                bool(r[f'{prefix}_3D']),
-            'falls_5_consecutive_moves':
-                bool(r[f'{prefix}_5D']),
+            'line_falls_3_consecutive_moves':
+                prices['line_falls_3_consecutive_moves'],
+            'line_falls_5_consecutive_moves':
+                prices['line_falls_5_consecutive_moves'],
+            'qualifies_3_day_downline_upcross_model':model3,
+            'qualifies_5_day_downline_upcross_model':model5,
             'geometry_from_model_source_ohlc':crossed,
             'broker_confirmed':False,
         }
-        if (scenarios[desc]['falls_5_consecutive_moves'] and not
-                scenarios[desc]['falls_3_consecutive_moves']):
+        if model3 and not prices['line_falls_3_consecutive_moves']:
+            raise ValueError('THIRTY_3D_CROSS_REQUIRES_DECLINE')
+        if model5 and not prices['line_falls_5_consecutive_moves']:
+            raise ValueError('THIRTY_5D_CROSS_REQUIRES_DECLINE')
+        if (model5 and not model3):
             raise ValueError('THIRTY_5D_NOT_SUBSET_3D')
     return scenarios,h,i
 
 
 def _model_outcome_if_signal(history, index, d, scenario):
-    if not scenario['falls_3_consecutive_moves']:
+    if not scenario['qualifies_3_day_downline_upcross_model']:
         return {'status':'NO_30_3D_MODEL_SIGNAL'}
     now=history.iloc[index]
     available=min(HORIZON,int(d.session_index.max())-int(now.session_index))
@@ -235,12 +258,13 @@ def create_report(d, context_report, slope_report, direction_report):
     examples=audit_screen_examples(d,source_lines)
     anchor=spico_reference_check(d,source_lines)
     return {
-        'schema':'BLUE_DOT_KIWOOM_30_2_26_FOCUS_MODEL_AUDIT_V1',
+        'schema':'BLUE_DOT_KIWOOM_30_2_26_FOCUS_MODEL_AUDIT_V2',
         'user_confirmed_visual_target':'THICK_BLUE_DOTTED_LINE',
         'user_confirmed_parameters':{
             'period':PERIOD,'multiplier':MULTIPLIER,'shift':SHIFT},
         'working_hypothesis':'HLC3_LOWER_NOT_FULLY_KIWOOM_VERIFIED',
         'other_price_bases_bands_are_separate_hypotheses':True,
+        'line_only_descending_vs_full_candle_cross_are_distinct':True,
         'study_20_and_40_are_comparators_not_primary_signals':True,
         'unverified_40_period_examples_do_not_count_as_30_period_trades':True,
         'no_numeric_broker_blue_line_value_for_four_screenshots':True,
