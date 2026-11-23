@@ -110,11 +110,15 @@ def _line_strict_declines(raw_values, moves):
 
 
 def _model_line_check(history, idx, source_lines, prefix):
-    values=source_lines[prefix].loc[
-        history.original_index.iloc[max(0,idx-5):idx+1]]
+    history_window=history.iloc[max(0,idx-5):idx+1]
+    values=source_lines[prefix].loc[history_window.original_index]
     raw=[float(x) for x in values]
     last_six=[_finite_or_none(x) for x in raw]
+    dated=[{'date':row.date.strftime('%Y-%m-%d'),
+            'model_line_krw':_finite_or_none(v,5)}
+           for row,v in zip(history_window.itertuples(),raw)]
     return {
+        'model_line_last_six_by_date':dated,
         'last_six_values_krw':last_six,
         'current_line_krw':last_six[-1] if last_six else None,
         'prior_line_krw':last_six[-2] if len(last_six)>1 else None,
@@ -150,6 +154,7 @@ def _hypotheses_at_date(d, source_lines, code, date):
             'line_krw':prices['current_line_krw'],
             'previous_line_krw':prices['prior_line_krw'],
             'model_line_last_six_krw':prices['last_six_values_krw'],
+            'model_line_last_six_by_date':prices['model_line_last_six_by_date'],
             'line_falls_3_consecutive_moves':
                 prices['line_falls_3_consecutive_moves'],
             'line_falls_5_consecutive_moves':
