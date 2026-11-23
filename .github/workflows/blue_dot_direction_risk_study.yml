@@ -4,7 +4,10 @@ on:
   pull_request:
     paths:
       - 'scripts/blue_dot_direction_risk.py'
+      - 'scripts/blue_dot_supply_interaction.py'
+      - 'scripts/supply_profile_r15110.py'
       - 'tests/test_blue_dot_direction_risk.py'
+      - 'tests/test_blue_dot_supply_interaction.py'
       - '.github/workflows/blue_dot_direction_risk_study.yml'
   workflow_dispatch:
     inputs:
@@ -41,6 +44,8 @@ jobs:
       - name: Verify slope separation and no-lookahead safeguards
         run: |
           python -m unittest tests.test_blue_dot_direction_risk -v
+          python -m unittest tests.test_blue_dot_supply_interaction -v
+          python -m unittest discover -s tests -p 'test_supply_profile_r15110.py' -v
           python -m unittest tests.test_blue_dot_triple_period_parity -v
           python -m unittest tests.test_blue_dot_broker_parity -v
       - name: Show immutable research plan without market downloads
@@ -61,13 +66,13 @@ jobs:
               --output "output/blue_dot_direction/sources/marcap-$YEAR.parquet" \
               "https://raw.githubusercontent.com/FinanceData/marcap/master/data/marcap-$YEAR.parquet"
           done
-      - name: Compare A and B first-touch risk without publishing trades
+      - name: Compare A/B first-touch risk and prior-120-bar supply proximity
         if: env.MODE == 'study'
         run: |
           python scripts/blue_dot_direction_risk.py --mode=study \
             --source-dir output/blue_dot_direction/sources \
             --out output/blue_dot_direction/report.json
-      - name: Archive model-only aggregates and chart-check examples
+      - name: Archive model-only direction and supply interaction aggregates
         if: always()
         uses: actions/upload-artifact@v4
         with:

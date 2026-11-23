@@ -16,6 +16,7 @@ import pandas as pd
 
 try:
     from scripts.blue_dot_broker_parity import classify_cross
+    from scripts.blue_dot_supply_interaction import analyze_supply_interaction
     from scripts.blue_dot_2026_research import build_blue_signals
     from scripts.blue_dot_parameter_sweep import contiguous_lookback
     from scripts.env20_rebound_comparison import MIN_HISTORY, evaluate
@@ -23,6 +24,7 @@ try:
     from scripts.research_v2_targeted_history import EXACT_MARCAP_HASHES
 except ModuleNotFoundError:
     from blue_dot_broker_parity import classify_cross
+    from blue_dot_supply_interaction import analyze_supply_interaction
     from blue_dot_2026_research import build_blue_signals
     from blue_dot_parameter_sweep import contiguous_lookback
     from env20_rebound_comparison import MIN_HISTORY, evaluate
@@ -229,6 +231,28 @@ def annotate_chart_examples(report: dict, d: pd.DataFrame) -> None:
                 })
 
 
+def assert_supply_reconciles(report: dict) -> None:
+    """Every supply bucket must conserve the exact underlying A/B cases."""
+    by_flag = {s['flag']: s for s in report['model_cohorts']}
+    primary = [row for row in report['supply_interaction']['results'] if (
+        row['observation_sessions_not_forced_holding'],
+        row['take_profit_pct'], row['stop_loss_pct']) == PRIMARY]
+    if len(primary) != 6:
+        raise ValueError('SUPPLY_PRIMARY_COHORT_COUNT_MISMATCH')
+    fields = ('n', 'first_take_count', 'first_stop_count', 'stop_gap_count',
+              'severe_resolved_net_at_or_below_minus_10pct_count',
+              'unresolved_no_touch_count', 'review_discontinuity_count')
+    for row in primary:
+        if row['flag'] not in by_flag:
+            raise ValueError('SUPPLY_UNEXPECTED_BASE_MODEL')
+        for side in ('train', 'holdout'):
+            expected = by_flag[row['flag']][side]
+            actual = row[side]['total']
+            if any(expected[field] != actual[field] for field in fields):
+                raise ValueError('SUPPLY_BASE_SIGNAL_OUTCOME_MISMATCH_' +
+                                 row['flag'] + '_' + side)
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--mode', choices=('plan', 'study'), default='plan')
@@ -254,6 +278,8 @@ def main():
         output_schema='BLUE_DOT_DIRECTION_UNVALIDATED_FULL_STUDY_V1')
     report = compact_risk_report(full, specs)
     annotate_chart_examples(report, d)
+    report['supply_interaction'] = analyze_supply_interaction(d, sessions)
+    assert_supply_reconciles(report)
     path = Path(args.out)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(report, ensure_ascii=False, indent=2)+'\n',
