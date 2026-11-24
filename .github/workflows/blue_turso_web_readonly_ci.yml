@@ -3,6 +3,9 @@ name: BLUE Turso Web Read-Only Safety Tests (NO SECRETS)
 on:
   pull_request:
     paths:
+      - 'web/src/**'
+      - 'web/package*.json'
+      - 'web/tsconfig*.json'
       - 'web/src/turso-research-reader.ts'
       - 'web/src/SmartBasket.tsx'
       - 'web/src/basket-rank.ts'
