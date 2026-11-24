@@ -38,6 +38,11 @@ def monitor(source):
             suffixes.update(["|BULL|"+("BODY_10_30" if body<.3 else "BODY_30_50" if body<.5 else "BODY_50_70"),"|BULL|"+("CLOSE_LOW" if pos<.33 else "CLOSE_MID" if pos<.67 else "CLOSE_HIGH")])
             if regime!="UNKNOWN":
                 suffixes.add("|BULL|MARKET_"+regime)
+        prev=bars.get((days[i-1],c)) if i>0 else None
+        if shape and prev:
+            change=100*(b["close"]/prev-1)
+            band="NEGATIVE" if change<0 else "UP_0_2" if change<2 else "UP_2_5" if change<5 else "UP_5_10" if change<10 else "UP_10_PLUS"
+            suffixes.add("|"+shape+"|"+band)
         for n in (5,10,20):
             prior=[raw.get((day,c),{}).get("amount") for day in days[max(0,i-n):i]]
             a=b.get("amount")
@@ -45,8 +50,8 @@ def monitor(source):
                 ratio=a*n/sum(prior)
                 band="LT_0_5" if ratio<.5 else "0_5_1" if ratio<1 else "1_1_5" if ratio<1.5 else "1_5_2" if ratio<2 else "2_3" if ratio<3 else "GE_3"
                 suffixes.add(f"|AMOUNT_{n}|{band}")
-                if shape=="BULL":
-                    suffixes.add(f"|BULL|AMOUNT_{n}|{band}")
+                if shape:
+                    suffixes.add(f"|{shape}|AMOUNT_{n}|{band}")
         for p in set(s["names"]):
             for suffix in suffixes:
                 events[p+suffix].append((i,c))
