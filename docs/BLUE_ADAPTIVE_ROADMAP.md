@@ -26,3 +26,13 @@
 
 ## 병행 개발 정책
 로드맵은 고정 순서가 아닌 누락 방지 목록이다. 추천 갱신/이력/검색 표시, 최단기 변화 연구, 순환매 데이터 기반, 과거 데이터 확보를 독립적으로 병행한다. 공통 데이터와 검증 의존성은 먼저 해결하고, 운영 반영은 테스트 및 실제 결과 확인 후 진행한다.
+
+
+## 2026-11-24 사용자 우선순위 재조정: 5·6번 우선
+- 사용자 지정: 업종·테마 순환매 레이더(5번), AI 종합 시황·대응 전망(6번)을 먼저 묶어 개발한다. 동일 패턴 상승 우위·하락 위험 연구의 미병합 브랜치 `research/same-pattern-advantage-risk`는 보존하고 운영 반영하지 않는다.
+- PR #168 병합 및 오프라인 테스트 통과 확인. 실제 운영 저장·배포·화면 검증은 별도 확인 필요.
+- 이번 PR: KIS 공식 국내업종 구분별전체시세(FHPUP02140000)와 시장별 투자자매매동향 일별(FHPTJ04040000)을 기존 Turso 캐시 토큰으로 최대 4회 조회. 신규 토큰 발급·D1·주문·자동 스케줄 없음. 분류 시세에는 거래일이 명시되지 않으므로 수집 시각과 실제 시세일을 구분하고 일별 수급은 응답 일자를 그대로 표시. 수급 금액 단위 확인 전 방향만 표시. KIS 자료는 비공개 앱에서만 조회하고 공개 Actions 산출물에 게시하지 않는다.
+- 순환매 1차: 시장 대비 업종 분류 지수 등락률 차이, 공급자 거래대금 비중, 이전 수집일 대비 강도/비중 차이 및 정렬. 중복 분류 가능, 거래대금은 순매수 아님. 실제 업종 구성·테마·대장주/후발주·RRG·선후행 검증·종목 패턴 결합은 후속 단계.
+- 시황 1차: KIS 지수/상승·하락 종목 수와 일별 투자자 순매수 방향을 표시. 규칙 기반 시황 초안 및 반등 지속/횡보·바닥 확인/재하락 조건부 시나리오와 반대 증거. 생성형 AI, VIX 현물/선물, 미국 지수, 주요 이벤트 및 전망 성과 검증은 미연동이며 수치를 만들어 내지 않음.
+- 수동 `blue_market_rotation_capture.yml`의 plan(외부 호출 없음), inspect(수집, 쓰기 없음), apply(분리 테이블 저장+읽기 검증), 기존 API/웹 배포로 연결한다. 코드 구현 단계이며 실제 KIS 응답·이용권한·운영 검증은 아직 확인 전. 자동 실행은 수집 검증 이후 검토.
+- 공식 원천: https://apiportal.koreainvestment.com/apiservice , https://github.com/koreainvestment/open-trading-api/tree/main/examples_llm/domestic_stock/inquire_index_category_price , https://github.com/koreainvestment/open-trading-api/tree/main/examples_llm/domestic_stock/inquire_investor_daily_by_market .
