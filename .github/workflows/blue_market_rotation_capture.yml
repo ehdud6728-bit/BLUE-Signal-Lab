@@ -1,0 +1,40 @@
+name: BLUE Market Rotation Capture
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        type: choice
+        options: [plan, inspect, apply]
+        default: plan
+        required: true
+permissions:
+  contents: read
+concurrency:
+  group: blue-market-rotation-capture
+  cancel-in-progress: false
+jobs:
+  capture:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm install --prefix collector --no-package-lock --no-audit --no-fund
+      - run: node --test collector/src/market-rotation.test.mjs
+      - name: Capture market observations
+        env:
+          MODE: ${{ inputs.mode }}
+          TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
+          TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
+          KIS_APP_KEY: ${{ secrets.KIS_APP_KEY }}
+          KIS_APP_SECRET: ${{ secrets.KIS_APP_SECRET }}
+        run: node collector/src/market-rotation.mjs "$MODE"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: market-rotation
+          path: output/market/snapshot.json
+          if-no-files-found: ignore
+          retention-days: 7
