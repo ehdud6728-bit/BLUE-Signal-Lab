@@ -1,3 +1,4 @@
+import {RECENT_ASOF,RECENT_RECOMMENDATIONS} from './recent-pattern-data';
 import RecentPatternReference from './RecentPatternReference';
 import RecentPatternRanking from './RecentPatternRanking';
 import StockChart from './StockChart';
@@ -687,7 +688,7 @@ function App(){
   // Never promote frequency growth or exploratory tomato observations to gold.
   // Only a future, independently verified Turso v2 recommendation can qualify.
   const goldSignal=(r:Signal)=>validatedResearchSignal(r,storageMode==='turso'&&searchSource==='patterns'&&patternBackend==='turso');
-  const recentMatch=(r:Signal)=>patternBackend==='turso'&&r.day>'2026-11-23'&&r.signals.includes('ENV20_LOWER_TOUCH')&&r.extras?.recent_candle_match==='ENV20_BULL_CLOSE_MID_20261123';
+  const recentMatch=(r:Signal)=>patternBackend==='turso'&&r.day>RECENT_ASOF&&r.signals.includes('ENV20_LOWER_TOUCH')&&r.extras?.recent_candle_match==='ENV20_BULL_CLOSE_MID_20261123'&&RECENT_RECOMMENDATIONS.some(x=>x.tier==='SHORT_RECOMMENDATION'&&x.group==='detail_rankings'&&x.pattern==='ENV20_LOWER_TOUCH|BULL|CLOSE_MID');
   const stockHighlight=(r:Signal)=>researchCardClasses(goldSignal(r)!==null||recentMatch(r),patternUp(r)!==null);
   const goldEvidenceBlock=(r:Signal)=>{const signal=goldSignal(r);
     return signal?<div className="r-research-gold-label" role="note">★ 검증 연구 추천 패턴 · {showSignal(signal)}</div>:null;};
