@@ -19,6 +19,7 @@ on:
       - 'worker/src/turso-market-trends.ts'
       - 'worker/src/turso-rotation-leaders.ts'
       - 'tests/test_market_briefing.mjs'
+      - 'tests/test_turso_rotation_leaders.mjs'
       - 'tests/test_turso_market_trends.mjs'
       - 'tests/test_turso_market_rotation.mjs'
       - 'worker/src/index.ts'
