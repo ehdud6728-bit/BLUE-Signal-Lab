@@ -39,7 +39,9 @@ jobs:
           python3 research/pattern_performance_audited.py --input output/pattern/source.json --output output/pattern/report.json
       - name: Generate short-window web snapshot candidate
         if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && inputs.sessions == '60'
-        run: python3 research/pattern_performance_web_snapshot.py --input output/pattern/report.json --output output/pattern/web-snapshot.json
+        run: |
+          python3 research/pattern_performance_audited.py --input output/pattern/source.json --output output/pattern/recent-report.json --recent-window 28
+          python3 research/pattern_performance_web_snapshot.py --input output/pattern/recent-report.json --output output/pattern/web-snapshot.json
       - uses: actions/upload-artifact@v4
         if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
         with:
@@ -47,4 +49,5 @@ jobs:
           path: |
             output/pattern/report.json
             output/pattern/web-snapshot.json
+            output/pattern/recent-report.json
           if-no-files-found: error
