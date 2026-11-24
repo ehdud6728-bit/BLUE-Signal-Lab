@@ -50,7 +50,11 @@ def scan_provisional(history, quotes, day, reference, now, workers=1):
     if not rows: return dict(day=day,status="KIS_PROVISIONAL",observed=len(quotes),eligible=0,excluded=excluded,items=[],**coverage)
     base=history.reset_index() if "Date" not in history.columns and history.index.name=="Date" else history.copy()
     base=base.loc[base.Code.astype(str).str.replace(r"\.0$", "", regex=True).str.zfill(6).isin([r["Code"] for r in rows])]
-    combined=pd.concat([base[COLS],pd.DataFrame(rows,columns=COLS)],ignore_index=True)
+    # CSV history contains date strings; the provisional bar uses Timestamp.
+    # Normalise before concatenation so corporate-action sorting sees one dtype.
+    base=base[COLS].copy()
+    base["Date"]=pd.to_datetime(base["Date"],errors="raise").dt.normalize()
+    combined=pd.concat([base,pd.DataFrame(rows,columns=COLS)],ignore_index=True)
     adjusted,_=adjust_verified_actions(combined,target.date())
     matches,audit=scan_r08_parallel(adjusted,day,workers=workers)
     for r in matches:
