@@ -204,6 +204,39 @@ export async function getKisDailyQuote(env,token,market,code,day,fetchFn=fetch){
     }};
   }finally{clearTimeout(abort);}
 }
+export async function getKisChartDailyQuote(env,token,market,code,day,fetchFn=fetch){
+  if(!/^20\d{2}-\d{2}-\d{2}$/.test(day)||market!=='J'||!/^[0-9A-Z]{6}$/.test(code))
+    throw Error('KIS_DAILY_INPUT_INVALID');
+  const url=new URL('/uapi/domestic-stock/v1/quotations/inquire-daily-itemchartprice',KIS_BASE);
+  url.searchParams.set('FID_COND_MRKT_DIV_CODE',market);
+  url.searchParams.set('FID_INPUT_ISCD',code);
+  url.searchParams.set('FID_PERIOD_DIV_CODE','D');
+  url.searchParams.set('FID_ORG_ADJ_PRC','1');
+  url.searchParams.set('FID_INPUT_DATE_1',day.replaceAll('-',''));
+  url.searchParams.set('FID_INPUT_DATE_2',day.replaceAll('-',''));
+  const controller=new AbortController();const abort=setTimeout(()=>controller.abort(),12000);
+  try{
+    const response=await fetchFn(url,{method:'GET',headers:{
+      authorization:'Bearer '+token,appkey:env.KIS_APP_KEY,appsecret:env.KIS_APP_SECRET,
+      tr_id:'FHKST03010100',custtype:'P',accept:'application/json'
+    },signal:controller.signal});
+    if(response.status===429)throw Error('KIS_RATE_LIMIT');
+    if(!response.ok)throw Error('KIS_DAILY_HTTP_UNAVAILABLE');
+    const data=await response.json();
+    if(data?.msg_cd==='EGW00201')throw Error('KIS_RATE_LIMIT');
+    if(data?.rt_cd!=='0'||!Array.isArray(data.output2)||data.output2.length>100)
+      throw Error('KIS_DAILY_RESPONSE_INVALID');
+    const rows=data.output2.filter(x=>String(x?.stck_bsop_date||'')===day.replaceAll('-',''));
+    if(rows.length!==1)throw Error('KIS_DAILY_EXACT_DATE_MISSING');
+    const row=rows[0];
+    return {rt_cd:'0',output:{
+      stck_bsop_date:row.stck_bsop_date,
+      stck_prpr:row.stck_clpr,stck_oprc:row.stck_oprc,
+      stck_hgpr:row.stck_hgpr,stck_lwpr:row.stck_lwpr,
+      acml_vol:row.acml_vol,acml_tr_pbmn:row.acml_tr_pbmn,prdy_ctrt:row.prdy_ctrt,
+    }};
+  }finally{clearTimeout(abort);}
+}
 export async function ensureTables(db){
   await db.batch([
     db.prepare('CREATE TABLE IF NOT EXISTS blue_kis_live_quotes_r141 (trade_date TEXT NOT NULL, market TEXT NOT NULL,code TEXT NOT NULL,received_at_utc TEXT NOT NULL,payload_json TEXT NOT NULL,PRIMARY KEY(trade_date,market,code))'),
