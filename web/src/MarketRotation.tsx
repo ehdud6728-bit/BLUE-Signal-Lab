@@ -1,6 +1,7 @@
 import {useEffect,useState} from 'react';
 import MarketTrends from './MarketTrends';
 import RotationLeaders from './RotationLeaders';
+import MarketAiBriefing from './MarketAiBriefing';
 import {flowWindow} from './market-briefing';
 type Sector={code:string;name:string;change_pct:number;relative_pct:number;turnover_share_pct:number|null;relative_delta_pp:number|null;share_delta_pp:number|null};
 type Flow={day:string;foreign:string|null;institution:string|null;individual:string|null};
@@ -21,6 +22,7 @@ export default function MarketRotation({api}:{api:string}){
  <div className="blue-pattern-heading"><strong>시장 브리핑 · 업종 순환매</strong><button type="button" disabled={loading} onClick={()=>setRev(x=>x+1)}>새로고침</button></div>
  {loading&&<p>저장된 시장 자료 조회 중…</p>}{error&&<p role="alert">{error}</p>}
  {!loading&&!error&&!ready&&<p className="blue-note">아직 KIS 시장 자료가 저장되지 않았습니다. 시장 수집 Actions를 실행해 주세요. 임의 수치를 표시하지 않습니다.</p>}
+ <MarketAiBriefing api={api} revision={rev}/>
  {ready&&data&&<>
  <small>KIS 수집 시작 {clock(data.observed_at_utc)} · 시세 자체의 거래일/공표시각 미확인</small>
  <div className="blue-note"><strong>{state}</strong><p>규칙 기반 시황 초안입니다. 실제 지수·상승 종목 비율·수급 방향을 사용하며 생성형 AI 전망이나 미래 확률은 아닙니다.</p></div>
