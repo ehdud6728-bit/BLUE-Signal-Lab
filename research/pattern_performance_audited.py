@@ -6,6 +6,7 @@ import json
 import re
 from pathlib import Path
 from pattern_performance_phase1 import summarize
+from pattern_entry_timing import study
 HORIZONS = (1, 2, 3, 5, 10, 20)
 from datetime import date
 
@@ -119,6 +120,7 @@ def analyze(source):
             "trading_calendar_verified":False,"corporate_actions_verified":False,
             "definition":"positive close-to-close return after N audited EOD sessions; missing outcomes excluded",
             "rankings":summarize(rows),
+            "entry_timing":study(source,days,raw_bars,candle),
             "candle_rankings":summarize(candles),
             "market_rankings":summarize(markets),
             "detail_rankings":summarize(details),
