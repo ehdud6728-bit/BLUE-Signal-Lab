@@ -10,6 +10,7 @@ on:
     paths:
       - 'research/pattern_performance*.py'
       - 'research/pattern_entry_timing.py'
+      - 'research/test_pattern_performance*.py'
       - '.github/workflows/blue_pattern_performance_audited.yml'
 permissions:
   contents: read
@@ -21,6 +22,8 @@ jobs:
       - uses: actions/checkout@v4
       - name: Offline exact-session test
         run: python3 research/test_pattern_performance_audited.py
+      - name: Recommendation threshold test
+        run: python3 research/test_pattern_performance_web_snapshot.py
       - uses: actions/setup-node@v4
         if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
         with:

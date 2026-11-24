@@ -5,6 +5,24 @@ import re
 from datetime import date
 from pathlib import Path
 
+def recommendations(report):
+    result = []
+    for group in ("rankings", "candle_rankings", "detail_rankings", "turnover_rankings", "market_rankings"):
+        for r in report.get(group, []):
+            p = r["pattern"]
+            h = r["horizon_trading_days"]
+            n, d, stocks = (r[k] for k in ("sample_count", "distinct_signal_dates", "distinct_stocks"))
+            rate, mean, median = (r[k] for k in ("positive_return_probability_pct", "mean_return_pct", "median_return_pct"))
+            if not all(re.fullmatch(r"[A-Z0-9_]+", part) for part in p.split("|")) or h not in (1,2,3,5,10,20):
+                raise ValueError("invalid recommendation condition")
+            if not all(type(x) is int for x in (n,d,stocks)) or not 1 <= d <= n or not 1 <= stocks <= n:
+                raise ValueError("invalid recommendation counts")
+            if not all(type(x) in (int,float) and math.isfinite(x) for x in (rate,mean,median)) or not 0 <= rate <= 100:
+                raise ValueError("invalid recommendation returns")
+            if rate >= 70 and mean > 0 and median > 0:
+                result.append({**r, "group":group, "tier":"SHORT_RECOMMENDATION" if n>=30 and d>=5 and stocks>=10 else "WATCH", "validation":"IN_SAMPLE_ONLY"})
+    return sorted(result, key=lambda r:(r["tier"]!="SHORT_RECOMMENDATION",-r["positive_return_probability_pct"],-r["sample_count"],r["pattern"],r["horizon_trading_days"]))
+
 def convert(report):
     if report.get("schema") != "BLUE_PATTERN_PERFORMANCE_AUDITED_V1" or report.get("status") != "RESEARCH_ONLY_NO_PRODUCTION_PROMOTION":
         raise ValueError("unexpected research report")
@@ -30,7 +48,7 @@ def convert(report):
         raise ValueError("empty snapshot")
     for rs in rows.values():
         rs.sort()
-    return {"asof":day,"audited_sessions":sessions,"window_start":report.get("research_window_start"),"rows":rows}
+    return {"asof":day,"audited_sessions":sessions,"window_start":report.get("research_window_start"),"rows":rows,"recommendations":recommendations(report),"recommendation_policy":{"min_rate":70,"min_samples":30,"min_dates":5,"min_stocks":10,"positive_mean_and_median":True,"independent_of_long_term":True}}
 
 def main():
     p=argparse.ArgumentParser()
