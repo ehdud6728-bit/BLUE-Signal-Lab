@@ -699,7 +699,7 @@ function App(){
   // Never promote frequency growth or exploratory tomato observations to gold.
   // Only a future, independently verified Turso v2 recommendation can qualify.
   const goldSignal=(r:Signal)=>validatedResearchSignal(r,storageMode==='turso'&&searchSource==='patterns'&&patternBackend==='turso');
-  const recentMatch=(r:Signal)=>patternBackend==='turso'&&matchedRecent(r.day,r.signals,r.extras?.audited_candle_features).length>0;
+  const recentMatch=(r:Signal)=>patternBackend==='turso'&&matchedRecent(r.day,r.signals,r.extras?.audited_candle_features,true).length>0;
   const stockHighlight=(r:Signal)=>researchCardClasses(goldSignal(r)!==null||recentMatch(r),patternUp(r)!==null);
   const goldEvidenceBlock=(r:Signal)=>{const signal=goldSignal(r);
     return signal?<div className="r-research-gold-label" role="note">★ 검증 연구 추천 패턴 · {showSignal(signal)}</div>:null;};
@@ -1030,7 +1030,7 @@ function App(){
 
         {storageMode==='turso'&&searchSource==='daily'&&<TursoEodRecovery key={eodRefresh} api={API} dates={tursoDays} onUnavailable={onTursoUnavailable}/>}
         <div className={"stats "+(storageMode==="turso"?"ai-summary-four":"")} ref={summaryRef} id="summary-panel">
-          <div className="metric"><span>검색 결과</span><strong>{total==null?'—':(allCount??total).toLocaleString()}</strong><small>종목</small></div>
+          <button type="button" className={'metric ai-summary-all '+(!aiOnly?'active':'')} disabled={busy||total===null} aria-pressed={!aiOnly} onClick={()=>{if(aiOnly)void search(1,false,gcFields,gcLogic,undefined,undefined,techFields,techLogic,{aiOnly:false});}}><span>검색 결과</span><strong>{total==null?'—':(allCount??total).toLocaleString()}</strong><small>전체 종목</small></button>
           {storageMode==='turso'&&<button type="button" className={'metric ai-summary-metric '+(aiOnly?'active':'')} disabled={busy||aiCount===null} aria-pressed={aiOnly} onClick={()=>void search(1,false,gcFields,gcLogic,undefined,undefined,techFields,techLogic,{aiOnly:!aiOnly})}><span>AI 추천</span><strong>{total===null||aiCount===null?'—':aiCount}</strong><small>일치 종목</small></button>}
           <div className="metric"><span>검색 거래일</span><strong>{total==null?'—':days.length}</strong><small>저장된 날짜</small></div>
           <div className="metric"><span>최신 저장일</span><strong className="smallnum">{latest?.slice(5)||'—'}</strong><small>종가 데이터</small></div>
