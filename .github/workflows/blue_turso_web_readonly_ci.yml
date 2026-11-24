@@ -18,7 +18,7 @@ on:
       - 'worker/src/turso-market-rotation.ts'
       - 'worker/src/turso-market-trends.ts'
       - 'tests/test_turso_market_trends.mjs'
-      - 'tests/test_turso_market_rotation.mjs tests/test_turso_market_trends.mjs'
+      - 'tests/test_turso_market_rotation.mjs'
       - 'worker/src/index.ts'
       - 'worker/src/turso-research.ts'
       - 'worker/src/turso-research-request.ts'
