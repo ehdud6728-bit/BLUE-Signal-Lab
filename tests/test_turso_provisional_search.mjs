@@ -101,3 +101,36 @@ test('API route and PWA label provisional data separately from verified research
   assert.match(web,/TursoProvisionalToday/);
   assert.match(card,/KIS 미확정 관측값/);
 });
+
+test('published provisional endpoint reads only promoted generation; EOD takes priority',async()=>{
+  const {tursoPublishedProvisional}=await import('../worker/src/turso-published-provisional.ts');
+  const db=new DatabaseSync(':memory:');
+  try{
+    db.exec("CREATE TABLE blue_eod_ingest_audit_v1(trade_day TEXT PRIMARY KEY,row_count INTEGER); INSERT INTO blue_eod_ingest_audit_v1 VALUES('2026-11-19',2660); CREATE TABLE blue_provisional_pattern_head_v1(trade_day TEXT,reference_day TEXT,snapshot_id TEXT,latest_observed_utc TEXT,scan_asof_utc TEXT,row_count INTEGER,metadata_json TEXT); CREATE TABLE blue_provisional_pattern_rows_v1(snapshot_id TEXT,code TEXT,record_json TEXT,row_sha256 TEXT);");
+    const day='2026-11-20',ref='2026-11-19',id='a'.repeat(64),at='2026-11-20T00:29:00Z';
+    const factory=()=>({async execute(cmd){assert.match(cmd.sql,/^SELECT\b/);return {rows:db.prepare(cmd.sql).all(...cmd.args)};},close(){}});
+    const query=q=>tursoPublishedProvisional(env,new URLSearchParams({date:day,...q}),factory,now);
+    assert.equal((await query({})).data_status,'NOT_PUBLISHED');
+    const meta={day,status:'KIS_PROVISIONAL',pattern_confirmed:false,scan_asof_utc:at,observed:3,eligible:2,
+      quote_coverage:{reference:ref,turnoverAvailable:1},history_metadata:{reference:ref},audit:{matched_stocks:2}};
+    db.prepare('INSERT INTO blue_provisional_pattern_head_v1 VALUES(?,?,?,?,?,?,?)').run(day,ref,id,at,at,2,JSON.stringify(meta));
+    const row=(code,name,amount)=>JSON.stringify({code,name,date:day,close:100,signals:'ENV20,BB20',observed_at_utc:at,
+      provisional:true,pattern_confirmed:false,source:'KIS_PROVISIONAL',turnover_available:amount!==null,traded_amount_krw:amount});
+    const insert=db.prepare('INSERT INTO blue_provisional_pattern_rows_v1 VALUES(?,?,?,?)');
+    insert.run(id,'000660',row('000660','SK하이닉스',100000000),'hash');
+    insert.run(id,'005930',row('005930','삼성전자',null),'hash');
+    insert.run('b'.repeat(64),'999999',row('999999','미공개',100),'hash');
+    const result=await query({});
+    assert.equal(result.data_status,'KIS_PROVISIONAL_PATTERNS');
+    assert.equal(result.total,2);assert.equal(result.items[1].traded_amount_krw,null);
+    assert.equal(result.items[0].traded_amount_krw,100000000);
+    assert.deepEqual(result.items[0].signals,['ENV20','BB20']);
+    assert.equal((await query({q:'삼성'})).items[0].code,'005930');
+    assert.equal((await query({q:'%'})).total,0);
+    assert.equal((await query({page:'2'})).items.length,0);
+    db.prepare('DELETE FROM blue_provisional_pattern_rows_v1 WHERE code=?').run('005930');
+    await assert.rejects(query({}),/INVALID_PUBLISHED_PROVISIONAL/);
+    db.exec("INSERT INTO blue_eod_ingest_audit_v1 VALUES('2026-11-20',2660)");
+    assert.equal((await query({})).data_status,'VERIFIED_EOD_AVAILABLE');
+  }finally{db.close();}
+});
