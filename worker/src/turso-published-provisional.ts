@@ -54,9 +54,11 @@ export async function tursoPublishedProvisional(env:Env,p:URLSearchParams,factor
   const signalLogic=logic(p,'logic'),gcLogic=logic(p,'gc_logic'),techLogic=logic(p,'tech_logic');
   const amountText=p.get('min_amount_eok')||'0',amount=Number(amountText);
   const sort=p.get('sort')||'recent',aiOnly=p.get('ai_only')||'0';
+  const floor=Number(p.get('min_pattern_n')||'8'),highlight=p.get('highlight_up')||'70',onlyPattern=p.get('only_pattern')||'0';
+  if(![3,4,5,6,7,8,10,15,20,30].includes(floor)||!['off','60','70','80','90'].includes(highlight)||!['0','1'].includes(onlyPattern))throw new InvalidProvisionalQuery();
   if(!/^\d{1,5}$/.test(amountText)||amount>50000||!['recent','amount_surge','amount_decline','recommended'].includes(sort)||!['0','1'].includes(aiOnly))throw new InvalidProvisionalQuery();
   const empty={storage:'TURSO',day,pattern_confirmed:false,complete_market:false,
-    data_status:'NOT_PUBLISHED',page,limit,total:0,matched_count:0,observed_count:0,ai_count:null as number|null,ai_asof:RECENT_ASOF,ai_only:false,ai_evidence_count:0,unfiltered_total:0,
+    data_status:'NOT_PUBLISHED',page,limit,total:0,matched_count:0,observed_count:0,ai_count:null as number|null,ai_asof:RECENT_ASOF,ai_only:false,ai_evidence_count:0,unfiltered_total:0,history_ready:false,pattern_filter_applied:false,
     eligible_count:0,turnover_available_count:0,reference_day:null as string|null,
     scan_asof_utc:null as string|null,latest_observed_utc:null as string|null,items:[] as unknown[]};
   const url=env.TURSO_DATABASE_URL?.trim()||'',authToken=env.TURSO_AUTH_TOKEN?.trim()||'';
@@ -102,29 +104,43 @@ export async function tursoPublishedProvisional(env:Env,p:URLSearchParams,factor
     check(count(total)&&total<=matched);
     // Match over the full filtered pool, before paging. Read compact evidence
     // in bounded pages instead of fetching every large diagnostic record.
-    const candidates:{code:string;features:string[]|null;rate:number|null}[]=[];
-    for(let offset=0;offset<total;offset+=40){
-      const chunk=await run("SELECT code,"+field('signals')+" AS signals,"+field('close')+" AS price,"+field('kis_candle')+" AS candle FROM blue_provisional_pattern_rows_v1 WHERE snapshot_id=?"+filter+' ORDER BY '+ordering+' LIMIT 40 OFFSET ?',[...args,offset]);
+    type Best={n:number;up:number;mean:number|null;median:number|null;label:string;days:string[]};
+    const candidates:{code:string;features:string[]|null;rate:number|null;history:boolean;best:Best|null}[]=[];
+    // Select the same 10d best setup as the verified EOD search, without
+    // returning large chart/case JSON for every stock.
+    const h="json_extract(s.value,'$.horizons.\"10\".";
+    const bestSql="(SELECT json_object('n',"+h+"n'),'up',"+h+"up_pct'),'mean',"+h+"mean_return_pct'),'median',"+h+"median_return_pct'),'label',json_extract(s.value,'$.label'),'days',json((SELECT json_group_array(json_extract(z.value,'$.signal_day')) FROM json_each(s.value,'$.horizons.\"10\".cases') z))) FROM json_each(record_json,'$.provisional_research.stats.setups') s WHERE "+h+"n')>=? AND "+h+"up_pct') BETWEEN 0 AND 100 ORDER BY "+h+"up_pct') DESC,COALESCE("+h+"median_return_pct'),0) DESC,COALESCE("+h+"mean_return_pct'),0) DESC,"+h+"n') DESC LIMIT 1)";
+    for(let offset=0;offset<total;offset+=10){
+      const chunk=await run("SELECT code,"+field('signals')+" AS signals,"+field('close')+" AS price,"+field('kis_candle')+" AS candle,"+field('provisional_research.reference')+" AS research_ref,"+bestSql+" AS best FROM blue_provisional_pattern_rows_v1 WHERE snapshot_id=?"+filter+' ORDER BY '+ordering+' LIMIT 10 OFFSET ?',[floor,...args,offset]);
       for(const r of chunk.rows){
         let raw:unknown=null;
         if(typeof r.candle==='string'){try{raw=JSON.parse(r.candle);}catch{/* fail closed */}}
         const features=provisionalCandleFeatures(raw,Number(r.price));
         const rec=features?matchedRecent(day,String(r.signals||'').split(','),features)[0]:undefined;
-        candidates.push({code:String(r.code),features,rate:rec?.positive_return_probability_pct??null});
+        const history=r.research_ref===reference;
+        const best:Best|null=history&&typeof r.best==='string'?JSON.parse(r.best):null;
+        if(best)check(count(best.n)&&best.n>=floor&&typeof best.up==='number'&&best.up>=0&&best.up<=100&&typeof best.label==='string'&&Array.isArray(best.days)&&best.days.every(d=>DAY.test(d)&&d<=reference));
+        candidates.push({code:String(r.code),features,rate:rec?.positive_return_probability_pct??null,history,best});
       }
     }
     check(candidates.length===total&&new Set(candidates.map(r=>r.code)).size===total);
-    const evidenceCount=candidates.filter(r=>r.features!==null).length;
-    const aiReady=day>RECENT_ASOF&&evidenceCount===total;
-    const aiCount=aiReady?candidates.filter(r=>r.rate!==null).length:null;
+    const historyReady=candidates.every(r=>r.history);
+    const hot=(r:typeof candidates[number])=>highlight!=='off'&&r.best!==null&&r.best.up>=Number(highlight);
+    const appliedPattern=onlyPattern==='1'&&highlight!=='off'&&historyReady;
+    const basePool=appliedPattern?candidates.filter(hot):candidates;
+    const evidenceCount=basePool.filter(r=>r.features!==null).length;
+    const aiReady=day>RECENT_ASOF&&evidenceCount===basePool.length;
+    const aiCount=aiReady?basePool.filter(r=>r.rate!==null).length:null;
     // Legacy snapshots without exact candle evidence must not report zero
     // recommendations or silently pretend to honor an AI-only request.
     const appliedAiOnly=aiOnly==='1'&&aiReady;
-    const pool=appliedAiOnly?candidates.filter(r=>r.rate!==null):candidates;
-    if(sort==='recommended'&&aiReady)pool.sort((a,b)=>(b.rate??-1)-(a.rate??-1)||a.code.localeCompare(b.code));
+    const pool=appliedAiOnly?basePool.filter(r=>r.rate!==null):basePool;
+    const rank=(r:typeof candidates[number])=>(aiReady&&r.rate!==null?2:0)+(historyReady&&hot(r)?1:0);
+    if(sort==='recommended')pool.sort((a,b)=>rank(b)-rank(a)||(aiReady?b.rate??-1:-1)-(aiReady?a.rate??-1:-1)||(historyReady&&hot(b)?b.best!.up:0)-(historyReady&&hot(a)?a.best!.up:0)||a.code.localeCompare(b.code));
     const slice=pool.slice((page-1)*limit,page*limit);
     const codes=slice.map(r=>r.code);
     const featuresByCode=new Map(slice.map(r=>[r.code,r.features]));
+    const bestByCode=new Map(slice.map(r=>[r.code,r.best]));
     // Project only display fields, not chart history or unverified research extras.
     const records=codes.length?await run("SELECT code,json_extract(record_json,'$.code') AS payload_code,"+displayName+" AS name,"+diagnosticJson+" AS diagnostics,json_extract(record_json,'$.date') AS day,json_extract(record_json,'$.close') AS price,json_extract(record_json,'$.signals') AS signals,json_extract(record_json,'$.observed_at_utc') AS observed_at_utc,json_extract(record_json,'$.traded_amount_krw') AS amount,json_extract(record_json,'$.turnover_available') AS turnover,json_extract(record_json,'$.provisional') AS provisional,json_extract(record_json,'$.pattern_confirmed') AS confirmed,json_extract(record_json,'$.source') AS source FROM blue_provisional_pattern_rows_v1 WHERE snapshot_id=? AND code IN ("+codes.map(()=>'?').join(',')+')',[id,...codes]):{rows:[]};
     const items=records.rows.map(r=>{
@@ -138,14 +154,16 @@ export async function tursoPublishedProvisional(env:Env,p:URLSearchParams,factor
         (available?amount!==null&&Number.isSafeInteger(amount)&&amount>0:amount===null));
       const diagnostics=JSON.parse(String(r.diagnostics));
       if(!available)diagnostics.amount_ratio20=null;
+      const best=bestByCode.get(code);
+      const historical=historyReady&&best?{r159_pattern_n_10d:best.n,r159_pattern_up_10d:best.up,r159_pattern_label_10d:best.label.slice(0,150),r159_pattern_mean_10d:best.mean,r159_pattern_median_10d:best.median,r159_pattern_signal_days_10d_json:JSON.stringify(best.days)}:{};
       return {code,name:String(r.name||code).slice(0,70),price,signals,observed_at_utc:at,turnover_available:available,traded_amount_krw:amount,
-        extras:{...diagnostics,traded_amount_krw:amount,provisional_candle_features:featuresByCode.get(code)??null},provisional:true,pattern_confirmed:false};
+        extras:{...diagnostics,...historical,traded_amount_krw:amount,provisional_candle_features:featuresByCode.get(code)??null,provisional_research_reference:historyReady?reference:null,provisional_snapshot_id:id},provisional:true,pattern_confirmed:false};
     });
     items.sort((a,b)=>codes.indexOf(a.code)-codes.indexOf(b.code));
     check(items.length===codes.length&&items.every((r,i)=>r.code===codes[i]));
     // EOD takes priority even if it arrived while reading this generation.
     if((await eod()).rows.length)return {...empty,data_status:'VERIFIED_EOD_AVAILABLE'};
-    return {...empty,data_status:'KIS_PROVISIONAL_PATTERNS',q,sort,total:pool.length,unfiltered_total:total,ai_count:aiCount,ai_only:appliedAiOnly,ai_evidence_count:evidenceCount,matched_count:matched,
+    return {...empty,data_status:'KIS_PROVISIONAL_PATTERNS',q,sort,total:pool.length,unfiltered_total:basePool.length,history_ready:historyReady,pattern_filter_applied:appliedPattern,ai_count:aiCount,ai_only:appliedAiOnly,ai_evidence_count:evidenceCount,matched_count:matched,
       observed_count:meta.observed,eligible_count:meta.eligible,turnover_available_count:meta.quote_coverage.turnoverAvailable,
       reference_day:reference,scan_asof_utc:scan,latest_observed_utc:latest,snapshot_id:id,items};
   }finally{db.close();}
