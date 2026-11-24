@@ -1,7 +1,7 @@
 import {useEffect,useState} from 'react';
 type Sector={code:string;name:string;change_pct:number;relative_pct:number;turnover_share_pct:number|null;relative_delta_pp:number|null;share_delta_pp:number|null};
 type Flow={day:string;foreign:string|null;institution:string|null;individual:string|null};
-type Market={market:string;index:number;change_pct:number;up:number|null;down:number|null;flat:number|null;breadth_pct:number|null;sectors:Sector[];flow_status:string;flows:Flow[]};
+type Market={sector_coverage?:{received:number;accepted:number;summary_rows:number;excluded_rows:number;status:string};market:string;index:number;change_pct:number;up:number|null;down:number|null;flat:number|null;breadth_pct:number|null;sectors:Sector[];flow_status:string;flows:Flow[]};
 type Snapshot={status:string;receipt_day:string;observed_at_utc:string;comparison_receipt_day:string|null;capture_days:number;state:string;markets:Market[]};
 const fmt=(x:number|null,unit='%')=>x===null?'미확인':(x>0?'+':'')+x.toFixed(2)+unit;
 const flow=(x:string|null)=>x==='BUY'?'순매수':x==='SELL'?'순매도':x==='FLAT'?'보합':'미확인';
@@ -25,6 +25,7 @@ export default function MarketRotation({api}:{api:string}){
  <div className="blue-research-card"><strong>향후 시나리오 및 대응 체크포인트</strong><p>반등 지속: 지수 상승과 상승 종목 확산, 주도 업종 강세 및 외국인 수급 개선이 함께 확인될 때 지속 여부를 검토합니다. 폭 축소·수급 반전은 반대 증거입니다.</p><p>횡보·바닥 확인: 지수와 시장 폭이 엇갈리거나 주도 업종이 반복 교체되면 추가 확인을 우선합니다. 직전 저점 이탈은 무효화 조건입니다.</p><p>재하락: 지수 하락과 하락 종목 확산, 외국인 순매도가 함께 이어지는지 확인합니다. 관찰 강화·위험 노출 축소 여부를 검토할 수 있습니다. 지수·폭 회복은 반대 증거입니다.</p><small>VIX 현물·선물 구조, 미국 지수, 주요 경제 일정은 아직 미연동입니다.</small></div>
  <strong>업종 상대강도 레이더</strong><p>시장 대비 등락률 차이(%p)와 KIS가 제공하는 거래대금 비중입니다. 비중은 순매수 금액이 아니며 업종 분류가 중복될 수 있습니다.</p>
  <div className="blue-periods">{['KOSPI','KOSDAQ'].map(m=><button type="button" key={m} aria-pressed={scope===m} onClick={()=>{setScope(m);setAll(false);}}>{m}</button>)}</div>
+ {market?.sector_coverage&&<p className="blue-note">업종 응답 {market.sector_coverage.received}행 · 유효 {market.sector_coverage.accepted} · 시장 요약 제외 {market.sector_coverage.summary_rows} · 오류 제외 {market.sector_coverage.excluded_rows}{market.sector_coverage.status==='PARTIAL'?' · 일부 업종만 비교':''}</p>}
  <label>정렬 <select value={sort} onChange={e=>setSort(e.target.value)}><option value="relative">시장 대비 강도</option><option value="share">거래대금 비중</option><option value="change">직전 수집 대비 강도 변화</option><option value="shareChange">직전 수집 대비 비중 변화</option></select></label>
  <small>{data.comparison_receipt_day?'직전 수집일 '+data.comparison_receipt_day+' 비교 · 거래일 동일성 미검증':'비교할 이전 수집 자료 없음'} · 확보 수집일 {data.capture_days}일(최근 최대 6일)</small>
  {sectors.slice(0,all?100:10).map(s=><div className="blue-research-card" key={s.code}><strong>{s.name} <small>{s.code}</small></strong><div className="blue-metrics"><div className="blue-metric"><small>등락률</small><b>{fmt(s.change_pct)}</b></div><div className="blue-metric"><small>시장 대비</small><b>{fmt(s.relative_pct,'%p')}</b></div><div className="blue-metric"><small>거래대금 비중</small><b>{s.turnover_share_pct===null?'미확인':s.turnover_share_pct.toFixed(2)+'%'}</b></div></div><p>강도 변화 {fmt(s.relative_delta_pp,'%p')} · 비중 변화 {fmt(s.share_delta_pp,'%p')}</p></div>)}
