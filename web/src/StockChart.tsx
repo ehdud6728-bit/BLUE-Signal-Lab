@@ -13,7 +13,7 @@ type Setup={code:string;label:string;factors:string[];factor_count:number;total_
 type Stats={zone_reaction?:ZoneReactionStats;version:string;asof:string;status:string;history_start:string|null;history_end:string;method?:string;limitations?:string[];active_factors?:{code:string;label:string}[];candidate_count?:number;eligible_candidate_count?:number;baseline?:Record<string,Horizon>;sector_lag?:{status:string;reason?:string};setups:Setup[]};
 type Payload={status:string;chart?:{bars:Bar[];asof:string};stats?:Stats;message?:string};
 type LineCandidate={signal:string;price:number};
-type Props={code:string;day:string;name:string;supplyPrice?:number|null;supplyGrade?:string;lineCandidates?:LineCandidate[];highlightThreshold?:number|null;highlightSamplesMin?:number;analysisMode?:boolean;researchBackend?:'turso'|'d1'};
+type Props={provisionalSnapshot?:string;code:string;day:string;name:string;supplyPrice?:number|null;supplyGrade?:string;lineCandidates?:LineCandidate[];highlightThreshold?:number|null;highlightSamplesMin?:number;analysisMode?:boolean;researchBackend?:'turso'|'d1'};
 
 function useChartResize(container:React.RefObject<HTMLDivElement|null>, fn:(element:HTMLDivElement)=>IChartApi, deps:unknown[]){
   useEffect(()=>{
@@ -174,18 +174,19 @@ function Evidence({stats,highlightThreshold,highlightSamplesMin}:{stats:Stats;hi
     <p className="blue-caution">이 결과는 당일 조건을 보고 과거 사례를 찾아본 탐색적 비교입니다. 여러 조합을 시험한 선택 편향, 짧은 표본, 20거래일 결과 중첩, 수정주가·거래비용 미반영으로 인해 미래 성과를 보장하지 않습니다. 업종 대장주 선행/후발 여부는 별도 업종과 과거 시계열이 확보되기 전에는 판정하지 않습니다.</p>
   </div>;
 }
-export default function StockChart({code,day,name,lineCandidates,highlightThreshold=70,highlightSamplesMin=8,analysisMode=false,researchBackend='d1'}:Props){
+export default function StockChart({code,day,name,lineCandidates,highlightThreshold=70,highlightSamplesMin=8,analysisMode=false,researchBackend='d1',provisionalSnapshot}:Props){
   const [data,setData]=useState<Payload|null>(null);const [error,setError]=useState('');const [loading,setLoading]=useState(true);
   const [reloadKey,setReloadKey]=useState(0);
   useEffect(()=>{
     const ctrl=new AbortController();setLoading(true);setData(null);setError('');
-    const url=new URL(API+(analysisMode?'/api/analysis/symbol':researchBackend==='turso'?'/api/research/chart':'/api/chart'));
+    const url=new URL(API+(provisionalSnapshot?'/api/research/provisional-detail':analysisMode?'/api/analysis/symbol':researchBackend==='turso'?'/api/research/chart':'/api/chart'));
     url.searchParams.set('code',code);url.searchParams.set(analysisMode?'asof':'date',day);
+    if(provisionalSnapshot)url.searchParams.set('snapshot_id',provisionalSnapshot);
     fetch(url.toString(),{credentials:'include',cache:'no-store',signal:ctrl.signal}).then(async r=>{
       const x=await r.json() as Payload;if(!r.ok)throw new Error(x.message||`차트 API ${r.status}`);return x;
     }).then(x=>setData(x)).catch(e=>{if(!ctrl.signal.aborted)setError(String(e));}).finally(()=>{if(!ctrl.signal.aborted)setLoading(false);});
     return ()=>ctrl.abort();
-  },[code,day,reloadKey,analysisMode,researchBackend]);
+  },[code,day,reloadKey,analysisMode,researchBackend,provisionalSnapshot]);
   const hasR159Highlight=!!data?.stats?.setups?.some(s=>{
     const x=s.horizons?.['10'];return highlightThreshold!==null&&!!x&&x.n>=highlightSamplesMin&&x.up_pct!==null&&x.up_pct>=highlightThreshold;
   });
@@ -196,7 +197,8 @@ export default function StockChart({code,day,name,lineCandidates,highlightThresh
     [b.o,b.h,b.l,b.c].every(v=>typeof v==='number'&&Number.isFinite(v)&&v>0)&&
     b.h>=Math.max(b.o,b.c,b.l)&&b.l<=Math.min(b.o,b.c,b.h));
   return <section className={'blue-chart-panel'+(hasR159Highlight?' r159-tomato-stock':'')}>
-    <div className="blue-chart-header"><h3>{name} · 실제 과거 일봉 차트</h3><span>종가(EOD) · {day}까지</span></div>
+    <div className="blue-chart-header"><h3>{name} · 실제 과거 일봉 차트</h3><span>{provisionalSnapshot?'KIS 잠정 일봉':'종가(EOD)'} · {day}까지</span></div>
+    {provisionalSnapshot&&<p className="blue-chart-info">마지막 캔들은 미확정입니다. 과거 성과는 직전 거래일까지 종료된 사례만 사용합니다. 표시 구간은 저장 용량에 따라 축소될 수 있습니다.</p>}
     {loading&&<p className="blue-chart-info">실제 일봉을 불러오고 있습니다…</p>}
     {error&&<div className="r15108-chart-error" role="status"><p className="blue-chart-error">{error}</p>
       <small>{name} ({code}) · {day}의 {researchBackend==='turso'?'Turso 연구 차트':'D1 차트'} 저장 여부를 확인해 주세요. 날짜가 다른 차트나 이후 가격으로 대체하지 않습니다.</small>
@@ -218,7 +220,7 @@ export default function StockChart({code,day,name,lineCandidates,highlightThresh
       <IndicatorChart bars={data.chart.bars} type="rsi"/>
       <IndicatorChart bars={data.chart.bars} type="slow"/>
       <IndicatorChart bars={data.chart.bars} type="macd"/>
-      <div className="blue-chart-note">가격대별 누적 거래량은 저장된 확정 일봉으로 재계산한 추정치입니다. 기존 구형 매물대 수치와 다를 수 있습니다. 수정주가가 아닌 원본 가격이며 미래 일봉은 포함하지 않습니다.</div>
+      <div className="blue-chart-note">가격대별 누적 거래량은 {provisionalSnapshot?'과거 일봉 및 KIS 잠정 일봉':'저장된 확정 일봉'}으로 재계산한 추정치입니다. 기존 구형 매물대 수치와 다를 수 있습니다. 수정주가가 아닌 원본 가격이며 미래 일봉은 포함하지 않습니다.</div>
       <ZoneReactionPanel data={data.stats?.zone_reaction??null}/>
       {data.stats&&<Evidence stats={data.stats} highlightThreshold={highlightThreshold} highlightSamplesMin={highlightSamplesMin}/>}
       <p className="blue-attribution">차트 제공: <a href="https://www.tradingview.com/" target="_blank" rel="noopener noreferrer">TradingView Lightweight Charts™</a></p>
