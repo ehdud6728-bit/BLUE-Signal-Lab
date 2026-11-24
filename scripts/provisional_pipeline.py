@@ -18,6 +18,7 @@ def run(history_path,quote_prefix,day,now,output):
     result["history_metadata"]=history_meta
     result["quote_coverage"]=meta
     result["pattern_confirmed"]=False
+    result["scan_asof_utc"]=pd.Timestamp(now).tz_convert("UTC").isoformat()
     Path(output).write_text(json.dumps(result,ensure_ascii=False,default=str,allow_nan=False))
     return result
 
