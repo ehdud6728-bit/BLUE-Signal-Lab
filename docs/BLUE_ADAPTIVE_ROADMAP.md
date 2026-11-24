@@ -60,3 +60,10 @@
 - 동일 기준일 감사 EOD 및 직전 5/10개 감사일의 가격, 직전 5개 거래대금 평균 사용. 대장: 당일 거래대금 5억원 이상, 5관측일 수익률 양수, 10관측일 +3% 이상 상위. 후발: 10관측일 -3~+3%, 5관측일 0초과~3%, 당일 거래대금 5억원 및 직전 5관측일 평균 대비 1.2배 이상, 대장보다 10일 수익률 낮음. 대장 없는 업종은 후발 판정 보류. 동일 기준일 신호 감사 통과 시 BLUE 기술신호 병기·후발 우선 정렬, 미확인은 null. 임의 탐색용 기준이며 수익률/순환매 성공 확률 입증 아님. 기업행동·거래일 연속성·과거 구성 및 독립 검증 필요.
 - `blue_rotation_leaders_capture.yml`: plan 무조회, inspect 공식 마스터/읽기 검증만, apply 분리된 해시 검증 스냅샷 저장. 선택 `refresh_trends=true`는 apply에서 기존 지수 재수집과 직전 사분면 산출을 먼저 수행. 별도 API/웹 카드, 기존 순환매/검색/골드·토마토·장바구니 변경 없음. 외국인·기관 3/5/10관측일 방향 및 글로벌 지수+VIX 조건부 시장 판단 강화. 생성형 AI/VIX 선물/경제 이벤트/자동 스케줄은 후속.
 - 공식 마스터 명세: https://github.com/koreainvestment/open-trading-api/blob/main/stocks_info/kis_kospi_code_mst.py 및 https://github.com/koreainvestment/open-trading-api/blob/main/stocks_info/kis_kosdaq_code_mst.py . 실제 다운로드/업종 매핑/운영 EOD 가용성/테스트·배포 미확인.
+
+
+## 2026-11-25 개선 업종 후보 EOD 날짜 정합성 복구
+- [실행 #45422104389](https://github.com/ehdud6728-bit/BLUE-Signal-Lab/actions/runs/45422104389)에서 업종 추세 136/136개 저장, 해외 지수 4/5개, KIS 종목 마스터 KOSPI 745/KOSDAQ 1,346개 정상 수집 확인. 최종 후보 분석은 LEADERS_EOD_HISTORY_REQUIRED 실패로 후보 저장 미완료.
+- 오류의 정확한 대상 날짜는 원래 로그에 없으므로 미확정. 최신 저장 추세의 기준일과 EOD 감사 날짜/원장 건수/출처/직전 관측일을 비교하고 누락·불일치 날짜를 로그에 출력한다. 최근 최대 7개 기존 추세 세대에서 같은 기준일 EOD 11개를 검증한 이전 세대가 있으면 해당 날짜에 한해 후보를 산출하며 최신 기준일과 이전 분석일을 구분 표시한다. 서로 다른 기준일 지수와 종목 시세 혼합 금지. 정합 세대 없으면 중단.
+- 신규 추세 수집부터 실제 벤치마크 관측일 목록을 보존하고 정확히 일치한 11개 거래일의 감사 원장과 행수만 사용. 이전 스냅샷은 감사일 순서와 직전 기준일 검증을 적용하며 전체 거래일 연속성 미검증 표시. 기존 EOD/추세 자료 수정 없음. 원인 확인 및 운영 재실행 전까지 복구 성공 미확정.
+- 재실행: blue_rotation_leaders_capture.yml, mode=inspect, refresh_trends=false. EOD 누락이면 기존 blue_turso_daily_verified_eod_auto.yml 또는 정확일 범위 복구 워크플로 사용. 새 업종 지수 수집 불필요.

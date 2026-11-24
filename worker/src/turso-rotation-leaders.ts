@@ -26,6 +26,7 @@ export async function tursoRotationLeaders(env:Env,factory:Factory=createClient,
     !day(s.trend_receipt_day)||s.trend_receipt_day>s.receipt_day||!/^[a-f0-9]{64}$/.test(s.trend_sha256)||
     !['KOSPI','KOSDAQ'].every(m=>/^[a-f0-9]{64}$/.test(s.master_hashes?.[m]))||
     !['AUDITED','MISSING','UNAVAILABLE'].includes(s.signal_status)||s.sector_limit!==12||!Array.isArray(s.markets)||s.markets.length!==2)throw Error('LEADERS_INVALID');
+  if(s.latest_trend_day!==undefined&&(!day(s.latest_trend_day)||s.latest_trend_day<s.day||s.latest_trend_day>s.receipt_day||!['AUDITED_DATES_LEGACY','EXACT_BENCHMARK_DATES'].includes(s.reference_basis)))throw Error('LEADERS_ALIGNMENT_INVALID');
   const thresholds=s.thresholds;
   if(!thresholds||thresholds.minimum_turnover_krw!==500000000||thresholds.leader_min_return10_pct!==3||thresholds.follower_return10_min_pct!==-3||thresholds.follower_return10_max_pct!==3||thresholds.follower_return5_max_pct!==3||thresholds.follower_min_turnover_ratio!==1.2)throw Error('LEADERS_THRESHOLDS_INVALID');
   const markets=new Set<string>();
