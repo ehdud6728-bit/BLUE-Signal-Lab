@@ -3,6 +3,8 @@
  * Turso's short EOD candle range. All methods are read-only.
  */
 import {createClient} from '@libsql/client/web';
+import {matchedRecent} from '../../web/src/recent-match';
+import {RECENT_ASOF} from '../../web/src/recent-pattern-data';
 import {technicalFilterWhere} from './technical-filters.ts';
 
 type ResearchEnv={TURSO_DATABASE_URL?:string;TURSO_AUTH_TOKEN?:string};
@@ -16,7 +18,7 @@ const ALLOWED=new Set(['BB20','BB30','BB40','ENV20','ENV40',
   'ENV20_LOWER_TOUCH']);
 const GC:Record<string,string>={rsi:'rsi_gc',slow14:'slow_14_3_3_gc',
   slow12:'slow_12_5_5_gc',slow20:'slow_20_12_12_gc',macd:'macd_gc'};
-const SORT=new Set(['recent','highest_gain','lowest_return','amount_surge','amount_decline']);
+const SORT=new Set(['recommended','recent','highest_gain','lowest_return','amount_surge','amount_decline']);
 const FLOOR=new Set([3,4,5,6,7,8,10,15,20,30]);
 export class InvalidResearchQuery extends Error{constructor(){super('INVALID_TURSO_RESEARCH_QUERY');}}
 function dayValid(x:string){if(!DATE.test(x))return false;
@@ -243,6 +245,7 @@ export async function tursoResearchSearch(env:ResearchEnv,p:URLSearchParams,fact
   const onlyPattern=p.get('only_pattern')||'0';if(!['0','1'].includes(onlyPattern))bad();
   const threshold=intParam(p.get('min_pattern_up')||'70',60,90);
   if(![60,70,80,90].includes(threshold))bad();
+  const highlight=p.get('highlight_up')||'70';if(!['off','60','70','80','90'].includes(highlight))bad();
   const floor=intParam(p.get('min_pattern_n')||'8',3,30);if(!FLOOR.has(floor))bad();
   const sort=(p.get('sort')||'recent').trim();if(!SORT.has(sort))bad();
   const nameArgs=[escapedLike(q),escapedLike(q),escapedLike(q)];
@@ -315,14 +318,15 @@ export async function tursoResearchSearch(env:ResearchEnv,p:URLSearchParams,fact
     const metrics=sort==='highest_gain'?`${high} AS observed_high_pct,`:
       sort==='lowest_return'?`${low} AS observed_low_pct,`:
       sort==='amount_surge'||sort==='amount_decline'?`${ratio} AS amount_ratio20_sort,`:'';
+    if(sort==='recommended'&&n>2000)throw Error('RECOMMENDATION_SORT_RANGE_TOO_LARGE');
     const result=await client.execute({sql:`${base} SELECT run_id,code,day,signal_names,
       close_price,supply_distance_pct,extras_json,stats_json,record_json,${metrics}
       row_sha256 FROM verified WHERE ${where} ORDER BY ${ordering} LIMIT ? OFFSET ?`,
-      args:[...args,limit,(page-1)*limit]});
+      args:[...args,sort==='recommended'?Math.max(1,n):limit,sort==='recommended'?0:(page-1)*limit]});
     // Read only exact-day audited candles for candidates on this result page.
     const candleMatches=new Set<string>();
     const candleFeatures=new Map<string,string[]>();
-    const candidates=result.rows.filter(r=>String(r.day)>'2026-11-23');
+    const candidates=result.rows.filter(r=>String(r.day)>RECENT_ASOF);
     for(let i=0;i<candidates.length;i+=40){
       const chunk=candidates.slice(i,i+40);
       const candles=await client.execute({sql:`SELECT e.trade_day,e.code,e.open,e.high,e.low,e.close
@@ -354,6 +358,7 @@ export async function tursoResearchSearch(env:ResearchEnv,p:URLSearchParams,fact
       const features=candleFeatures.get(String(r.day)+':'+String(r.code));
       if(features)extras.audited_candle_features=features;
       if(candleMatches.has(String(r.day)+':'+String(r.code)))extras.recent_candle_match='ENV20_BULL_CLOSE_MID_20261123';
+      for(const k of ['r159_pattern_up_10d','r159_pattern_n_10d','r159_pattern_label_10d','r159_pattern_signal_days_10d_json'])delete extras[k];
       const setups=Array.isArray(record.stats?.setups)?record.stats.setups:[];
       const best=setups.filter(s=>{
         const h=s?.horizons?.['10'];return Number.isInteger(Number(h?.n))&&Number(h.n)>=floor&&
@@ -378,8 +383,10 @@ export async function tursoResearchSearch(env:ResearchEnv,p:URLSearchParams,fact
         ...(sort==='lowest_return'?{observed_low_pct:r.observed_low_pct==null?null:Number(r.observed_low_pct)}:{}),
         ...(sort==='amount_surge'||sort==='amount_decline'?{amount_ratio20_sort:r.amount_ratio20_sort==null?null:Number(r.amount_ratio20_sort)}:{})};
     });
+    const rank=(r:typeof items[number])=>{const m=matchedRecent(r.day,r.signals,r.extras.audited_candle_features);const up=Number(r.extras.r159_pattern_up_10d);const tomato=highlight!=='off'&&Number.isFinite(up)&&up>=Number(highlight)&&Number(r.extras.r159_pattern_n_10d)>=floor;return {tier:(m.length?2:0)+(tomato?1:0),rate:m[0]?.positive_return_probability_pct??(tomato?up:0)};};
+    const ordered=sort==='recommended'?items.map(r=>({r,k:rank(r)})).sort((a,b)=>b.k.tier-a.k.tier||b.k.rate-a.k.rate||b.r.day.localeCompare(a.r.day)||a.r.code.localeCompare(b.r.code)).slice((page-1)*limit,page*limit).map(x=>x.r):items;
     return {storage:'TURSO',data_status:daily_counts.length?'AVAILABLE':'NOT_IMPORTED',
-      mode,start,end,q,sort,total:n,page,limit,items,daily_counts,
+      mode,start,end,q,sort,total:n,page,limit,items:ordered,daily_counts,
       high_complete:false,
       note:'Turso 감사 완료 연구 신호만 조회합니다. 이후 최고·최저가는 현재 저장된 후속 KRX 일봉의 부분 관측이며, 장중 시세가 아닙니다.'};
   },factory);
