@@ -686,7 +686,8 @@ function App(){
   // Never promote frequency growth or exploratory tomato observations to gold.
   // Only a future, independently verified Turso v2 recommendation can qualify.
   const goldSignal=(r:Signal)=>validatedResearchSignal(r,storageMode==='turso'&&searchSource==='patterns'&&patternBackend==='turso');
-  const stockHighlight=(r:Signal)=>researchCardClasses(goldSignal(r)!==null,patternUp(r)!==null);
+  const recentMatch=(r:Signal)=>patternBackend==='turso'&&r.day>'2026-11-23'&&r.signals.includes('ENV20_LOWER_TOUCH')&&r.extras?.recent_candle_match==='ENV20_BULL_CLOSE_MID_20261123';
+  const stockHighlight=(r:Signal)=>researchCardClasses(goldSignal(r)!==null||recentMatch(r),patternUp(r)!==null);
   const goldEvidenceBlock=(r:Signal)=>{const signal=goldSignal(r);
     return signal?<div className="r-research-gold-label" role="note">★ 검증 연구 추천 패턴 · {showSignal(signal)}</div>:null;};
   // Single presentation predicate shared by outline, basket evidence and search filter.
@@ -1173,7 +1174,7 @@ function App(){
                  <div><b>{displayName(r)}</b><div className="small">{r.code} · {amountLabel(r)}</div>
                  <div className="r15125-amount-change">{amountChange(r)}{sortedPercent(r)&&<span> · {sortedPercent(r)}</span>}</div>
                  {goldEvidenceBlock(r)}
-              <RecentPatternReference day={r.day} signals={r.signals}/>
+              <RecentPatternReference day={r.day} signals={r.signals} matched={recentMatch(r)}/>
                  {patternEvidenceBlock(r)}
                  {patternDays(r).length>0&&<div className="r1599-pattern-dates" title={patternDays(r).join(' · ')}>과거 신호일 {patternDays(r).slice(-3).join(' · ')}{patternDays(r).length>3?' 외':''}</div>}</div>
                  <button type="button" className={'r151-quick-add '+(inBasket(r)?'saved':'')}
@@ -1202,7 +1203,7 @@ function App(){
                 aria-label={`${displayName(r)} 상세 분석 보기`}>
               <div className="stock-top"><div className="stock-identity"><strong>{displayName(r)}</strong><span>{r.code} <span className="stock-dot">·</span> {r.day}</span></div><div className="stock-price"><b>{money(r.close_price)}<small>원</small></b><span>종가</span></div><ChevronRight size={19} className="stock-chevron"/></div>
               {goldEvidenceBlock(r)}
-              <RecentPatternReference day={r.day} signals={r.signals}/>
+              <RecentPatternReference day={r.day} signals={r.signals} matched={recentMatch(r)}/>
               {patternEvidenceBlock(r)}
               <PriceCompareMini compact data={r1593Prices[comparisonKey(r)]} baseline={r.close_price} loading={r1593Busy&&!r1593Prices[comparisonKey(r)]}
                 onRequest={()=>{void requestMissingQuote(r);}} requesting={r1595Requesting===comparisonKey(r)}
