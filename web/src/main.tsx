@@ -11,7 +11,7 @@ import SymbolAnalysisPanel from './SymbolAnalysisPanel';
 import TursoEodRecovery, {type TursoDay} from './TursoEodRecovery';
 import TursoResearchProgress from './TursoResearchProgress';
 import TursoProvisionalToday from './TursoProvisionalToday';
-import TursoProvisionalPatterns, {type ProvisionalSnapshot} from './TursoProvisionalPatterns';
+import {type ProvisionalSnapshot} from './TursoProvisionalPatterns';
 import TursoAiReadiness from './TursoAiReadiness';
 import {type TursoProgressStage} from './turso-research-progress';
 import {requestSearchPriority} from './search-priority';
@@ -53,7 +53,7 @@ import './ai-search-summary.css';
 // Keep the existing production API and Cloudflare Access cookies.
 const API = (import.meta.env.VITE_API_BASE || 'https://blue-signal-lab-api-v2.ehdud6728.workers.dev').replace(/\/+$/, '');
 type Signal = {code:string;name:string|null;day:string;signals:string[];close_price:number|null;supply_distance_pct:number|null;extras:Record<string,unknown>;
- observed_high_pct?:number|null;observed_low_pct?:number|null;amount_ratio20_sort?:number|null;research_recommendation?:unknown};
+ provisional?:boolean;observed_at_utc?:string;observed_high_pct?:number|null;observed_low_pct?:number|null;amount_ratio20_sort?:number|null;research_recommendation?:unknown};
 type Day = {day:string;observed_stocks:number;signal_events:number;matched_stocks:number};
 type ScanStatus = 'READY'|'NOT_IMPORTED'|'PENDING'|'FAILED'|'';
 type Line = {signal:string;price:number;gap_from_close_pct:number;slope_pct:number|null;status:string};
@@ -119,6 +119,7 @@ const showSignal=(t:string)=>({
   ENV20_LOWER_TOUCH:'엔벨(20,-20%) 하단 첫 터치',
 }[t]||t.replace(/^(?:BLUE|BB)(?=\d)/i,'B'));
 const money=(n:number|null|undefined)=>n==null?'—':n.toLocaleString('ko-KR');
+const observedKst=(s?:string)=>s&&Number.isFinite(Date.parse(s))?new Intl.DateTimeFormat('ko-KR',{timeZone:'Asia/Seoul',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hour12:false}).format(new Date(s)):'시각 미확인';
 
 function App(){
   // Turso is the primary source for verified EOD. D1 is the fallback for
@@ -252,7 +253,7 @@ function App(){
   const [r1593AutoStatus,setR1593AutoStatus]=useState('');
   const autoQuoteAttempted=useRef<Set<string>>(new Set());
   useEffect(()=>{
-    if(activeView!=='research'||!rows.length)return;
+    if(activeView!=='research'||!rows.length||rows.some(r=>r.provisional))return;
     const ctrl=new AbortController();setR1593Busy(true);setR1593Error('');setR1593Prices({});
     setR1593AutoStatus('');
     const readPrices=patternBackend==='turso'?fetchComparedTursoFirst:fetchCompared;
@@ -317,7 +318,7 @@ function App(){
   useEffect(()=>{
     // Turso research records alone are not proof of D1 queue enrollment.
     // Avoid implicit D1 writes/expensive reads while the D1 backend is down.
-    if(activeView!=='research'||!rows.length||patternBackend==='turso')return;
+    if(activeView!=='research'||!rows.length||rows.some(r=>r.provisional)||patternBackend==='turso')return;
     const ctrl=new AbortController();let count=0;let timer=0;
     const priority=rows.filter(x=>/^\d{6}$/.test(x.code)&&x.close_price!==null&&x.close_price>0)
       .filter((x,i,a)=>a.findIndex(y=>y.code===x.code)===i).slice(0,8);
@@ -553,7 +554,12 @@ function App(){
           !['KIS_PROVISIONAL_PATTERNS','NOT_PUBLISHED','VERIFIED_EOD_AVAILABLE'].includes(live.data_status))
           throw Error('당일 잠정 패턴 응답 검증 실패');
         if(live.data_status==='KIS_PROVISIONAL_PATTERNS'){
-          setRows([]);setDays([]);setSelected(null);setAiCount(null);setAiOnly(false);
+          // Reuse the normal search-card data model, without confirmed outcomes.
+          setRows(live.items.map(r=>({code:r.code,name:r.name===r.code?null:r.name,day:live.day,
+            signals:r.signals,close_price:r.price,supply_distance_pct:null,extras:r.extras||{},
+            provisional:true,observed_at_utc:r.observed_at_utc})));
+          setR1593Prices({});setR1593Busy(false);setR1593Error('');setR1593AutoStatus('');setR1595RequestNote('');
+          setDays([]);setSelected(null);setAiCount(null);setAiOnly(false);
           setTotal(live.total);setAllCount(live.total);setPage(p);setDataStatus('');
           setAppliedNameQuery(queryName);setAppliedAmountEok(queryAmountEok);
           setAppliedSort(liveSort);setResultSort(liveSort);setProvisionalResult(live);
@@ -734,12 +740,12 @@ function App(){
   const extra=(r:Signal,k:string):unknown=>r.extras?.[k];
   const num=(r:Signal,k:string):number|null=>{const v=extra(r,k);if(v==null||v==='')return null;const n=Number(v);return Number.isFinite(n)?n:null;};
   // Only verified EOD chart evidence is eligible: selected floor 3-30, default 8.
-  const patternUp=(r:Signal)=>{const p=num(r,'r159_pattern_up_10d');const n=num(r,'r159_pattern_n_10d');
+  const patternUp=(r:Signal)=>{if(r.provisional)return null;const p=num(r,'r159_pattern_up_10d');const n=num(r,'r159_pattern_n_10d');
     return highlightMin!==null&&n!==null&&n>=patternSampleMin&&p!==null&&p>=highlightMin?p:null;};
   // Never promote frequency growth or exploratory tomato observations to gold.
   // Only a future, independently verified Turso v2 recommendation can qualify.
-  const goldSignal=(r:Signal)=>validatedResearchSignal(r,storageMode==='turso'&&searchSource==='patterns'&&patternBackend==='turso');
-  const recentMatch=(r:Signal)=>patternBackend==='turso'&&matchedRecent(r.day,r.signals,r.extras?.audited_candle_features,true).length>0;
+  const goldSignal=(r:Signal)=>r.provisional?null:validatedResearchSignal(r,storageMode==='turso'&&searchSource==='patterns'&&patternBackend==='turso');
+  const recentMatch=(r:Signal)=>!r.provisional&&patternBackend==='turso'&&matchedRecent(r.day,r.signals,r.extras?.audited_candle_features,true).length>0;
   const stockHighlight=(r:Signal)=>researchCardClasses(goldSignal(r)!==null||recentMatch(r),patternUp(r)!==null);
   const goldEvidenceBlock=(r:Signal)=>{const signal=goldSignal(r);
     return signal?<div className="r-research-gold-label" role="note">★ 검증 연구 추천 패턴 · {showSignal(signal)}</div>:null;};
@@ -759,13 +765,14 @@ function App(){
     </div>;
   };
   const patternDays=(r:Signal):string[]=>{
+    if(r.provisional)return [];
     const raw=extra(r,'r159_pattern_signal_days_10d_json');
     try{const v=typeof raw==='string'?JSON.parse(raw):raw;
       return Array.isArray(v)?v.filter((s):s is string=>typeof s==='string'&&/^20\d{2}-\d{2}-\d{2}$/.test(s)&&s<=r.day).slice(-12):[];
     }catch{return [];}
   };
   const amountLabel=(r:Signal)=>{const n=num(r,'traded_amount_krw');
-    return n===null?'거래대금 미저장':`거래대금 ${(n/100000000).toLocaleString('ko-KR',{maximumFractionDigits:1})}억원`;};
+    return n===null?(r.provisional?'거래대금 미확보':'거래대금 미저장'):`거래대금 ${(n/100000000).toLocaleString('ko-KR',{maximumFractionDigits:1})}억원`;};
   const amountChange=(r:Signal):string=>{
     const ratio=num(r,'amount_ratio20');
     if(ratio===null||ratio<0)return '20일 평균 대비 미계산';
@@ -782,7 +789,7 @@ function App(){
   };
   // Search chips and the basket's immutable discovery record share one rule.
   const techBadges=(r:Signal)=>discoveryTechnicalBadges(r.extras);
-  const techFlag=(r:Signal,k:string)=>extra(r,k)===undefined?'미계산':flag(r,k)?'발생':'해당 없음';
+  const techFlag=(r:Signal,k:string)=>extra(r,k)==null?'미계산':flag(r,k)?'발생':'해당 없음';
   const maDown=(r:Signal)=>{const a=num(r,'ma20'),b=num(r,'ma40'),c=num(r,'ma60');return a===null||b===null||c===null?'미계산':a<b&&b<c?'해당':'해당 없음';};
   const fmt=(r:Signal,k:string,digits=2)=>{const n=num(r,k);return n==null?'—':n.toLocaleString('ko-KR',{minimumFractionDigits:digits,maximumFractionDigits:digits});};
   const flag=(r:Signal,k:string)=>extra(r,k)===true||['true','True','1'].includes(String(extra(r,k)));
@@ -801,7 +808,7 @@ function App(){
   const displayName=(r:Signal)=>r.name||String(r.extras?.name||r.extras?.Name||'종목명 미등록');
   // The API searches and sorts *before* paging, so every returned row belongs
   // to the complete filtered dataset, not a browser-only page subset.
-  const visibleRows=rows;
+  const visibleRows=rows.filter(r=>!r.provisional||activeProvisional!==null);
   const changeGc=(next:GcKey[],mode:'any'|'all'=gcLogic)=>{
     setGcFields(next);setGcLogic(mode);
     // Search in D1 across all stored result pages, not only the 100 rows currently loaded.
@@ -814,11 +821,11 @@ function App(){
   };
   const flip=(t:string)=>setSignals(a=>a.includes(t)?a.filter(s=>s!==t):[...a,t]);
   const inBasket=(r:Signal)=>basketIds.includes(`MANUAL:${r.code}:${r.day}`);
-  const canBasket=(r:Signal)=>/^\d{6}$/.test(r.code)&&typeof r.close_price==='number'&&Number.isFinite(r.close_price)&&r.close_price>0;
-  const basketBlocked=(r:Signal)=>!/^\d{6}$/.test(r.code)?'현재 장바구니는 숫자 6자리 종목코드만 지원합니다.':
+  const canBasket=(r:Signal)=>!r.provisional&&/^\d{6}$/.test(r.code)&&typeof r.close_price==='number'&&Number.isFinite(r.close_price)&&r.close_price>0;
+  const basketBlocked=(r:Signal)=>r.provisional?'잠정 발견가 저장 기능은 아직 연결되지 않았습니다.':!/^\d{6}$/.test(r.code)?'현재 장바구니는 숫자 6자리 종목코드만 지원합니다.':
     typeof r.close_price!=='number'||!Number.isFinite(r.close_price)||r.close_price<=0?'검색일 확정 종가가 없어 담을 수 없습니다.':
     basketRegularCount>=100?'장바구니 일반 관찰 100건 한도에 도달했습니다.':'장바구니에 담기';
-  const basketLabel=(r:Signal)=>inBasket(r)?'담김':!/^\d{6}$/.test(r.code)?'코드 제한':
+  const basketLabel=(r:Signal)=>inBasket(r)?'담김':r.provisional?'확정 대기':!/^\d{6}$/.test(r.code)?'코드 제한':
     !canBasket(r)?'가격 없음':basketRegularCount>=100?'한도 초과':'담기';
   const enqueueBasket=(item:BasketQuickAddRequest['item'],other?:Pick<BasketQuickAddRequest,'selectionOrigin'|'analysisMatched'>)=>{
     setBasketNotice(`${item.name||item.code} · 장바구니에 저장 중…`);
@@ -852,7 +859,7 @@ function App(){
   const refreshCurrentView=()=>{
     if(activeView==='research'){
       setR1594Refresh(v=>v+1);
-      if(storageMode==='turso'&&searchSource==='patterns')void loadPatternDates();
+      if(storageMode==='turso'&&searchSource==='patterns'){if(activeProvisional)void search(1,false);else void loadPatternDates();}
       else void loadDates().then(source=>{if(source==='d1'&&total!==null)void search(page,false);});
     }else if(activeView==='tracking')setR1594TrackingRefresh(v=>v+1);
     else if(activeView==='basket')setR1594BasketRefresh(v=>v+1);
@@ -864,7 +871,7 @@ function App(){
   // Collector RPC. It never enters the D1 queue, even when D1 is exhausted.
   async function requestMissingQuote(r:Signal){
     const key=comparisonKey(r);
-    if(r1595Requesting||r1595Timers.current.size>=3)return;
+    if(r.provisional||r1595Requesting||r1595Timers.current.size>=3)return;
     if(!/^[0-9A-Z]{6}$/.test(r.code)||!r.close_price||r.close_price<=0)return;
     setR1595Requesting(key);setR1595RequestNote('');
     try{
@@ -1098,33 +1105,18 @@ function App(){
         {storageMode==='turso'&&searchSource==='patterns'&&patternBackend==='turso'&&
           mode==='single'&&date===todayKST()&&!activeProvisional&&(!rows.length||dataStatus==='NOT_IMPORTED')&&
           <TursoProvisionalToday api={API} day={date} query={appliedNameQuery}/>}
-        {activeProvisional?<section className="panel result" ref={resultRef} id="results-panel">
-          <div className="result-heading"><h2><BarChart3 size={18}/> 검색된 종목 <small>{activeProvisional.total}건</small></h2><span className="eod-pill"><Clock3 size={13}/> KIS 잠정</span></div>
-          <form className="r1599-active-filters" onSubmit={e=>{e.preventDefault();void search(1,false,gcFields,gcLogic,undefined,undefined,techFields,techLogic,{q:localQuery,sort:resultSort});}}>
-            <label>종목명·코드 <input value={localQuery} onChange={e=>setLocalQuery(e.target.value)} placeholder="종목명 또는 코드"/></label>
-            <button type="submit" disabled={busy}>검색</button>
-          </form>
-          <details className="ai-search-help"><summary>GC·이동평균·정렬 조건</summary>
-            <div className="r1599-active-filters">
-              <label>GC 조건 <select value={gcLogic} onChange={e=>changeGc(gcFields,e.target.value as 'any'|'all')}><option value="any">하나 이상</option><option value="all">모두</option></select></label>
-              {GC_OPTIONS.map(x=><label key={x.key}><input type="checkbox" checked={gcFields.includes(x.key)} onChange={()=>changeGc(gcFields.includes(x.key)?gcFields.filter(k=>k!==x.key):[...gcFields,x.key])}/>{x.label}</label>)}
-              <label>이동평균 조건 <select value={techLogic} onChange={e=>changeTech(techFields,e.target.value as 'any'|'all')}><option value="any">하나 이상</option><option value="all">모두</option></select></label>
-              {TECH_OPTIONS.map(x=><label key={x.key}><input type="checkbox" checked={techFields.includes(x.key)} onChange={()=>changeTech(techFields.includes(x.key)?techFields.filter(k=>k!==x.key):[...techFields,x.key])}/>{x.label}</label>)}
-              <label>정렬 <select value={resultSort} onChange={e=>{const sort=e.target.value as ResultSort;setResultSort(sort);void search(1,false,gcFields,gcLogic,undefined,undefined,techFields,techLogic,{sort});}}><option value="recent">종목코드순</option><option value="amount_surge">거래대금 증가율순</option><option value="amount_decline">거래대금 감소율순</option></select></label>
-            </div>
-          </details>
-          <TursoProvisionalPatterns state={activeProvisional} loading={busy} onPage={p=>void search(p,false)} showSignal={showSignal}/>
-        </section>:<section className="panel result" ref={resultRef} id="results-panel">
-          <div className="result-heading"><h2><BarChart3 size={18}/> 검색된 종목 <small>{dataStatus==='NOT_IMPORTED'?'일봉 미수집':total===null?'검색 전':total+'건'}</small></h2><span className="eod-pill"><Clock3 size={13}/> EOD</span></div>
-          <p className="r1599-active-filters">검색 결과 기준 · 거래대금 {(appliedAmountEok??amountEok)>0?(appliedAmountEok??amountEok).toLocaleString('ko-KR')+'억원 이상':'전체'} · 토마토 강조 {highlightMin===null?'꺼짐':highlightMin+'% 이상 · 표본 '+patternSampleMin+'건 이상'}{onlyPattern&&highlightMin!==null?' · 해당 종목만 보기':''}{appliedAmountEok!==null&&appliedAmountEok!==amountEok?' · 거래대금 변경 미적용(검색 버튼을 누르세요)':''}</p>
-          <details className="ai-search-help"><summary>검색 기준 안내 ⓘ</summary><p>확정 일봉 기준이며 후속 관측 기간은 불완전할 수 있습니다. 골드: 연구 추천 · 토마토: 과거 10일 성과 · 대각선: 두 조건 충족. AI 추천 집계에는 최신 연구 조건의 과거 일치 사례가 포함되며 당시 추천을 뜻하지 않습니다. — 표시는 집계 불가입니다.</p></details>
+        <section className="panel result" ref={resultRef} id="results-panel">
+          <div className="result-heading"><h2><BarChart3 size={18}/> 검색된 종목 <small>{dataStatus==='NOT_IMPORTED'?'일봉 미수집':total===null?'검색 전':total+'건'}</small></h2><span className="eod-pill"><Clock3 size={13}/> {activeProvisional?'KIS 잠정':'EOD'}</span></div>
+          {activeProvisional&&<p className="r1599-active-filters">KIS 수집 {activeProvisional.observed_count.toLocaleString()} · 분석 {activeProvisional.eligible_count.toLocaleString()} · 검출 {activeProvisional.matched_count.toLocaleString()}종목 · 최근 수신 {observedKst(activeProvisional.latest_observed_utc||undefined)} · 미확정 일봉</p>}
+          <p className="r1599-active-filters">검색 결과 기준 · 거래대금 {(appliedAmountEok??amountEok)>0?(appliedAmountEok??amountEok).toLocaleString('ko-KR')+'억원 이상':'전체'} {activeProvisional?' · 과거 검증 통계 미적용':' · 토마토 강조 '}{activeProvisional?'':highlightMin===null?'꺼짐':highlightMin+'% 이상 · 표본 '+patternSampleMin+'건 이상'}{!activeProvisional&&onlyPattern&&highlightMin!==null?' · 해당 종목만 보기':''}{appliedAmountEok!==null&&appliedAmountEok!==amountEok?' · 거래대금 변경 미적용(검색 버튼을 누르세요)':''}</p>
+          <details className="ai-search-help"><summary>검색 기준 안내 ⓘ</summary><p>{activeProvisional?'KIS 잠정 시세 기준이며 확정 일봉이 아닙니다. 과거 성과·추천·장바구니 저장은 아직 적용하지 않습니다. ':'확정 일봉 기준이며 후속 관측 기간은 불완전할 수 있습니다. '} 골드: 연구 추천 · 토마토: 과거 10일 성과 · 대각선: 두 조건 충족. AI 추천 집계에는 최신 연구 조건의 과거 일치 사례가 포함되며 당시 추천을 뜻하지 않습니다. — 표시는 집계 불가입니다.</p></details>
           {aiOnly&&<p className="r1599-active-filters">AI 조건 일치 종목만 표시 · 과거 사례 포함</p>}
           {basketNotice&&<p className="r1595-request-status" role="status">{basketNotice}</p>}
           {total===0&&(appliedAmountEok??amountEok)>0&&<p className="r15125-result-scope" role="status">현재 거래대금 최소 {(appliedAmountEok??amountEok).toLocaleString('ko-KR')}억원 조건으로는 검색 대상이 없습니다. 저거래대금 하단 터치 종목도 찾으려면 거래대금을 ‘전체(0억원)’로 바꾸고 검색해 보세요.</p>}
           {r1593Error&&<p className="r1593-comparison-status" role="status">가격 비교: {r1593Error}</p>}
           {r1593AutoStatus&&patternBackend==='turso'&&<p className="r1593-comparison-status" role="status">{r1593AutoStatus.replace('KIS 최신가 자동 확인 ','최신가 ').replace('종목 · ',' · ')}</p>}
           {r1595RequestNote&&<p className="r1595-request-status" role="status">{r1595RequestNote}</p>}
-          {rows.length>0&&<details className="ai-search-help"><summary>시세 안내 ⓘ</summary><p>확정 일봉을 기본으로 표시합니다. KIS 최신가 조회 시 시세를 갱신하며 수신 시각과 체결 시각은 다를 수 있습니다.</p></details>}
+          {rows.length>0&&!activeProvisional&&<details className="ai-search-help"><summary>시세 안내 ⓘ</summary><p>확정 일봉을 기본으로 표시합니다. KIS 최신가 조회 시 시세를 갱신하며 수신 시각과 체결 시각은 다를 수 있습니다.</p></details>}
           <div className="gc-filter-panel r15102-unified-filter" aria-label="골든크로스 및 다중 조건 과거 패턴 필터">
               <div className="gc-filter-heading"><strong><ListFilter size={15}/> 골든크로스 필터</strong><span>검색 전체 결과에 적용 · 당일 발생만</span></div>
               <div className="gc-quick-actions">
@@ -1157,7 +1149,7 @@ function App(){
                 </div>}
                 <small className="r15116-tech-note">이동평균선 값이나 돌파 신호가 저장되지 않은 과거 종목은 해당 조건에 포함하지 않습니다. GC·거래대금 조건과 함께 적용됩니다.</small>
               </div>
-            <div className="r15102-tomato-inline" role="group" aria-label="토마토색 과거 패턴 기준">
+            {!activeProvisional&&<div className="r15102-tomato-inline" role="group" aria-label="토마토색 과거 패턴 기준">
               <label htmlFor="r1599-pattern">토마토 기준</label>
               <select id="r1599-pattern" value={patternThreshold} onChange={e=>{
                 const v=e.target.value as typeof patternThreshold;
@@ -1185,8 +1177,8 @@ function App(){
                   const checked=e.target.checked;setOnlyPattern(checked);
                   if(total!==null)void search(1,false,gcFields,gcLogic,undefined,{enabled:checked});
                 }}/> 해당 종목만 보기</label>
-            </div>
-            <p className="gc-filter-note">GC는 당일 발생 기준 · 토마토는 과거 10거래일 상승 관측 비율과 선택한 최소 표본 수를 함께 충족해야 합니다. 표본 3~7건은 소표본으로 통계적 신뢰도가 낮으며 미래 수익을 보장하지 않습니다.</p>
+            </div>}
+            <p className="gc-filter-note">{activeProvisional?'GC는 당일 잠정 일봉 계산 기준입니다.':'GC는 당일 발생 기준 · 토마토는 과거 10거래일 상승 관측 비율과 선택한 최소 표본 수를 함께 충족해야 합니다. 표본 3~7건은 소표본으로 통계적 신뢰도가 낮으며 미래 수익을 보장하지 않습니다.'}</p>
           </div>
           <div className="r15125-result-tools" role="search" aria-label="전체 검색 결과 종목명 검색 및 정렬">
             <label className="result-quick-search"><Search size={16}/><span className="sr-only">전체 페이지에서 종목명 또는 코드 찾기</span>
@@ -1217,10 +1209,10 @@ function App(){
                 if(total!==null)void search(1,false,gcFields,gcLogic,undefined,undefined,techFields,techLogic,{q:localQuery,sort:next});
               }}>
                 <option value="recent">최신 발견일순</option>
-                <option value="highest_gain">발견가 대비 확인 최고 수익률순</option>
-                <option value="lowest_return">발견가 대비 확인 최저 수익률순</option>
+                <option value="highest_gain" disabled={!!activeProvisional}>발견가 대비 확인 최고 수익률순</option>
+                <option value="lowest_return" disabled={!!activeProvisional}>발견가 대비 확인 최저 수익률순</option>
                 <option value="amount_surge">20일 평균 거래대금 증가율 높은순</option>
-                <option value="recommended" disabled={patternBackend!=='turso'}>추천 패턴 우선 (최대 2,000건)</option>
+                <option value="recommended" disabled={!!activeProvisional||patternBackend!=='turso'}>추천 패턴 우선 (최대 2,000건)</option>
                 <option value="amount_decline">20일 평균 거래대금 감소율 큰순</option>
               </select>
             </label>
@@ -1232,13 +1224,13 @@ function App(){
             </p>}
           {(appliedSort==='highest_gain'||appliedSort==='lowest_return')&&
             <p className="r15125-result-scope">최고·최저 수익률은 발견일 이후 저장된 검증 일봉 중 확인된 구간만 사용합니다. 후속 일봉이 없는 종목은 정렬 뒤쪽에 표시되며, 전체 보유기간 최저·최고를 보장하지 않습니다.</p>}
-          <div className="desktop-results tablewrap"><table><thead><tr><th>날짜</th><th>종목명 / 코드</th><th>신호</th><th>검색일 종가 / 최근 확인가 / 기간 최고가</th><th>RSI / GC</th><th>Slow(14,3,3) / GC</th><th>MACD / GC</th><th>돌파선 후보</th><th>상단 매물대</th></tr></thead><tbody>
+          <div className="desktop-results tablewrap"><table><thead><tr><th>날짜</th><th>종목명 / 코드</th><th>신호</th><th>{activeProvisional?'KIS 관측가':'검색일 종가 / 최근 확인가 / 기간 최고가'}</th><th>RSI / GC</th><th>Slow(14,3,3) / GC</th><th>MACD / GC</th><th>돌파선 후보</th><th>상단 매물대</th></tr></thead><tbody>
             {visibleRows.length?visibleRows.map((r,i)=><tr key={`${r.code}-${r.day}-${i}`} className={'clickable'+stockHighlight(r)} tabIndex={0} onClick={()=>openDetail(r)} onKeyDown={e=>{if(e.key==='Enter')openDetail(r);}}>
               <td>{r.day}</td><td><div className="r151-desktop-stock">
                  <div><b>{displayName(r)}</b><div className="small">{r.code} · {amountLabel(r)}</div>
                  <div className="r15125-amount-change">{amountChange(r)}{sortedPercent(r)&&<span> · {sortedPercent(r)}</span>}</div>
                  {goldEvidenceBlock(r)}
-              <RecentPatternReference day={r.day} signals={r.signals} matched={recentMatch(r)} features={r.extras?.audited_candle_features} onDetails={storageMode==="turso"?()=>{setAiResearchTab(recentMatch(r)?"recommend":"ranking");nav("ai");}:undefined}/>
+              {!r.provisional&&<RecentPatternReference day={r.day} signals={r.signals} matched={recentMatch(r)} features={r.extras?.audited_candle_features} onDetails={storageMode==="turso"?()=>{setAiResearchTab(recentMatch(r)?"recommend":"ranking");nav("ai");}:undefined}/>}
                  {patternEvidenceBlock(r)}
                  {patternDays(r).length>0&&<div className="r1599-pattern-dates" title={patternDays(r).join(' · ')}>과거 신호일 {patternDays(r).slice(-3).join(' · ')}{patternDays(r).length>3?' 외':''}</div>}</div>
                  <button type="button" className={'r151-quick-add '+(inBasket(r)?'saved':'')}
@@ -1250,11 +1242,11 @@ function App(){
                    {inBasket(r)?<CheckCircle2 size={16}/>:<ShoppingBasket size={16}/>}
                  </button>
                </div></td>
-              <td>{r.signals.map(s=><span className="tag" key={s}>{showSignal(s)}</span>)}{techBadges(r).map(t=><span className="r1591-search-tech" key={t}>{t}</span>)}{supplyTag(r)}</td><td className="r1593-price-cell"><strong>{money(r.close_price)}원</strong><small> · 검색일 종가</small>
-                <PriceCompareMini data={r1593Prices[comparisonKey(r)]} baseline={r.close_price} loading={r1593Busy&&!r1593Prices[comparisonKey(r)]}
+              <td>{r.signals.map(s=><span className="tag" key={s}>{showSignal(s)}</span>)}{techBadges(r).map(t=><span className="r1591-search-tech" key={t}>{t}</span>)}{supplyTag(r)}</td><td className="r1593-price-cell"><strong>{money(r.close_price)}원</strong><small> · {r.provisional?'KIS 관측가':'검색일 종가'}</small>
+                {r.provisional?<div className="r1599-mobile-meta">{observedKst(r.observed_at_utc)} 수신 · 미확정</div>:<PriceCompareMini data={r1593Prices[comparisonKey(r)]} baseline={r.close_price} loading={r1593Busy&&!r1593Prices[comparisonKey(r)]}
                   onRequest={()=>{void requestMissingQuote(r);}} requesting={r1595Requesting===comparisonKey(r)}
                   requestLabel={patternBackend==='turso'?'↻ KIS 최신가 조회':'↻ 시세 갱신'}
-                  requestDisabled={!!r1595Requesting||r1595Timers.current.size>=3}/>
+                  requestDisabled={!!r1595Requesting||r1595Timers.current.size>=3}/>}
               </td>
               <td>{fmt(r,'rsi')} <small>{crossed(r,'rsi_gc')}</small></td><td>{fmt(r,'slow_14_3_3_k')} / {fmt(r,'slow_14_3_3_d')} <small>{crossed(r,'slow_14_3_3_gc')}</small></td>
               <td>{fmt(r,'macd_12_26_9')} <small>{crossed(r,'macd_gc')}</small></td><td>{present(r,'valid_line_candidates_json')?`${validLines(r).length}개`:'미계산'}</td>
@@ -1265,14 +1257,14 @@ function App(){
               <div className="stock-card" role="button" tabIndex={0} onClick={()=>openDetail(r)}
                 onKeyDown={e=>{if(e.target===e.currentTarget&&(e.key==='Enter'||e.key===' ')){e.preventDefault();openDetail(r);}}}
                 aria-label={`${displayName(r)} 상세 분석 보기`}>
-              <div className="stock-top"><div className="stock-identity"><strong>{displayName(r)}</strong><span>{r.code} <span className="stock-dot">·</span> {r.day}</span></div><div className="stock-price"><b>{money(r.close_price)}<small>원</small></b><span>종가</span></div><ChevronRight size={19} className="stock-chevron"/></div>
+              <div className="stock-top"><div className="stock-identity"><strong>{displayName(r)}</strong><span>{r.code} <span className="stock-dot">·</span> {r.day}</span></div><div className="stock-price"><b>{money(r.close_price)}<small>원</small></b><span>{r.provisional?'KIS 관측가':'종가'}</span></div><ChevronRight size={19} className="stock-chevron"/></div>
               {goldEvidenceBlock(r)}
-              <RecentPatternReference day={r.day} signals={r.signals} matched={recentMatch(r)} features={r.extras?.audited_candle_features} onDetails={storageMode==="turso"?()=>{setAiResearchTab(recentMatch(r)?"recommend":"ranking");nav("ai");}:undefined}/>
+              {!r.provisional&&<RecentPatternReference day={r.day} signals={r.signals} matched={recentMatch(r)} features={r.extras?.audited_candle_features} onDetails={storageMode==="turso"?()=>{setAiResearchTab(recentMatch(r)?"recommend":"ranking");nav("ai");}:undefined}/>}
               {patternEvidenceBlock(r)}
-              <PriceCompareMini compact data={r1593Prices[comparisonKey(r)]} baseline={r.close_price} loading={r1593Busy&&!r1593Prices[comparisonKey(r)]}
+              {r.provisional?<div className="r1599-mobile-meta">{observedKst(r.observed_at_utc)} 수신 · 미확정</div>:<PriceCompareMini compact data={r1593Prices[comparisonKey(r)]} baseline={r.close_price} loading={r1593Busy&&!r1593Prices[comparisonKey(r)]}
                 onRequest={()=>{void requestMissingQuote(r);}} requesting={r1595Requesting===comparisonKey(r)}
                 requestLabel={patternBackend==='turso'?'↻ KIS 최신가 조회':'↻ 시세 갱신'}
-                requestDisabled={!!r1595Requesting||r1595Timers.current.size>=3}/>
+                requestDisabled={!!r1595Requesting||r1595Timers.current.size>=3}/>}
               <div className="stock-tags">{r.signals.slice(0,4).map(s=><span className="tag" key={s}>{showSignal(s)}</span>)}{r.signals.length>4&&<span className="tag tag-more">+{r.signals.length-4}</span>}{supplyTag(r)}</div>
               <div className="r1599-mobile-meta">{amountLabel(r)}</div>
               <div className="r15125-amount-change">{amountChange(r)}{sortedPercent(r)&&<span> · {sortedPercent(r)}</span>}</div>
@@ -1291,8 +1283,8 @@ function App(){
               {/* Quote refresh is now visible directly beside the saved quote above. */}
               </div>):<div className="mobile-empty"><Search size={30}/><strong>{appliedNameQuery?'전체 검색 결과에서 일치하는 종목이 없습니다.':total===0?'해당 조건의 종목이 없습니다.':'검색 조건을 선택해 주세요.'}</strong><p>{onlyPattern?'토마토 조건은 10거래일 패턴·최소 표본 수에 더해 선택한 골든크로스와 거래대금 조건도 모두 충족해야 합니다. GC 전체 종목 및 거래대금 전체로 비교해 보세요.':gcFields.length?'선택한 골든크로스 조건을 만족하는 종목이 없습니다.':'과거 거래일을 선택한 다음 검색 버튼을 누르세요.'}</p><button onClick={()=>nav('search')}>검색 조건 열기</button></div>}
           </div>
-          {total!==null&&total>100&&<div className="pager"><button disabled={busy||page===1} onClick={()=>{void search(page-1,false);}}>이전</button><span>{page} / {Math.ceil(total/100)}</span><button disabled={busy||page>=Math.ceil(total/100)} onClick={()=>{void search(page+1,false);}}>다음</button></div>}
-        </section>}
+          {total!==null&&total>(activeProvisional?.limit??100)&&<div className="pager"><button disabled={busy||page===1} onClick={()=>{void search(page-1,false);}}>이전</button><span>{page} / {Math.ceil(total/(activeProvisional?.limit??100))}</span><button disabled={busy||page>=Math.ceil(total/(activeProvisional?.limit??100))} onClick={()=>{void search(page+1,false);}}>다음</button></div>}
+        </section>
         {days.length>0&&<section className="panel daily-panel"><h2><CalendarDays size={18}/> 날짜별 요약</h2><div className="tablewrap"><table><thead><tr><th>날짜</th><th>관측 종목</th><th>신호 건수</th><th>신호 종목</th></tr></thead><tbody>{days.map(d=><tr key={d.day}><td>{d.day}</td><td>{d.observed_stocks}</td><td>{d.signal_events}</td><td>{d.matched_stocks}</td></tr>)}</tbody></table></div></section>}
         <p className="disclaimer"><AlertCircle size={14}/> RSI·MACD·유효선 후보·상단 매물대 강도는 연구용 계산값이며 현재가·실제 호가 매물대가 아닙니다. R0.8 이전 분석 기록은 재분석해야 신규 정보가 표시됩니다.</p>
         </div>
@@ -1308,18 +1300,18 @@ function App(){
     </nav>
     {selected&&<div className="detail-overlay" role="presentation" onMouseDown={e=>{if(e.target===e.currentTarget)closeDetail();}}>
       <section className="detail-sheet" role="dialog" aria-modal="true" aria-label={`${displayName(selected)} 상세 분석`}>
-        <div className="detail-handle" aria-hidden="true"/><div className="detail-toolbar"><button onClick={closeDetail} className="detail-back"><ArrowLeft size={19}/> 뒤로</button><span className="detail-eod">일봉 · 연구용</span><button onClick={closeDetail} className="detail-x" aria-label="상세 닫기"><X size={21}/></button></div>
-        <div className="detail-head"><div><small>{selected.code} · {selected.day}</small><h2>{displayName(selected)}</h2></div><div className="detail-close"><span>종가</span><strong>{money(selected.close_price)} <small>원</small></strong></div></div>
-        <PriceCompareMini compact data={r1593Prices[comparisonKey(selected)]} baseline={selected.close_price} loading={r1593Busy&&!r1593Prices[comparisonKey(selected)]}
+        <div className="detail-handle" aria-hidden="true"/><div className="detail-toolbar"><button onClick={closeDetail} className="detail-back"><ArrowLeft size={19}/> 뒤로</button><span className="detail-eod">{selected.provisional?'KIS 잠정 · 연구용':'일봉 · 연구용'}</span><button onClick={closeDetail} className="detail-x" aria-label="상세 닫기"><X size={21}/></button></div>
+        <div className="detail-head"><div><small>{selected.code} · {selected.day}</small><h2>{displayName(selected)}</h2></div><div className="detail-close"><span>{selected.provisional?'KIS 관측가':'종가'}</span><strong>{money(selected.close_price)} <small>원</small></strong></div></div>
+        {selected.provisional?<p className="r1599-mobile-meta">{observedKst(selected.observed_at_utc)} 수신 · 미확정 일봉</p>:<PriceCompareMini compact data={r1593Prices[comparisonKey(selected)]} baseline={selected.close_price} loading={r1593Busy&&!r1593Prices[comparisonKey(selected)]}
           onRequest={()=>{void requestMissingQuote(selected);}} requesting={r1595Requesting===comparisonKey(selected)}
           requestLabel={patternBackend==='turso'?'↻ KIS 최신가 조회':'↻ 시세 갱신'}
-          requestDisabled={!!r1595Requesting||r1595Timers.current.size>=3}/>
+          requestDisabled={!!r1595Requesting||r1595Timers.current.size>=3}/>}
         <div className="study-tags">{selected.signals.map(s=><span key={s}>{showSignal(s)}</span>)}</div>
-        <StockChart key={'chart-'+selected.code+'-'+selected.day} code={selected.code}
+        {selected.provisional?<p className="r159-data-note">당일 잠정 차트는 아직 연결되지 않았습니다. 아래는 저장된 당일 기술지표입니다.</p>:<StockChart key={'chart-'+selected.code+'-'+selected.day} code={selected.code}
           day={selected.day} name={displayName(selected)} researchBackend={patternBackend}
           supplyPrice={num(selected,'supply_reference_price')}
           supplyGrade={supplyGrade(selected)}
-          lineCandidates={validLines(selected).map(l=>({signal:l.signal,price:l.price}))} highlightThreshold={highlightMin} highlightSamplesMin={patternSampleMin}/>
+          lineCandidates={validLines(selected).map(l=>({signal:l.signal,price:l.price}))} highlightThreshold={highlightMin} highlightSamplesMin={patternSampleMin}/>}
         <h3 className="detail-section-title"><Activity size={17}/> 보조지표</h3>
         <div className="info-grid indicator-grid">
           <div><strong>RSI (14) / Signal (9)</strong><p className="indicator-value">{fmt(selected,'rsi')} <small>/ {fmt(selected,'rsi_signal')}</small></p><p className={flag(selected,'rsi_gc')?'positive':''}>{crossed(selected,'rsi_gc')} · 최근 GC {lastCross(selected,'rsi_last_gc')}</p></div>
@@ -1329,7 +1321,7 @@ function App(){
           <div><strong>Slow (20,12,12)</strong><p className="indicator-value">{fmt(selected,'slow_20_12_12_k')} <small>/ {fmt(selected,'slow_20_12_12_d')}</small></p><p>{crossed(selected,'slow_20_12_12_gc')} · 최근 GC {lastCross(selected,'slow_20_12_12_last_gc')}</p></div>
           <div><strong>상단 가격대별 추정 거래량 (이전 120봉)</strong><p className="indicator-value">{supplyGrade(selected)} <small>· {isSupplyV2(selected)?money(num(selected,'supply_reference_price'))+'원':'구형 기록'}</small></p><p>{isSupplyV2(selected)?`해당 구간 추정 ${money(num(selected,'supply_volume_est_shares'))}주 · 전체 비중 ${fmt(selected,'supply_bin_share_pct',2)}% · 최대 구간 대비 ${fmt(selected,'supply_strength_relative_pct',1)}%`:'차트의 새 거래량 분포를 확인하세요. 기존 스캔 값은 재분석 전까지 구형입니다.'}</p></div>
         </div>
-        <h3 className="detail-section-title"><BarChart3 size={17}/> 이동평균 배열·돌파 (확정 일봉)</h3>
+        <h3 className="detail-section-title"><BarChart3 size={17}/> 이동평균 배열·돌파 ({selected.provisional?'잠정 일봉':'확정 일봉'})</h3>
          <div className="r159-tech-grid">
            <div><b>역배열 (20&lt;40&lt;60)</b><strong>{maDown(selected)}</strong></div>
            <div><b>정배열 전환</b><strong>{techFlag(selected,'ma_to_up')}</strong></div>
@@ -1340,7 +1332,7 @@ function App(){
         <h3 className="detail-section-title"><CheckCircle2 size={17}/> 돌파 기준선 후보</h3>
         {present(selected,'valid_line_candidates_json')?(validLines(selected).length?<div className="line-list">{validLines(selected).map((l,i)=><div key={`${l.signal}-${i}`} className="line-card"><strong>{showSignal(l.signal)}</strong><span>선 가격 <b>{money(l.price)}원</b></span><span>종가와 차이 {l.gap_from_close_pct}%</span><span>기울기 {l.slope_pct==null?'미계산':l.slope_pct+'%'}</span></div>)}</div>:<p className="small">해당 날짜의 돌파 기준선 후보가 없습니다.</p>):<p className="small">R0.8로 다시 분석하면 돌파선 후보 정보가 표시됩니다.</p>}
         <div className="detail-disclaimer"><AlertCircle size={16}/>돌파선은 원본 Stock-Hunter 유효선과 동일하다고 검증되지 않았습니다. 상단 매물 강도도 체결가별 실제 매물량이 아니라 과거 일봉 기반 추정치입니다.</div>
-        <AiWidget key={'stock-'+selected.day+'-'+selected.code} kind="stock" date={selected.day} stock={selected}/>
+        {!selected.provisional&&<AiWidget key={'stock-'+selected.day+'-'+selected.code} kind="stock" date={selected.day} stock={selected}/>}
         <button className="detail-done" onClick={closeDetail}>종목 목록으로 돌아가기</button>
       </section>
     </div>}
