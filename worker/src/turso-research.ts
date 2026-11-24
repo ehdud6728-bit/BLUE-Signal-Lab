@@ -3,8 +3,8 @@
  * Turso's short EOD candle range. All methods are read-only.
  */
 import {createClient} from '@libsql/client/web';
-import {matchedRecent} from '../../web/src/recent-match';
-import {RECENT_ASOF} from '../../web/src/recent-pattern-data';
+import {matchedRecent} from '../../web/src/recent-match.ts';
+import {RECENT_ASOF} from '../../web/src/recent-pattern-data.ts';
 import {technicalFilterWhere} from './technical-filters.ts';
 
 type ResearchEnv={TURSO_DATABASE_URL?:string;TURSO_AUTH_TOKEN?:string};
