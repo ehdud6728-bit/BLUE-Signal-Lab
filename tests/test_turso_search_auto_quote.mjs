@@ -28,7 +28,8 @@ test('search automatic requests are bounded, independent from D1 and user click'
  assert.match(web,/autoQuoteAttempted\.current\.add\(today\+':'\+quoteWindow\+':'\+item\.code\)/);
  assert.match(web,/refreshKisQuoteToTurso\(item\.code,ctrl\.signal\)/);
  assert.match(web,/fetchComparedTursoOnly\(\[item\],ctrl\.signal\)/);
- assert.match(instant,/INSTANT_PER_MINUTE=12/);
+ assert.match(instant,/INSTANT_PER_MINUTE=20/);
+ assert.ok(web.includes('window.setTimeout(done,3100)'));
  assert.doesNotMatch(instant,/tokenP\(/);
 });
 
