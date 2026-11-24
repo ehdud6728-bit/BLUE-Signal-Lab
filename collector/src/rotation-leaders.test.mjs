@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
-import {classifyStocks,captureLeaders,selectAlignedTrend,masterMembership,resolveMembership} from './rotation-leaders.mjs';
+import {classifyStocks,captureLeaders,selectAlignedTrend,masterMembership,resolveMembership,publishLeaders,leaderStorageFailure} from './rotation-leaders.mjs';
 const row=(code,r5,r10,ratio,signals=[],amount=600000000,sectors=['0002'])=>({code,name:code,close:1000,r5,r10,amount_ratio:ratio,signals,amount,sectors});
 test('leaders and recovering followers require liquidity, true group and price recovery',()=>{
  const r=classifyStocks([row('000001',4,15,2),row('000002',2,0,2,['ENV20_LOWER_TOUCH']),row('000003',1,1,3),row('000004',-1,-10,4),row('000005',1,0,null),row('000006',1,0,3,[],100),row('000007',1,0,3,[],600000000,['0003'])],{code:'0002'});
@@ -49,4 +49,29 @@ test('KRX fallback requires exact requested day and group identities and interse
  assert.equal(bad.get('KOSPI/2010').source,'UNMAPPED');
  const rows=[row('000001',4,15,2,[],600000000,['0010']),row('000002',5,20,2,[],600000000,['0010'])];
  assert.deepEqual(classifyStocks(rows,targets[0],x=>r.codes.has(x.code)).leaders.map(x=>x.code),['000001']);
+});
+
+test('publication opens its own client and verifies partial snapshot before success',async()=>{
+ const snapshot={receipt_day:'2026-11-25',observed_at_utc:'2026-11-24T15:49:24Z',mapping_status:'PARTIAL',markets:[]};
+ let saved,closed=false,opened=0;
+ const factory=()=>{opened++;return {async execute(q){
+   if(typeof q==='string'){assert.match(q,/CREATE TABLE IF NOT EXISTS blue_rotation_leaders_v1/);return {rows:[]};}
+   if(q.sql.startsWith('INSERT')){saved=q.args;return {rows:[]};}
+   assert.equal(q.args[0],snapshot.receipt_day);
+   return {rows:[{payload_json:saved[2],payload_sha256:saved[3]}]};
+ },close(){closed=true;}};};
+ await publishLeaders(snapshot,factory,{url:'libsql://test.invalid',authToken:'fake'});
+ assert.equal(opened,1);assert.equal(closed,true);
+ assert.deepEqual(JSON.parse(saved[2]),snapshot);
+ assert.equal(saved[3],createHash('sha256').update(saved[2]).digest('hex'));
+});
+test('publication reports safe stage and provider code, never leaks provider message',async()=>{
+ const snapshot={receipt_day:'2026-11-25',observed_at_utc:'2026-11-24T15:49:24Z'};
+ let closed=false;
+ await assert.rejects(()=>publishLeaders(snapshot,()=>({async execute(q){
+   if(typeof q==='string')return {rows:[]};
+   throw Object.assign(Error('SECRET URL token'),{code:'HRANA_WEBSOCKET_ERROR'});
+ },close(){closed=true;}}),{}),{message:'LEADERS_STORAGE_WRITE_HRANA_WEBSOCKET_ERROR'});
+ assert.equal(closed,true);
+ assert.equal(leaderStorageFailure('RUNTIME',new ReferenceError('secret')),'LEADERS_STORAGE_RUNTIME_UNKNOWN_REFERENCEERROR');
 });
