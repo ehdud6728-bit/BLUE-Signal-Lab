@@ -36,3 +36,11 @@
 - 시황 1차: KIS 지수/상승·하락 종목 수와 일별 투자자 순매수 방향을 표시. 규칙 기반 시황 초안 및 반등 지속/횡보·바닥 확인/재하락 조건부 시나리오와 반대 증거. 생성형 AI, VIX 현물/선물, 미국 지수, 주요 이벤트 및 전망 성과 검증은 미연동이며 수치를 만들어 내지 않음.
 - 수동 `blue_market_rotation_capture.yml`의 plan(외부 호출 없음), inspect(수집, 쓰기 없음), apply(분리 테이블 저장+읽기 검증), 기존 API/웹 배포로 연결한다. 코드 구현 단계이며 실제 KIS 응답·이용권한·운영 검증은 아직 확인 전. 자동 실행은 수집 검증 이후 검토.
 - 공식 원천: https://apiportal.koreainvestment.com/apiservice , https://github.com/koreainvestment/open-trading-api/tree/main/examples_llm/domestic_stock/inquire_index_category_price , https://github.com/koreainvestment/open-trading-api/tree/main/examples_llm/domestic_stock/inquire_investor_daily_by_market .
+
+
+## 2026-11-24 시황·순환매 운영 검증 및 2차 개발
+- PR #169/170 병합. [실제 수집 #45409598502](https://github.com/ehdud6728-bit/BLUE-Signal-Lab/actions/runs/45409598502) apply 성공: KOSPI 응답 38행 중 유효 분류 37, 요약 1; KOSDAQ 응답 100행 중 유효 99, 지수 오류 1; 양 시장 일별 투자자 방향 10행씩, API 4회, 테스트 3개 통과, 저장 후 read-back 성공. 136개는 분류 수이며 고유 산업/테마 수를 의미하지 않는다. 사용자 API·웹 배포 완료 보고, 실제 화면 검증은 별도.
+- 이번 PR: 기존 KIS 토큰과 이전 시장 분류 스냅샷을 사용한 `blue_market_trends_capture.yml` (plan / inspect / apply). FHKUP03500100(국내 업종 기간별) 및 FHKST03030100(해외 지수 기간별) 조회. .DJI 공식 예제, .NDX/.SPX/.SOX/.VIX는 정확한 응답 코드 일치 및 실제 접근 권한 검증 전 후보. API 요청 경로/필드의 문서 확인은 실제 응답 성공과 별개. 수집일 현재 현지 일자는 미확정 가능성 때문에 보수적으로 제외. 최대 160회, 1.2초 순차 대기, HTTP 인증/제한 및 EGW00201 발생 시 중단. inspect에서는 시장별 2개 업종 및 벤치마크·해외 후보만, apply에서는 분류 전부 시도.
+- 최근 동일 벤치마크 관측일 26개 모두 일치한 업종만 5/10/20일 상대성과(업종/시장 가격비율 변화율) 및 10일 상대성과의 5관측일 전 대비 차이(%p) 산출. 부호에 따라 주도/개선/약화/소외/경계 분류. RRG 원리 참고한 자체 투명 산식, 정식 RRG 산식·순환 확률 아님. 거래일 달력·분류 변경·업종 구성·지수 사용 권한 및 독립 검증 남음.
+- 별도 `blue_market_trends_v1`에 압축된 파생 결과만 저장, 해시·read-back 검사, 별도 API/웹 카드. 외부 원시 자료·토큰·가격은 공개 Actions 로그에 출력하지 않음. 실제 수집 성공·운영 배포 미확인. 사분면의 시간 이동 연구, 대장/후발주, VIX 선물 구조, FOMC/기업 이벤트, 생성형 AI 및 시나리오 성과 추적은 후속.
+- 공식 문서: https://github.com/koreainvestment/open-trading-api/blob/main/backtester/kis_backtest/providers/kis/data.py ; https://github.com/koreainvestment/open-trading-api/tree/main/examples_llm/overseas_stock/inquire_daily_chartprice .

@@ -1,0 +1,38 @@
+name: BLUE Market Trends Capture
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        type: choice
+        options: [plan, inspect, apply]
+        default: plan
+        required: true
+  pull_request:
+    paths:
+      - 'collector/src/market-trends*'
+      - '.github/workflows/blue_market_trends_capture.yml'
+permissions:
+  contents: read
+concurrency:
+  group: blue-market-trends-capture
+  cancel-in-progress: false
+jobs:
+  capture:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm install --prefix collector --no-package-lock --no-audit --no-fund
+      - run: node --test collector/src/market-trends.test.mjs
+      - name: Capture dated market history
+        if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
+        env:
+          MODE: ${{ inputs.mode }}
+          TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
+          TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
+          KIS_APP_KEY: ${{ secrets.KIS_APP_KEY }}
+          KIS_APP_SECRET: ${{ secrets.KIS_APP_SECRET }}
+        run: node collector/src/market-trends.mjs "$MODE"

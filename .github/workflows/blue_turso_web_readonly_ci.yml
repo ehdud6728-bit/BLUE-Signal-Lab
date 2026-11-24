@@ -16,6 +16,8 @@ on:
       - 'web/src/price-compare.ts'
       - 'worker/src/turso-eod.ts'
       - 'worker/src/turso-market-rotation.ts'
+      - 'worker/src/turso-market-trends.ts'
+      - 'tests/test_turso_market_trends.mjs'
       - 'tests/test_turso_market_rotation.mjs'
       - 'worker/src/index.ts'
       - 'worker/src/turso-research.ts'
