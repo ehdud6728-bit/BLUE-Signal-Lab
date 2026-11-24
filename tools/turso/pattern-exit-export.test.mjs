@@ -8,13 +8,13 @@ function fixture({missing=false,badHash=false,researchMismatch=false,marketJump=
   db.exec(`CREATE TABLE blue_eod_ingest_audit_v1 (
     trade_day TEXT,row_count INTEGER,source TEXT,day_sha256 TEXT);
     CREATE TABLE blue_eod_daily_v1 (
-    trade_day TEXT,code TEXT,market TEXT,name TEXT,open INTEGER,high INTEGER,low INTEGER,close INTEGER);
+    trade_day TEXT,code TEXT,market TEXT,name TEXT,open INTEGER,high INTEGER,low INTEGER,close INTEGER,amount INTEGER);
     CREATE TABLE blue_research_signal_audit_v1 (
     trade_day TEXT,row_count INTEGER,observed_stocks INTEGER,
     signal_events INTEGER,source_payload_sha256 TEXT);
     CREATE TABLE blue_research_signals_v1 (
     trade_day TEXT,code TEXT,signal_names TEXT,source_payload_sha256 TEXT);`);
-  const rows=db.prepare('INSERT INTO blue_eod_daily_v1 VALUES (?,?,?,?,?,?,?,?)');
+  const rows=db.prepare('INSERT INTO blue_eod_daily_v1 VALUES (?,?,?,?,?,?,?,?,?)');
   const audit=db.prepare('INSERT INTO blue_eod_ingest_audit_v1 VALUES (?,?,?,?)');
   const researchAudit=db.prepare('INSERT INTO blue_research_signal_audit_v1 VALUES (?,?,?,?,?)');
   const signal=db.prepare('INSERT INTO blue_research_signals_v1 VALUES (?,?,?,?)');
@@ -24,7 +24,7 @@ function fixture({missing=false,badHash=false,researchMismatch=false,marketJump=
     signal.run(day,idx?'000002':'000001','BB20',badHash?'c'.repeat(64):'b'.repeat(64));
     for(let i=1;i<=1700-(missing&&idx?1:0);i++){
       rows.run(day,String(i).padStart(6,'0'),i%2?'KOSPI':'KOSDAQ',`테스트종목${i}`,
-        100,104,98,marketJump&&idx?102:101);
+        100,104,98,marketJump&&idx?102:101,1000000);
     }
   }
   const calls=[];
@@ -50,6 +50,7 @@ test('audited EOD, hashes and matched signal rows make a bounded read-only study
   assert.equal(x.signals.length,2);
   assert.equal(x.bars.length,4);
   assert.equal(x.bars[0].market,'KOSPI');
+  assert.equal(x.bars[0].amount,1000000);
   assert.deepEqual(x.signals.map(s=>s.stock_name_at_signal),['테스트종목1','테스트종목2']);
   assert.equal(x.market_breadth_by_day.length,6);
   const second=x.market_breadth_by_day.find(x=>x.day==='2026-11-19'&&x.scope==='ALL');
