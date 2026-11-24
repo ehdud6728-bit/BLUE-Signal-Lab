@@ -6,7 +6,7 @@
  * No token issuance, D1 reads/writes, orders, or minute bars.
  */
 import {createClient} from '@libsql/client/web';
-import {ageDays,getKisQuote,getKisDailyQuote,kstParts,marketsFor,parseQuote} from './core.mjs';
+import {ageDays,getKisQuote,getKisChartDailyQuote,kstParts,marketsFor,parseQuote} from './core.mjs';
 import {tursoDirectCachedToken} from './turso-direct.mjs';
 import {buildTursoMirrorStatements} from './turso-mirror.mjs';
 
@@ -186,7 +186,7 @@ export async function collectTursoProvisional(env,now=new Date(),deps={}){
       previous++;
       try{
         const json=afterClose
-          ?await (deps.quoteDaily||getKisDailyQuote)(env,found.token,'J',code,kst.date)
+          ?await (deps.quoteDaily||getKisChartDailyQuote)(env,found.token,'J',code,kst.date)
           :await (deps.quote||getKisQuote)(env,found.token,'J',code);
         const received=deps.receivedAt||new Date();
         const q=parseQuote({code,name:String(r.name||'').slice(0,70),
@@ -197,7 +197,7 @@ export async function collectTursoProvisional(env,now=new Date(),deps={}){
         // Regular inquire-price may omit a day, but post-close daily-price must
         // provide an exact matching KIS business date (never an inference).
         if(afterClose&&!q.reported_trade_date)throw Error('KIS_DAILY_DATE_MISSING');
-        if(afterClose)q.source='KIS_REST_INQUIRE_DAILY_PRICE';
+        if(afterClose){q.source='KIS_REST_INQUIRE_DAILY_PRICE';q.provider_endpoint='inquire-daily-itemchartprice';}
         q.provisional_status='IN_PROGRESS';
         q.provisional_date_basis=q.reported_trade_date?
           'KIS_REPORTED_TRADE_DATE':'COLLECTOR_KST_REGULAR_SESSION';
