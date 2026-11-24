@@ -132,7 +132,7 @@ function selectedObservation(item:BasketItem,comp:PriceCompare|undefined,pr:Perf
  add(comp?.latest_price,comp?.latest_day,sourceName(comp?.latest_source),comp?.latest_at,4);
  add(pr?.quote_price,pr?.quote_day,'기존 KIS 수집기',pr?.quote_at,3);
  add(pr?.recent_close,pr?.recent_day,'기존 KIS 일봉',null,2);
- add(q?.price,q?.trade_date_kst,'KIS 저장 시세',q?.received_at_utc,1);
+ if(!item.discovery)add(q?.price,q?.trade_date_kst,'KIS 저장 시세',q?.received_at_utc,1);
  choices.sort((a,b)=>b.day.localeCompare(a.day)||(item.discovery&&a.day===item.day?(Date.parse(b.at||'')||0)-(Date.parse(a.at||'')||0):0)||b.priority-a.priority);
  return choices[0]||null;
 }
@@ -610,10 +610,10 @@ export default function SmartBasket({quickAddRequests,onItemsChange,onAddFeedbac
        signals={signalChips} highestObserved={maxHigh} highestDay={maxHighDay}
        selectedMethod={it.stopMethod} refreshKey={refreshKey}
        onSelectMethod={(method:StopMethod)=>setItems(old=>old.map(x=>x.id===it.id?{...x,stopMethod:method}:x))}/>}
-     <BasketSupplyRecordRow record={it.supplyRecord} day={it.day} baseline={it.baseline}
+     {it.discovery&&!it.supplyRecord?<p className="basket-selection-note">발견 당시 매물대 자료가 없으며 다른 날짜 자료로 대체하지 않습니다.</p>:<BasketSupplyRecordRow record={it.supplyRecord} day={it.day} baseline={it.baseline}
        note={it.supplyMemo||''} loading={supplyBusy.includes(it.id)}
        onFetch={()=>{if(!it.discovery)void captureSupply(it.id,it.code,it.day,it.baseline);else setMessage('잠정 발견 시점의 매물대 기록을 보존합니다.');}}
-       onNoteChange={value=>setItems(old=>old.map(x=>x.id===it.id?{...x,supplyMemo:value}:x))}/>
+       onNoteChange={value=>setItems(old=>old.map(x=>x.id===it.id?{...x,supplyMemo:value}:x))}/>}
      <div className="r153-row-state" title={pr?.checked_at||''}>{state}{pr?.checked_at&&` · 최종 확인 ${new Date(pr.checked_at).toLocaleString('ko-KR')}`}</div>
      <details className="r152-record-more"><summary>메모 · 관찰 근거</summary>
        {it.source==='AI'&&<p className="basket-insight">AI 관찰 근거: {it.reason||'미기재'} · 위험: {it.risk||'미기재'}</p>}
