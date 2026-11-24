@@ -1,3 +1,4 @@
+import DirectionalDiscovery from './DirectionalDiscovery';
 import {patternLabel} from './research-pattern-label';
 import './adaptive-research.css';
 import {useState} from 'react';
@@ -8,7 +9,7 @@ type Window={current_covered?:number;prior_covered?:number;requested_sessions:nu
 type History={asof:string;previous_asof:string|null;changes:{group:string;pattern:string;horizon:number;status:string;rate_delta_pp:number|null}[]};
 const labels:Record<string,string>={NEW:'신규',REMOVED:'해제',STRENGTHENED:'강화',WEAKENED:'약화',MAINTAINED:'유지'};
 export default function AdaptiveRadar(){
- const [w,setW]=useState(5),[h,setH]=useState(3),[tab,setTab]=useState<'market'|'history'>('market'),[day,setDay]=useState('');
+ const [w,setW]=useState(5),[h,setH]=useState(3),[tab,setTab]=useState<'market'|'history'|'direction'>('market'),[day,setDay]=useState('');
  const [scope,setScope]=useState('candle'),[order,setOrder]=useState('strength'),[showPending,setShowPending]=useState(false);
  const data=RADAR_DATA as {asof:string;windows:Window[]}|null;
  const history=RADAR_HISTORY as History[];
@@ -22,8 +23,8 @@ export default function AdaptiveRadar(){
  const record=history.find(x=>x.asof===day)??history[0];
  const fmt=(v:number|null|undefined)=>v==null?'미확인':v.toFixed(2)+'%';
  return <div className="r15106-search-pattern-evidence blue-research">
- <div style={{display:'flex',gap:6}}><button type="button" aria-pressed={tab==='market'} onClick={()=>setTab('market')}>시장 변화</button><button type="button" aria-pressed={tab==='history'} onClick={()=>setTab('history')}>추천 변경 이력</button></div>
- {tab==='market'?<>
+ <div style={{display:'flex',gap:6}}><button type="button" aria-pressed={tab==='market'} onClick={()=>setTab('market')}>시장 변화</button><button type="button" aria-pressed={tab==='history'} onClick={()=>setTab('history')}>추천 변경 이력</button><button type="button" aria-pressed={tab==='direction'} onClick={()=>setTab('direction')}>방향성 발굴</button></div>
+ {tab==='direction'?<DirectionalDiscovery/>:tab==='market'?<>
  <small>{data?data.asof+' 기준':'연구 데이터 게시 대기'}</small>
  <strong>최근 어떤 복합 조건의 성과가 변했나요?</strong>
  <div className="blue-periods">{[3,5,10,20,28,60].map(n=><button key={n} type="button" aria-pressed={w===n} onClick={()=>{setW(n);if(h>=n)setH(n===3?1:3);}}>{n}일</button>)}</div>
