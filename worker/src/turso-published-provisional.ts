@@ -168,3 +168,24 @@ export async function tursoPublishedProvisional(env:Env,p:URLSearchParams,factor
       reference_day:reference,scan_asof_utc:scan,latest_observed_utc:latest,snapshot_id:id,items};
   }finally{db.close();}
 }
+
+/** Exact snapshot detail; never substitute another scan or confirmed day. */
+export async function tursoProvisionalDetail(env:Env,p:URLSearchParams,factory:Factory=createClient,now=new Date()){
+  const day=p.get('date')||'',code=p.get('code')||'',id=p.get('snapshot_id')||'';
+  if(day!==kstDay(now)||!DAY.test(day)||!CODE.test(code)||!HASH.test(id))throw new InvalidProvisionalQuery();
+  const unavailable={status:'NOT_AVAILABLE',message:'해당 잠정 스냅샷의 차트가 없습니다. 검색 결과를 새로고침해 주세요.'};
+  const url=env.TURSO_DATABASE_URL?.trim()||'',authToken=env.TURSO_AUTH_TOKEN?.trim()||'';
+  if(!/^(https|libsql):\/\//.test(url)||!authToken)throw Error('TURSO_PROVISIONAL_NOT_CONFIGURED');
+  const db=factory({url,authToken,intMode:'string'});
+  try{
+    const run=(sql:string,args:string[])=>db.execute({sql,args});
+    const head=async()=>run('SELECT reference_day FROM blue_provisional_pattern_head_v1 WHERE trade_day=? AND snapshot_id=? AND NOT EXISTS (SELECT 1 FROM blue_eod_ingest_audit_v1 WHERE trade_day=? AND row_count>=1700)',[day,id,day]);
+    const first=(await head()).rows[0];if(!first)return unavailable;
+    const read=async(key:string)=> (await run("SELECT "+field(key)+" AS payload FROM blue_provisional_pattern_rows_v1 WHERE snapshot_id=? AND code=?",[id,code])).rows[0]?.payload;
+    const rawChart=await read('provisional_research.chart'),rawStats=await read('provisional_research.stats');
+    if(typeof rawChart!=='string'||typeof rawStats!=='string'||!(await head()).rows.length)return unavailable;
+    const chart=JSON.parse(rawChart),stats=JSON.parse(rawStats);
+    check(chart.asof===day&&chart.pattern_confirmed===false&&chart.data_frequency==='PROVISIONAL_DAILY'&&Array.isArray(chart.bars)&&chart.bars.at(-1)?.t===day&&stats.asof===day&&stats.history_end<=String(first.reference_day));
+    return {status:'READY',chart,stats,provisional:true,reference_day:String(first.reference_day)};
+  }finally{db.close();}
+}
