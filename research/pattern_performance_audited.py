@@ -8,6 +8,27 @@ from pathlib import Path
 from pattern_performance_phase1 import HORIZONS, summarize
 from datetime import date
 
+def candle(b):
+    o,h,l,c = (b[k] for k in ("open","high","low","close"))
+    if not (0 < l <= min(o,c) <= max(o,c) <= h):
+        raise ValueError("invalid OHLC")
+    span=h-l
+    if not span: return "FLAT"
+    body=abs(c-o)/span
+    lower=(min(o,c)-l)/span
+    upper=(h-max(o,c))/span
+    if body<=0.1: return "DOJI"
+    if lower>=0.6 and upper<=0.15: return "LOWER_WICK"
+    if upper>=0.6 and lower<=0.15: return "UPPER_WICK"
+    if body>=0.7: return "LONG_BULL" if c>o else "LONG_BEAR"
+    return "BULL" if c>o else "BEAR"
+
+def market_regime(b):
+    if not b or b["matched5"] < 0.8*b["universe"] or not b["matched5"]:
+        return "UNKNOWN"
+    ratio=b["up5"]/b["matched5"]
+    return "BROAD_UP" if ratio>=0.6 else "BROAD_WEAK" if ratio<=0.4 else "MIXED"
+
 def analyze(source):
     if source.get("format") != "BLUE_TURSO_EXIT_SOURCE_V1" or source.get("audits_readback_verified") is not True:
         raise ValueError("audited source required")
@@ -22,6 +43,9 @@ def analyze(source):
             raise ValueError("invalid bar")
         bars[key] = b["close"]
     rows = []
+    candles, markets = [], []
+    raw_bars = {(b['day'],b['code']):b for b in source['bars']}
+    breadth = {b['day']:b for b in source.get('market_breadth_by_day',[]) if b['scope']=='ALL'}
     seen = set()
     missing = {n:0 for n in HORIZONS}
     for s in source["signals"]:
@@ -32,6 +56,11 @@ def analyze(source):
         future = {n:bars.get((days[index[d]+n],c)) if index[d]+n<len(days) else None for n in HORIZONS}
         for p in s["names"]:
             rows.append((c,date.fromisoformat(d),p,bars[d,c],future))
+            bar=raw_bars[d,c]
+            shape=candle(bar) if all(k in bar for k in ("open","high","low")) else "UNKNOWN"
+            regime=market_regime(breadth.get(d))
+            candles.append((c,date.fromisoformat(d),p+"|"+shape,bars[d,c],future))
+            markets.append((c,date.fromisoformat(d),p+"|"+regime,bars[d,c],future))
             for n in HORIZONS:
                 missing[n] += future[n] is None
     return {"schema":"BLUE_PATTERN_PERFORMANCE_AUDITED_V1",
@@ -42,7 +71,10 @@ def analyze(source):
             "signal_events":len(rows),"missing_by_horizon":missing,
             "trading_calendar_verified":False,"corporate_actions_verified":False,
             "definition":"positive close-to-close return after N audited EOD sessions; missing outcomes excluded",
-            "rankings":summarize(rows)}
+            "rankings":summarize(rows),
+            "candle_rankings":summarize(candles),
+            "market_rankings":summarize(markets),
+            "subgroup_warning":"Exploratory only; small and overlapping samples; same-day close-known features; no independent holdout or corporate action adjustment."}
 
 if __name__ == "__main__":
     p=argparse.ArgumentParser()
