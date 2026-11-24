@@ -6,7 +6,7 @@ import {join} from 'node:path';
 import {createHash} from 'node:crypto';
 import {CODES,FORBIDDEN_R19_CODES,FORBIDDEN_R28_CODES,START,END,EVAL_START,CaptureError,
   frozenCodePreflight,urlFor,parsePage,fetchPage,fetchTicker,capture}
-from './stockhunter-r31-unseen2026-kis-capture.mjs';
+from './stockhunter-r31-new30-kis-capture.mjs';
 
 const CRED={KIS_APP_KEY:'fake-key',KIS_APP_SECRET:'fake-secret',
             TURSO_DATABASE_URL:'libsql://fake',TURSO_AUTH_TOKEN:'fake-token',
