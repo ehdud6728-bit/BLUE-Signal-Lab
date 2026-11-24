@@ -30,7 +30,7 @@ export default function MarketAiBriefing({api,revision=0}:{api:string;revision?:
  return <section className="blue-research-card">
  <div className="blue-pattern-heading"><strong>BLUE AI 종합 시황 · 대응 전망</strong><button type="button" disabled={busy} onClick={()=>void load('GET')}>저장 분석 확인</button></div>
  <small>Gemini 생성형 분석 · Turso 자료 기반 · 하루 최대 {data?.daily_limit??5}회 신규 분석 · 같은 근거는 재사용</small>
- <p>시장 방향, 외국인·기관 수급, VIX 및 해외 일봉, 개선 업종과 대장주·후발주 후보를 연결해 설명합니다. 종목명과 코드는 외부 AI에 보내지 않고 화면에서만 연결합니다.</p>
+ <p>시장 방향, 외국인·기관 수급, VIX 및 해외 일봉, 개선 업종과 대장주·후발주 후보를 연결해 설명합니다. 생성 버튼을 누르면 가공된 시장·기술신호 요약을 Gemini에 전송합니다. 종목명과 코드는 보내지 않고 화면에서만 연결합니다.</p>
  {dates&&<details><summary>자료별 기준일</summary><p>국내 시황 수집 {dates.market_observed_at?fmt(dates.market_observed_at):'미확인'} · 실제 시세일 미확인</p><p>국내 업종 지수 수집 {dates.trend_observed_at?fmt(dates.trend_observed_at):'미확인'} · 해외 지수 수집 {dates.global_observed_at?fmt(dates.global_observed_at):'미확인'}</p><p>후보 일봉 기준 {dates.candidate_day??'미확인'} · 마스터 수집 {dates.master_receipt_day??'미확인'}</p></details>}
  <button type="button" disabled={busy||data?.status==='READY'||data?.status==='PENDING'||data?.gemini_key_configured===false} onClick={()=>void load('POST')}>{busy?'처리 중…':data?.status==='READY'?'동일 근거 분석 저장됨':data?.status==='PENDING'?'분석 진행 중':'AI 종합 분석 생성'}</button>
  {data?.status==='PENDING'&&!busy&&<p>다른 요청이 분석 중입니다. 저장 분석 확인 버튼으로 결과를 조회해 주세요.</p>}
