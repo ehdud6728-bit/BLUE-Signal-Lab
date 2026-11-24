@@ -16,7 +16,9 @@ test('distinguishes old payload from new null amount',async()=>{
  assert.equal(r.coverage.bySource[source].absent,1);
  assert.equal(r.coverage.bySource[source].nullAmount,1);
  assert.equal(r.coverage.bySource[source].valid,1);
- assert.equal(r.quotes[0].amount,2000);
+ assert.equal(r.coverage.eligible,3);
+ assert.equal(r.coverage.turnoverAvailable,1);
+ assert.deepEqual(r.quotes.map(q=>q.amount),[null,null,2000]);
 });
 test('rejects incomplete reference even in quotes-only mode',async()=>{
  await assert.rejects(exportInputs(client(1699),day,now,260,{quotesOnly:true}),/EOD_COUNT_MISMATCH/);
