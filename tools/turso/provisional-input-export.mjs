@@ -11,15 +11,22 @@ export async function exportInputs(client,day,now,sessions=260,{quotesOnly=false
  const dates=await run('SELECT trade_day,row_count FROM blue_eod_ingest_audit_v1 WHERE trade_day<? AND row_count>=1700 ORDER BY trade_day DESC LIMIT ?',[day,sessions]);
  if(dates.length<(quotesOnly?1:225))throw Error('INSUFFICIENT_AUDITED_HISTORY');
  const reference=String(dates[0].trade_day);
+ const count=await run('SELECT COUNT(*) AS n FROM blue_eod_daily_v1 WHERE trade_day=?',[reference]);
+ if(Number(count[0].n)!==Number(dates[0].row_count))throw Error('EOD_COUNT_MISMATCH');
+ const observations=await run('SELECT source,COUNT(*) AS n,MIN(observed_at_utc) AS oldest,MAX(observed_at_utc) AS newest FROM blue_kis_provisional_daily_v1 WHERE trade_day=? AND reference_day=? GROUP BY source',[day,reference]);
  const quotes=await run(`SELECT p.*,e.market AS listing_market,e.name AS listing_name,l.payload_json
  FROM blue_kis_provisional_daily_v1 p JOIN blue_eod_daily_v1 e ON e.trade_day=p.reference_day AND e.code=p.code
  JOIN blue_kis_live_quotes_r141 l ON l.trade_date=p.trade_day AND l.market=p.market AND l.code=p.code AND l.received_at_utc=p.observed_at_utc
  WHERE p.trade_day=? AND p.reference_day=? AND p.market='J' AND p.date_basis IN ('KIS_REPORTED_TRADE_DATE','COLLECTOR_KST_REGULAR_SESSION')
  AND p.source IN ('KIS_REST_INQUIRE_PRICE_PROVISIONAL','KIS_REST_INQUIRE_DAILY_PRICE_PROVISIONAL') ORDER BY p.code`,[day,reference]);
- const eligible=[];let missingAmount=0;
+ const eligible=[];let missingAmount=0;const bySource={};
  for(const q of quotes){
   const p=JSON.parse(String(q.payload_json));
+  const stats=bySource[q.source]??={joined:0,absent:0,nullAmount:0,valid:0,newest:null};
+  stats.joined++;if(!stats.newest||q.observed_at_utc>stats.newest)stats.newest=q.observed_at_utc;
   const amount=p.accumulated_amount_krw;
+  if(!Object.hasOwn(p,'accumulated_amount_krw'))stats.absent++;else if(amount===null)stats.nullAmount++;
+  if(Number.isSafeInteger(amount)&&amount>0)stats.valid++;
   if(!Number.isSafeInteger(amount)||amount<=0){missingAmount++;continue;}
   if(p.code!==q.code||p.trade_date_kst!==day||p.received_at_utc!==q.observed_at_utc||p.price!==Number(q.close)||p.accumulated_volume!==Number(q.volume))throw Error('QUOTE_MISMATCH');
   eligible.push({code:String(q.code),name:String(q.listing_name||q.code),market:String(q.listing_market),day,reference_day:reference,observed_at_utc:String(q.observed_at_utc),source:String(q.source),open:Number(q.open),high:Number(q.high),low:Number(q.low),close:Number(q.close),volume:Number(q.volume),amount});
@@ -31,7 +38,7 @@ export async function exportInputs(client,day,now,sessions=260,{quotesOnly=false
   for(const r of rows)if(codes.has(String(r.code)))history.push([r.trade_day,r.code,r.name,r.market,r.open,r.high,r.low,r.close,r.volume,r.amount]);
  }
  const csv=v=>'"'+String(v??'').replaceAll('"','""')+'"';
- return {reference,quotes:eligible,history:['Date,Code,Name,Market,Open,High,Low,Close,Volume,Amount',...history.map(r=>r.map(csv).join(','))].join('\n')+'\n',coverage:{joined:quotes.length,missingAmount,eligible:eligible.length,historySessions:quotesOnly?0:dates.length,calendarVerified:false}};
+ return {reference,quotes:eligible,history:['Date,Code,Name,Market,Open,High,Low,Close,Volume,Amount',...history.map(r=>r.map(csv).join(','))].join('\n')+'\n',coverage:{observations:observations.map(x=>({...x,n:Number(x.n)})),bySource,joined:quotes.length,missingAmount,eligible:eligible.length,historySessions:quotesOnly?0:dates.length,calendarVerified:false}};
 }
 if(process.argv[1]?.endsWith('/provisional-input-export.mjs')){
  const [day,prefix]=process.argv.slice(2);if(!prefix)throw Error('OUTPUT_REQUIRED');
