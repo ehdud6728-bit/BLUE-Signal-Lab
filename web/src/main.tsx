@@ -504,11 +504,11 @@ function App(){
       return;
     }
     const serial=++searchVersion.current;
-    const effectiveAiOnly=patternBackend==='turso'&&(queryOverride?.aiOnly??aiOnly);
+    const effectiveAiOnly=(patternBackend==='turso'||todaySearch)&&(queryOverride?.aiOnly??aiOnly);
     const queryAmountEok=patternOverride?.amountEok??amountEok;
     const queryName=(queryOverride?.q??appliedNameQuery).trim();
     const desiredSort=queryOverride?.sort??appliedSort;
-    let querySort=desiredSort==='recommended'&&patternBackend!=='turso'?'recent':desiredSort;
+    let querySort=desiredSort==='recommended'&&patternBackend!=='turso'&&!todaySearch?'recent':desiredSort;
     if(!Number.isInteger(queryAmountEok)||queryAmountEok<0||queryAmountEok>50000){
       setError('거래대금은 0~50,000억원 사이 정수로 입력하세요.');return;
     }
@@ -544,8 +544,9 @@ function App(){
         for(const k of ['date','q','signals','logic','gc','gc_logic','tech','tech_logic','min_amount_eok','page']){
           const value=u.searchParams.get(k);if(value!==null)provisionalUrl.searchParams.set(k,value);
         }
-        const liveSort=querySort==='amount_surge'||querySort==='amount_decline'?querySort:'recent';
+        const liveSort=querySort==='amount_surge'||querySort==='amount_decline'||querySort==='recommended'?querySort:'recent';
         provisionalUrl.searchParams.set('sort',liveSort);
+        if(effectiveAiOnly)provisionalUrl.searchParams.set('ai_only','1');
         const response=await fetch(provisionalUrl.toString(),{credentials:'include',cache:'no-store'});
         if(!response.ok)throw Error('당일 잠정 기술패턴 조회 실패: '+response.status);
         const live=await response.json() as ProvisionalSnapshot;
@@ -559,13 +560,16 @@ function App(){
             signals:r.signals,close_price:r.price,supply_distance_pct:null,extras:r.extras||{},
             provisional:true,observed_at_utc:r.observed_at_utc})));
           setR1593Prices({});setR1593Busy(false);setR1593Error('');setR1593AutoStatus('');setR1595RequestNote('');
-          setDays([]);setSelected(null);setAiCount(null);setAiOnly(false);
-          setTotal(live.total);setAllCount(live.total);setPage(p);setDataStatus('');
+          const liveAiReady=live.ai_asof===RECENT_ASOF&&typeof live.ai_count==='number';
+          setDays([]);setSelected(null);setAiCount(liveAiReady?live.ai_count:null);setAiOnly(liveAiReady&&live.ai_only===true);
+          setTotal(live.total);setAllCount(live.unfiltered_total??live.total);setPage(p);setDataStatus('');
           setAppliedNameQuery(queryName);setAppliedAmountEok(queryAmountEok);
           setAppliedSort(liveSort);setResultSort(liveSort);setProvisionalResult(live);
-          setStatus(effectiveAiOnly||effectiveOnlyPattern||liveSort!==querySort?
-            '당일 잠정 패턴: 확정 연구 전용 AI·토마토·수익률 조건은 적용하지 않습니다.':
-            '당일 KIS 잠정 기술패턴 검색 결과입니다. 확정 종가 및 과거 연구 통계와 구분합니다.');
+          setStatus(!liveAiReady?
+            '당일 KIS 잠정 패턴 · AI 조건 판정용 캔들 증거가 아직 부족합니다. 패턴 저장을 다시 실행해 주세요.':
+            effectiveOnlyPattern||liveSort!==querySort?
+            '당일 KIS 잠정 패턴 · AI 연구 조건 일치 적용 · 토마토·확정 수익률 조건은 아직 미적용':
+            '당일 KIS 잠정 패턴 · 과거 AI 연구 조건 일치 적용 (독립 검증 전, 확정 신호 아님)');
           if(scroll){setFilterOpen(false);requestAnimationFrame(()=>resultRef.current?.scrollIntoView({behavior:'smooth',block:'start'}));}
           return;
         }
@@ -745,7 +749,8 @@ function App(){
   // Never promote frequency growth or exploratory tomato observations to gold.
   // Only a future, independently verified Turso v2 recommendation can qualify.
   const goldSignal=(r:Signal)=>r.provisional?null:validatedResearchSignal(r,storageMode==='turso'&&searchSource==='patterns'&&patternBackend==='turso');
-  const recentMatch=(r:Signal)=>!r.provisional&&patternBackend==='turso'&&matchedRecent(r.day,r.signals,r.extras?.audited_candle_features,true).length>0;
+  const researchFeatures=(r:Signal)=>r.provisional?r.extras?.provisional_candle_features:r.extras?.audited_candle_features;
+  const recentMatch=(r:Signal)=>(r.provisional?activeProvisional?.ai_asof===RECENT_ASOF&&typeof activeProvisional?.ai_count==='number':patternBackend==='turso')&&matchedRecent(r.day,r.signals,researchFeatures(r),!r.provisional).length>0;
   const stockHighlight=(r:Signal)=>researchCardClasses(goldSignal(r)!==null||recentMatch(r),patternUp(r)!==null);
   const goldEvidenceBlock=(r:Signal)=>{const signal=goldSignal(r);
     return signal?<div className="r-research-gold-label" role="note">★ 검증 연구 추천 패턴 · {showSignal(signal)}</div>:null;};
@@ -1078,7 +1083,7 @@ function App(){
         {storageMode==='turso'&&searchSource==='daily'&&<TursoEodRecovery key={eodRefresh} api={API} dates={tursoDays} onUnavailable={onTursoUnavailable}/>}
         <div className={"stats "+(storageMode==="turso"?"ai-summary-four":"")} ref={summaryRef} id="summary-panel">
           <button type="button" className={'metric ai-summary-all '+(!aiOnly?'active':'')} disabled={busy||total===null} aria-pressed={!aiOnly} onClick={()=>{if(aiOnly)void search(1,false,gcFields,gcLogic,undefined,undefined,techFields,techLogic,{aiOnly:false});}}><span>검색 결과</span><strong>{total==null?'—':(allCount??total).toLocaleString()}</strong><small>{activeProvisional?'잠정 패턴':'전체 종목'}</small></button>
-          {storageMode==='turso'&&<button type="button" className={'metric ai-summary-metric '+(aiOnly?'active':'')} disabled={busy||aiCount===null} aria-pressed={aiOnly} onClick={()=>void search(1,false,gcFields,gcLogic,undefined,undefined,techFields,techLogic,{aiOnly:!aiOnly})}><span>AI 추천</span><strong>{total===null||aiCount===null?'—':aiCount}</strong><small>일치 종목</small></button>}
+          {storageMode==='turso'&&<button type="button" className={'metric ai-summary-metric '+(aiOnly?'active':'')} disabled={busy||aiCount===null} aria-pressed={aiOnly} onClick={()=>void search(1,false,gcFields,gcLogic,undefined,undefined,techFields,techLogic,{aiOnly:!aiOnly})}><span>AI 추천</span><strong>{total===null||aiCount===null?'—':aiCount}</strong><small>{activeProvisional?'잠정 일치':'일치 종목'}</small></button>}
           <div className="metric"><span>검색 거래일</span><strong>{activeProvisional?1:total==null?'—':days.length}</strong><small>{activeProvisional?'잠정 분석일':'저장된 날짜'}</small></div>
           <div className="metric"><span>최신 저장일</span><strong className="smallnum">{latest?.slice(5)||'—'}</strong><small>종가 데이터</small></div>
         </div>
@@ -1108,9 +1113,9 @@ function App(){
         <section className="panel result" ref={resultRef} id="results-panel">
           <div className="result-heading"><h2><BarChart3 size={18}/> 검색된 종목 <small>{dataStatus==='NOT_IMPORTED'?'일봉 미수집':total===null?'검색 전':total+'건'}</small></h2><span className="eod-pill"><Clock3 size={13}/> {activeProvisional?'KIS 잠정':'EOD'}</span></div>
           {activeProvisional&&<p className="r1599-active-filters">KIS 수집 {activeProvisional.observed_count.toLocaleString()} · 분석 {activeProvisional.eligible_count.toLocaleString()} · 검출 {activeProvisional.matched_count.toLocaleString()}종목 · 최근 수신 {observedKst(activeProvisional.latest_observed_utc||undefined)} · 미확정 일봉</p>}
-          <p className="r1599-active-filters">검색 결과 기준 · 거래대금 {(appliedAmountEok??amountEok)>0?(appliedAmountEok??amountEok).toLocaleString('ko-KR')+'억원 이상':'전체'} {activeProvisional?' · 과거 검증 통계 미적용':' · 토마토 강조 '}{activeProvisional?'':highlightMin===null?'꺼짐':highlightMin+'% 이상 · 표본 '+patternSampleMin+'건 이상'}{!activeProvisional&&onlyPattern&&highlightMin!==null?' · 해당 종목만 보기':''}{appliedAmountEok!==null&&appliedAmountEok!==amountEok?' · 거래대금 변경 미적용(검색 버튼을 누르세요)':''}</p>
-          <details className="ai-search-help"><summary>검색 기준 안내 ⓘ</summary><p>{activeProvisional?'KIS 잠정 시세 기준이며 확정 일봉이 아닙니다. 과거 성과·추천·장바구니 저장은 아직 적용하지 않습니다. ':'확정 일봉 기준이며 후속 관측 기간은 불완전할 수 있습니다. '} 골드: 연구 추천 · 토마토: 과거 10일 성과 · 대각선: 두 조건 충족. AI 추천 집계에는 최신 연구 조건의 과거 일치 사례가 포함되며 당시 추천을 뜻하지 않습니다. — 표시는 집계 불가입니다.</p></details>
-          {aiOnly&&<p className="r1599-active-filters">AI 조건 일치 종목만 표시 · 과거 사례 포함</p>}
+          <p className="r1599-active-filters">검색 결과 기준 · 거래대금 {(appliedAmountEok??amountEok)>0?(appliedAmountEok??amountEok).toLocaleString('ko-KR')+'억원 이상':'전체'} {activeProvisional?' · AI 조건 일치 '+(aiCount===null?'판정 대기':'적용')+' · 토마토 미적용':' · 토마토 강조 '}{activeProvisional?'':highlightMin===null?'꺼짐':highlightMin+'% 이상 · 표본 '+patternSampleMin+'건 이상'}{!activeProvisional&&onlyPattern&&highlightMin!==null?' · 해당 종목만 보기':''}{appliedAmountEok!==null&&appliedAmountEok!==amountEok?' · 거래대금 변경 미적용(검색 버튼을 누르세요)':''}</p>
+          <details className="ai-search-help"><summary>검색 기준 안내 ⓘ</summary><p>{activeProvisional?'KIS 잠정 시세 기준입니다. 골드 테두리는 이전 AI 연구 조건의 잠정 일치이며 독립 검증 전입니다. 토마토 및 장바구니 저장은 아직 미적용입니다. ':'확정 일봉 기준이며 후속 관측 기간은 불완전할 수 있습니다. '} 골드: 연구 추천 · 토마토: 과거 10일 성과 · 대각선: 두 조건 충족. AI 추천 집계에는 최신 연구 조건의 과거 일치 사례가 포함되며 당시 추천을 뜻하지 않습니다. — 표시는 집계 불가입니다.</p></details>
+          {aiOnly&&<p className="r1599-active-filters">AI 조건 일치 종목만 표시 · {activeProvisional?'잠정 신호':'과거 사례 포함'}</p>}
           {basketNotice&&<p className="r1595-request-status" role="status">{basketNotice}</p>}
           {total===0&&(appliedAmountEok??amountEok)>0&&<p className="r15125-result-scope" role="status">현재 거래대금 최소 {(appliedAmountEok??amountEok).toLocaleString('ko-KR')}억원 조건으로는 검색 대상이 없습니다. 저거래대금 하단 터치 종목도 찾으려면 거래대금을 ‘전체(0억원)’로 바꾸고 검색해 보세요.</p>}
           {r1593Error&&<p className="r1593-comparison-status" role="status">가격 비교: {r1593Error}</p>}
@@ -1212,7 +1217,7 @@ function App(){
                 <option value="highest_gain" disabled={!!activeProvisional}>발견가 대비 확인 최고 수익률순</option>
                 <option value="lowest_return" disabled={!!activeProvisional}>발견가 대비 확인 최저 수익률순</option>
                 <option value="amount_surge">20일 평균 거래대금 증가율 높은순</option>
-                <option value="recommended" disabled={!!activeProvisional||patternBackend!=='turso'}>추천 패턴 우선 (최대 2,000건)</option>
+                <option value="recommended" disabled={activeProvisional?aiCount===null:patternBackend!=='turso'}>추천 패턴 우선 (최대 2,000건)</option>
                 <option value="amount_decline">20일 평균 거래대금 감소율 큰순</option>
               </select>
             </label>
@@ -1230,7 +1235,7 @@ function App(){
                  <div><b>{displayName(r)}</b><div className="small">{r.code} · {amountLabel(r)}</div>
                  <div className="r15125-amount-change">{amountChange(r)}{sortedPercent(r)&&<span> · {sortedPercent(r)}</span>}</div>
                  {goldEvidenceBlock(r)}
-              {!r.provisional&&<RecentPatternReference day={r.day} signals={r.signals} matched={recentMatch(r)} features={r.extras?.audited_candle_features} onDetails={storageMode==="turso"?()=>{setAiResearchTab(recentMatch(r)?"recommend":"ranking");nav("ai");}:undefined}/>}
+              {(!r.provisional||recentMatch(r))&&<RecentPatternReference provisional={r.provisional} day={r.day} signals={r.signals} matched={recentMatch(r)} features={researchFeatures(r)} onDetails={storageMode==="turso"?()=>{setAiResearchTab(recentMatch(r)?"recommend":"ranking");nav("ai");}:undefined}/>}
                  {patternEvidenceBlock(r)}
                  {patternDays(r).length>0&&<div className="r1599-pattern-dates" title={patternDays(r).join(' · ')}>과거 신호일 {patternDays(r).slice(-3).join(' · ')}{patternDays(r).length>3?' 외':''}</div>}</div>
                  <button type="button" className={'r151-quick-add '+(inBasket(r)?'saved':'')}
@@ -1259,7 +1264,7 @@ function App(){
                 aria-label={`${displayName(r)} 상세 분석 보기`}>
               <div className="stock-top"><div className="stock-identity"><strong>{displayName(r)}</strong><span>{r.code} <span className="stock-dot">·</span> {r.day}</span></div><div className="stock-price"><b>{money(r.close_price)}<small>원</small></b><span>{r.provisional?'KIS 관측가':'종가'}</span></div><ChevronRight size={19} className="stock-chevron"/></div>
               {goldEvidenceBlock(r)}
-              {!r.provisional&&<RecentPatternReference day={r.day} signals={r.signals} matched={recentMatch(r)} features={r.extras?.audited_candle_features} onDetails={storageMode==="turso"?()=>{setAiResearchTab(recentMatch(r)?"recommend":"ranking");nav("ai");}:undefined}/>}
+              {(!r.provisional||recentMatch(r))&&<RecentPatternReference provisional={r.provisional} day={r.day} signals={r.signals} matched={recentMatch(r)} features={researchFeatures(r)} onDetails={storageMode==="turso"?()=>{setAiResearchTab(recentMatch(r)?"recommend":"ranking");nav("ai");}:undefined}/>}
               {patternEvidenceBlock(r)}
               {r.provisional?<div className="r1599-mobile-meta">{observedKst(r.observed_at_utc)} 수신 · 미확정</div>:<PriceCompareMini compact data={r1593Prices[comparisonKey(r)]} baseline={r.close_price} loading={r1593Busy&&!r1593Prices[comparisonKey(r)]}
                 onRequest={()=>{void requestMissingQuote(r);}} requesting={r1595Requesting===comparisonKey(r)}
