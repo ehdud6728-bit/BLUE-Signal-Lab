@@ -12,6 +12,29 @@ const CODE=/^[0-9A-Z]{6}$/;
 const count=n=>Number.isSafeInteger(n)&&n>=0&&n<=10000;
 const check=(ok,reason)=>{if(!ok)throw Error(reason);};
 const sha=s=>createHash('sha256').update(s).digest('hex');
+// Match the conservative request sizes used by the confirmed signal importer.
+const WRITE_PAGE=4,READ_PAGE=5,WRITE_BYTES=24000;
+export function* writeChunks(rows){
+  let chunk=[],bytes=0;
+  for(const row of rows){
+    // JSON escaping on the wire can enlarge the stored record string.
+    const size=Buffer.byteLength(JSON.stringify([row.code,row.raw,row.hash]));
+    if(chunk.length&&(chunk.length>=WRITE_PAGE||bytes+size>WRITE_BYTES)){
+      yield chunk;chunk=[];bytes=0;
+    }
+    chunk.push(row);bytes+=size;
+  }
+  if(chunk.length)yield chunk;
+}
+const SAFE_STAGES=new Set(['CONNECT','CHECK_EOD','CHECK_REFERENCE','CREATE_ROWS','CREATE_HEAD','READ_HEAD','WRITE_ROWS','READ_ROWS','PROMOTE_HEAD','VERIFY_HEAD']);
+export function storageFailure(stage,err){
+  // Never include the provider's message, URL, SQL, or credentials.
+  const rawCode=String(err?.code||err?.cause?.code||'');
+  const code=/^(?:SQLITE_[A-Z0-9_]+|HRANA_[A-Z0-9_]+|LIBSQL_[A-Z0-9_]+|SERVER_ERROR|HTTP_ERROR|FETCH_ERROR|STREAM_EXPIRED|TRANSACTION_TIMEOUT|TRANSACTION_CLOSED|CLIENT_CLOSED|URL_INVALID|AUTH_TOKEN_INVALID|ECONNRESET|ECONNREFUSED|ETIMEDOUT|EPIPE|ENOTFOUND|EAI_AGAIN|UND_ERR_[A-Z0-9_]+)$/.test(rawCode)?rawCode:'UNKNOWN';
+  const status=Number(err?.status??err?.statusCode??err?.cause?.status);
+  return 'PROVISIONAL_STORAGE_'+(SAFE_STAGES.has(stage)?stage:'UNKNOWN')+'_'+code+
+    (Number.isInteger(status)&&status>=400&&status<=599?'_HTTP_'+status:'');
+}
 const kstDay=ms=>new Date(ms+9*3600000).toISOString().slice(0,10);
 const timestamp=s=>{
   check(typeof s==='string'&&/(?:Z|[+-]\d{2}:\d{2})$/.test(s)&&Number.isFinite(Date.parse(s)),'INVALID_PROVISIONAL_TIMESTAMP');
@@ -75,7 +98,7 @@ export function validateSnapshot(result,quotes){
   return {day:r.day,reference:q.reference,scan,newest,id,metadata,rows};
 }
 
-export async function publishSnapshot({result,quotes,mode='dry_run',env=process.env,now=new Date(),clientFactory=createClient}){
+export async function publishSnapshot({result,quotes,mode='dry_run',env=process.env,now=new Date(),clientFactory=createClient,onProgress=()=>{}}){
   check(['dry_run','apply'].includes(mode),'INVALID_PROVISIONAL_MODE');
   const s=validateSnapshot(result,quotes);
   const summary={day:s.day,snapshot_id:s.id,rows:s.rows.length,latest_observed_utc:s.newest};
@@ -83,55 +106,69 @@ export async function publishSnapshot({result,quotes,mode='dry_run',env=process.
   check(s.day===kstDay(now.getTime())&&Date.parse(s.scan)<=now.getTime(),'PROVISIONAL_NOT_CURRENT_DAY');
   const url=String(env.TURSO_DATABASE_URL||'').trim(),authToken=String(env.TURSO_AUTH_TOKEN||'').trim();
   check(/^(libsql|https):\/\//.test(url)&&authToken,'PROVISIONAL_DB_NOT_CONFIGURED');
-  const client=clientFactory({url,authToken,intMode:'string'});
+  let client,stage='CONNECT';
   try{
-    const run=(sql,args=[])=>client.execute({sql,args});
-    const current=await run('SELECT trade_day FROM blue_eod_ingest_audit_v1 WHERE trade_day=? AND row_count>=1700',[s.day]);
+    onProgress({stage});
+    client=clientFactory({url,authToken,intMode:'string'});
+    const run=async(next,sql,args=[])=>{
+      stage=next;
+      return client.execute({sql,args});
+    };
+    const current=await run('CHECK_EOD','SELECT trade_day FROM blue_eod_ingest_audit_v1 WHERE trade_day=? AND row_count>=1700',[s.day]);
     if(current.rows.length)return {...summary,status:'SKIPPED_VERIFIED_EOD',written:0};
-    const ref=await run('SELECT trade_day,row_count FROM blue_eod_ingest_audit_v1 WHERE trade_day<? AND row_count>=1700 ORDER BY trade_day DESC LIMIT 1',[s.day]);
+    const ref=await run('CHECK_REFERENCE','SELECT trade_day,row_count FROM blue_eod_ingest_audit_v1 WHERE trade_day<? AND row_count>=1700 ORDER BY trade_day DESC LIMIT 1',[s.day]);
     check(ref.rows.length===1&&String(ref.rows[0].trade_day)===s.reference,'PROVISIONAL_REFERENCE_CHANGED');
-    const n=await run('SELECT COUNT(*) AS n FROM blue_eod_daily_v1 WHERE trade_day=?',[s.reference]);
+    const n=await run('CHECK_REFERENCE','SELECT COUNT(*) AS n FROM blue_eod_daily_v1 WHERE trade_day=?',[s.reference]);
     check(Number(n.rows[0]?.n)===Number(ref.rows[0].row_count),'PROVISIONAL_REFERENCE_INCOMPLETE');
-    await run('CREATE TABLE IF NOT EXISTS blue_provisional_pattern_rows_v1 (snapshot_id TEXT NOT NULL, code TEXT NOT NULL, record_json TEXT NOT NULL, row_sha256 TEXT NOT NULL, PRIMARY KEY(snapshot_id,code))');
-    await run('CREATE TABLE IF NOT EXISTS blue_provisional_pattern_head_v1 (trade_day TEXT PRIMARY KEY, reference_day TEXT NOT NULL, snapshot_id TEXT NOT NULL, latest_observed_utc TEXT NOT NULL, scan_asof_utc TEXT NOT NULL, row_count INTEGER NOT NULL, metadata_json TEXT NOT NULL)');
-    const head=()=>run('SELECT snapshot_id,latest_observed_utc,scan_asof_utc,row_count,metadata_json FROM blue_provisional_pattern_head_v1 WHERE trade_day=?',[s.day]);
+    await run('CREATE_ROWS','CREATE TABLE IF NOT EXISTS blue_provisional_pattern_rows_v1 (snapshot_id TEXT NOT NULL, code TEXT NOT NULL, record_json TEXT NOT NULL, row_sha256 TEXT NOT NULL, PRIMARY KEY(snapshot_id,code))');
+    await run('CREATE_HEAD','CREATE TABLE IF NOT EXISTS blue_provisional_pattern_head_v1 (trade_day TEXT PRIMARY KEY, reference_day TEXT NOT NULL, snapshot_id TEXT NOT NULL, latest_observed_utc TEXT NOT NULL, scan_asof_utc TEXT NOT NULL, row_count INTEGER NOT NULL, metadata_json TEXT NOT NULL)');
+    const head=(next='READ_HEAD')=>run(next,'SELECT snapshot_id,latest_observed_utc,scan_asof_utc,row_count,metadata_json FROM blue_provisional_pattern_head_v1 WHERE trade_day=?',[s.day]);
     const before=(await head()).rows[0];
     if(before&&(String(before.latest_observed_utc)>s.newest||
       (String(before.latest_observed_utc)===s.newest&&String(before.scan_asof_utc)>=s.scan))&&String(before.snapshot_id)!==s.id)
       return {...summary,status:'SKIPPED_STALE',written:0};
-    for(let i=0;i<s.rows.length;i+=10){
-      const chunk=s.rows.slice(i,i+10);
-      await run('INSERT INTO blue_provisional_pattern_rows_v1 (snapshot_id,code,record_json,row_sha256) VALUES '+chunk.map(()=>'(?,?,?,?)').join(',')+' ON CONFLICT(snapshot_id,code) DO NOTHING',
+    let written=0;
+    onProgress({stage:'WRITE_ROWS',done:0,total:s.rows.length});
+    for(const chunk of writeChunks(s.rows)){
+      await run('WRITE_ROWS','INSERT INTO blue_provisional_pattern_rows_v1 (snapshot_id,code,record_json,row_sha256) VALUES '+chunk.map(()=>'(?,?,?,?)').join(',')+' ON CONFLICT(snapshot_id,code) DO NOTHING',
         chunk.flatMap(v=>[s.id,v.code,v.raw,v.hash]));
+      written+=chunk.length;
+      if(written===s.rows.length||written%20<chunk.length)onProgress({stage:'WRITE_ROWS',done:written,total:s.rows.length});
     }
     let read=0;
-    for(let offset=0;offset<=s.rows.length;offset+=10){
-      const page=await run('SELECT code,record_json,row_sha256 FROM blue_provisional_pattern_rows_v1 WHERE snapshot_id=? ORDER BY code LIMIT 10 OFFSET ?',[s.id,offset]);
+    onProgress({stage:'READ_ROWS',done:0,total:s.rows.length});
+    for(let offset=0;offset<=s.rows.length;offset+=READ_PAGE){
+      const page=await run('READ_ROWS','SELECT code,record_json,row_sha256 FROM blue_provisional_pattern_rows_v1 WHERE snapshot_id=? ORDER BY code LIMIT ? OFFSET ?',[s.id,READ_PAGE,offset]);
       for(const v of page.rows){
         const expected=s.rows[read++];
         check(expected&&String(v.code)===expected.code&&String(v.record_json)===expected.raw&&String(v.row_sha256)===expected.hash,'PROVISIONAL_READBACK_MISMATCH');
       }
-      if(page.rows.length<10)break;
+      if(read===s.rows.length||read%20===0)onProgress({stage:'READ_ROWS',done:read,total:s.rows.length});
+      if(page.rows.length<READ_PAGE)break;
     }
     check(read===s.rows.length,'PROVISIONAL_READBACK_MISMATCH');
     // One SQL statement publishes a fully verified generation. Prevent both
     // out-of-order writers and promotion after an exact-day EOD audit arrives.
-    await run('INSERT INTO blue_provisional_pattern_head_v1 (trade_day,reference_day,snapshot_id,latest_observed_utc,scan_asof_utc,row_count,metadata_json) SELECT ?,?,?,?,?,?,? WHERE NOT EXISTS (SELECT 1 FROM blue_eod_ingest_audit_v1 WHERE trade_day=? AND row_count>=1700) AND ?=(SELECT trade_day FROM blue_eod_ingest_audit_v1 WHERE trade_day<? AND row_count>=1700 ORDER BY trade_day DESC LIMIT 1) ON CONFLICT(trade_day) DO UPDATE SET reference_day=excluded.reference_day,snapshot_id=excluded.snapshot_id,latest_observed_utc=excluded.latest_observed_utc,scan_asof_utc=excluded.scan_asof_utc,row_count=excluded.row_count,metadata_json=excluded.metadata_json WHERE excluded.latest_observed_utc>blue_provisional_pattern_head_v1.latest_observed_utc OR (excluded.latest_observed_utc=blue_provisional_pattern_head_v1.latest_observed_utc AND excluded.scan_asof_utc>blue_provisional_pattern_head_v1.scan_asof_utc)',
+    onProgress({stage:'PROMOTE_HEAD'});
+    await run('PROMOTE_HEAD','INSERT INTO blue_provisional_pattern_head_v1 (trade_day,reference_day,snapshot_id,latest_observed_utc,scan_asof_utc,row_count,metadata_json) SELECT ?,?,?,?,?,?,? WHERE NOT EXISTS (SELECT 1 FROM blue_eod_ingest_audit_v1 WHERE trade_day=? AND row_count>=1700) AND ?=(SELECT trade_day FROM blue_eod_ingest_audit_v1 WHERE trade_day<? AND row_count>=1700 ORDER BY trade_day DESC LIMIT 1) ON CONFLICT(trade_day) DO UPDATE SET reference_day=excluded.reference_day,snapshot_id=excluded.snapshot_id,latest_observed_utc=excluded.latest_observed_utc,scan_asof_utc=excluded.scan_asof_utc,row_count=excluded.row_count,metadata_json=excluded.metadata_json WHERE excluded.latest_observed_utc>blue_provisional_pattern_head_v1.latest_observed_utc OR (excluded.latest_observed_utc=blue_provisional_pattern_head_v1.latest_observed_utc AND excluded.scan_asof_utc>blue_provisional_pattern_head_v1.scan_asof_utc)',
       [s.day,s.reference,s.id,s.newest,s.scan,s.rows.length,s.metadata,s.day,s.reference,s.day]);
-    const after=(await head()).rows[0];
+    const after=(await head('VERIFY_HEAD')).rows[0];
     if(String(after?.snapshot_id)!==s.id)return {...summary,status:'SKIPPED_SUPERSEDED',written:0};
     check(Number(after.row_count)===s.rows.length&&String(after.metadata_json)===s.metadata,'PROVISIONAL_HEAD_READBACK_MISMATCH');
     return {...summary,status:'OK',written:s.rows.length};
-  }finally{client.close();}
+  }catch(err){
+    if(/^(INVALID_PROVISIONAL_|PROVISIONAL_)[A-Z0-9_]+$/.test(err?.message||''))throw err;
+    throw Error(storageFailure(stage,err));
+  }finally{client?.close();}
 }
 
 if(process.argv[1]&&import.meta.url===pathToFileURL(process.argv[1]).href){
   try{
     const [resultPath,quotesPath,mode='dry_run']=process.argv.slice(2);
     const result=JSON.parse(await readFile(resultPath,'utf8')),quotes=JSON.parse(await readFile(quotesPath,'utf8'));
-    console.log('BLUE_PROVISIONAL_PUBLISH',JSON.stringify(await publishSnapshot({result,quotes,mode})));
+    console.log('BLUE_PROVISIONAL_PUBLISH',JSON.stringify(await publishSnapshot({result,quotes,mode,onProgress:p=>console.log('BLUE_PROVISIONAL_PUBLISH_PROGRESS',JSON.stringify(p))})));
   }catch(e){
-    console.error('BLUE_PROVISIONAL_PUBLISH_FAILED',/^(INVALID_PROVISIONAL_|PROVISIONAL_)[A-Z_]+$/.test(e?.message||'')?e.message:'SANITIZED_RUNTIME_FAILURE');
+    console.error('BLUE_PROVISIONAL_PUBLISH_FAILED',/^(INVALID_PROVISIONAL_|PROVISIONAL_)[A-Z0-9_]+$/.test(e?.message||'')?e.message:'SANITIZED_RUNTIME_FAILURE');
     process.exitCode=1;
   }
 }
