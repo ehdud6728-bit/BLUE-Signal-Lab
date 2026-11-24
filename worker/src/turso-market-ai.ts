@@ -61,7 +61,7 @@ export function buildMarketEvidence(input:Input,now=new Date()){
  }):[];
  // Exact current source generation only. Old stock observations may remain visible in the
  // independent candidate card, but are never blended with a superseding trend in AI.
- const candidateReady=l?.status==='READY'&&readyT&&!l.trend_superseded&&l.trend_receipt_day===t.receipt_day&&t.markets.every((m:any)=>m.benchmark?.day===l.day);
+ const candidateReady=l?.status==='READY'&&readyT&&!l.trend_superseded&&l.trend_receipt_day===t.receipt_day&&typeof t.trend_sha256==='string'&&l.trend_sha256===t.trend_sha256&&t.markets.every((m:any)=>m.benchmark?.day===l.day);
  const candidates=candidateReady?l.markets.map((m:any)=>{
   const id=ref('C_'+m.market,m.market+' 후보 범위','개선 '+m.improving+'개 · 연결 '+m.groups.filter((g:any)=>g.members>0&&g.matched>0).length+'개 · 기준 '+l.day);
   const groups=m.groups.filter((g:any)=>g.members>0&&g.matched>0).map((g:any,i:number)=>{
