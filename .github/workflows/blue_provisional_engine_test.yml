@@ -22,3 +22,5 @@ jobs:
 
       - run: python -m unittest discover -s tests -p test_provisional_history.py
       - run: node --check tools/turso/provisional-input-export.mjs
+
+      - run: python -m unittest discover -s tests -p test_provisional_pipeline.py
