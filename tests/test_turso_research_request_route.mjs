@@ -9,6 +9,10 @@ const script=ts.transpileModule(`
 class InvalidTursoResearchRequest extends Error {}
 const requestTursoResearch=async (_env,day)=>({status:'PENDING',day});
 const tursoResearchRequestStatus=async (_env,day)=>({status:'READY',day});
+const tursoMarketRotation=async()=>({status:'READY',source:'ROTATION'});
+const tursoMarketTrends=async()=>({status:'READY',source:'TRENDS'});
+const tursoRotationLeaders=async()=>({status:'READY',source:'LEADERS'});
+const handleTursoMarketAi=async (request,env,facts)=>new Response(JSON.stringify({status:'READY',method:request.method,facts}),{status:200});
 const tursoResearchCoverage=async ()=>({storage:'TURSO',status:'AUDIT_COUNTS_ONLY'});
 const tursoPatternPulse=async ()=>({storage:'TURSO',status:'AUDITED_PATTERN_ACTIVITY'});
 const tursoExitStudyReport=async ()=>({storage:'TURSO',status:'NOT_PUBLISHED',report:null});
@@ -78,4 +82,14 @@ test('Turso AI tab is pattern readiness only and refreshes its ledger',async()=>
   assert.match(readiness,/추천 점수·예상 수익·AI 시장 전망을 생성하지 않습니다/);
   assert.match(readiness,/<TursoPatternPulse api=\{api\} active=\{active\}/);
   assert.match(readiness,/<TursoExitStudy api=\{api\} active=\{active\}/);
+});
+
+test('market AI requires Access and same-origin POST before collecting Turso evidence',async()=>{
+ const path='/api/research/market-ai';
+ assert.equal((await api.fetch(request(path,'GET'),env,{})).status,401);
+ assert.equal((await api.fetch(request(path,'POST','https://attacker.invalid'),env,{access:true})).status,403);
+ assert.equal((await api.fetch(request(path,'POST'),env,{})).status,401);
+ const response=await api.fetch(request(path,'POST'),env,{access:true});
+ assert.equal(response.status,200);
+ assert.deepEqual((await response.json()).facts,{rotation:{status:'READY',source:'ROTATION'},trends:{status:'READY',source:'TRENDS'},leaders:{status:'READY',source:'LEADERS'}});
 });
