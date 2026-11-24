@@ -1,0 +1,49 @@
+name: BLUE Provisional Live Read-only Verification
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: pip install pandas numpy requests pyarrow pykrx
+      - run: npm --prefix tools/turso install --no-audit --no-fund --ignore-scripts --no-package-lock
+      - name: Export saved quotes (read only)
+        env:
+          TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
+          TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
+        run: |
+          mkdir -p output/provisional
+          DAY=$(TZ=Asia/Seoul date +%F)
+          echo "DAY=$DAY" >> "$GITHUB_ENV"
+          node tools/turso/provisional-input-export.mjs "$DAY" output/provisional/quotes --quotes-only
+          python -c 'import json; m=json.load(open("output/provisional/quotes.meta.json")); print(m); assert m["eligible"]>0,"NO_VALID_KIS_TURNOVER"'
+      - name: Prepare verified reference history
+        env:
+          KRX_DATA_ID: ${{ secrets.KRX_DATA_ID }}
+          KRX_DATA_PW: ${{ secrets.KRX_DATA_PW }}
+          KRX_AUTH_KEY: ${{ secrets.KRX_AUTH_KEY }}
+        run: |
+          REF=$(python -c 'import json; print(json.load(open("output/provisional/quotes.meta.json"))["reference"])')
+          python scripts/provisional_history.py --reference "$REF" --output output/provisional/history.csv
+      - name: Scan provisional patterns
+        run: |
+          python scripts/provisional_pipeline.py --history output/provisional/history.csv --quote-prefix output/provisional/quotes --day "$DAY" --now "$(date -u +%FT%TZ)" --output output/provisional/result.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: provisional-verification
+          path: |
+            output/provisional/*.meta.json
+            output/provisional/result.json
+          if-no-files-found: ignore
+          retention-days: 3
