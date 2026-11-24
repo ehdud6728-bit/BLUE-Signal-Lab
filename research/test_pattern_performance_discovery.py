@@ -12,6 +12,10 @@ source=dict(asof_day=days[-1],audits_readback_verified=True,eod_days=[dict(day=d
 r=discover(source)
 assert any(x["direction"]=="UPSIDE" and x["status"]=="HOLDOUT_AGREES_EXPLORATORY" for x in r["rows"])
 assert any(x["direction"]=="DOWNSIDE" and x["status"]=="HOLDOUT_AGREES_EXPLORATORY" for x in r["rows"])
+assert all(x["window"]<=60 for x in r["rows"])
+assert all(x["train_base"]["up_pct"]==0 for x in r["rows"] if x["direction"]=="UPSIDE")
+assert all(x["train_base"]["up_pct"]==100 for x in r["rows"] if x["direction"]=="DOWNSIDE")
+assert all(x["covered_sessions"]==x["actual_sessions"] for x in r["rows"])
 source["research_audited_dates"]=days[:-1]
 try:
     discover(source)
