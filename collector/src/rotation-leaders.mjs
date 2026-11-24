@@ -4,6 +4,7 @@
 import {createClient} from '@libsql/client';
 import {createHash} from 'node:crypto';
 import {readFile} from 'node:fs/promises';
+import {execFileSync} from 'node:child_process';
 import {pathToFileURL} from 'node:url';
 const hash=s=>createHash('sha256').update(s).digest('hex');
 const validDay=x=>typeof x==='string'&&/^20\d{2}-\d{2}-\d{2}$/.test(x)&&Number.isFinite(Date.parse(x))&&new Date(x+'T00:00:00Z').toISOString().slice(0,10)===x;
@@ -13,14 +14,72 @@ const round=x=>Math.round(x*100)/100;
 const pct=(a,b)=>round(100*(a/b-1));
 const sectorsLimit=12;
 const thresholds={minimum_turnover_krw:500000000,leader_min_return10_pct:3,follower_return10_min_pct:-3,follower_return10_max_pct:3,follower_return5_max_pct:3,follower_min_turnover_ratio:1.2};
-export function classifyStocks(rows,sector){
-  const matched=rows.filter(r=>r.sectors.includes(sector.code)&&r.amount!==null&&r.amount>=thresholds.minimum_turnover_krw&&r.r5!==null&&r.r10!==null);
+export function classifyStocks(rows,sector,isMember=r=>r.sectors.includes(sector.code)){
+  const matched=rows.filter(r=>isMember(r)&&r.amount!==null&&r.amount>=thresholds.minimum_turnover_krw&&r.r5!==null&&r.r10!==null);
   // A price leader needs positive 5- and 10-day performance and adequate liquidity.
   const leaders=matched.filter(r=>r.r5>0&&r.r10>=thresholds.leader_min_return10_pct).sort((a,b)=>b.r10-a.r10||b.amount-a.amount||a.code.localeCompare(b.code)).slice(0,3);
   const leaderCodes=new Set(leaders.map(x=>x.code));
   const followers=leaders.length?matched.filter(r=>!leaderCodes.has(r.code)&&r.r10>=thresholds.follower_return10_min_pct&&r.r10<=thresholds.follower_return10_max_pct&&r.r5>0&&r.r5<=thresholds.follower_return5_max_pct&&r.amount_ratio!==null&&r.amount_ratio>=thresholds.follower_min_turnover_ratio&&r.r10<leaders[0].r10).sort((a,b)=>Number(b.signals?.length>0)-Number(a.signals?.length>0)||b.amount_ratio-a.amount_ratio||b.r5-a.r5||a.code.localeCompare(b.code)).slice(0,3):[];
   const compact=r=>({code:r.code,name:r.name,close:r.close,r5:r.r5,r10:r.r10,amount:r.amount,amount_ratio:r.amount_ratio,signals:r.signals});
   return {eligible:matched.length,leaders:leaders.map(compact),followers:followers.map(compact)};
+}
+// Exact labels only. Sector flags in the KIS headers are distinct from the
+// three industry code fields. Never expand a theme by a stock name.
+const norm=x=>String(x).normalize('NFKC').replace(/\s+/g,'').toUpperCase();
+const tagNames={
+ KOSPI_LARGE:['대형주','코스피대형주','KOSPI대형주'],KOSPI_MID:['중형주','코스피중형주','KOSPI중형주'],KOSPI_SMALL:['소형주','코스피소형주','KOSPI소형주'],
+ KOSDAQ_LARGE:['코스닥100','KOSDAQ100'],KOSDAQ_MID:['코스닥MID300','KOSDAQMID300'],KOSDAQ_SMALL:['코스닥SMALL','KOSDAQSMALL'],
+ KOSPI_MANUFACTURING:['제조업','코스피제조업','KOSPI제조업'],
+ KOSPI200:['코스피200','KOSPI200'],KOSPI100:['코스피100','KOSPI100'],KOSPI50:['코스피50','KOSPI50'],
+ KOSDAQ150:['코스닥150','KOSDAQ150'],KOSDAQ_VENTURE:['벤처기업','코스닥벤처기업','KOSDAQ벤처기업'],
+ KRX100:['KRX100']
+};
+for(const x of ['건설','중공업','철강소재','에너지화학','정보통신','금융','필수소비재','자유소비재','산업재','건강관리','커뮤니케이션서비스'])
+ tagNames['KOSPI200_'+x]=['코스피200'+x,'KOSPI200'+x];
+for(const x of ['자동차','반도체','바이오','은행','에너지화학','철강','미디어통신','건설','증권','선박','보험','운송'])
+ tagNames['KRX'+x]=['KRX'+x];
+export function masterMembership(members,market,sector){
+ const scoped=members.filter(r=>r.market===market);
+ const tags=Object.entries(tagNames).filter(([tag,names])=>(tag.startsWith('KRX')||tag.startsWith(market))&&names.some(n=>norm(n)===norm(sector.name))).map(([tag])=>tag);
+ if(tags.length===1){
+   const codes=new Set(scoped.filter(r=>r.index_tags?.includes(tags[0])).map(r=>r.code));
+   if(codes.size)return {source:'KIS_MASTER_FLAG',reason:null,codes};
+ }
+ const codes=new Set(scoped.filter(r=>r.sectors.includes(sector.code)).map(r=>r.code));
+ return codes.size?{source:'KIS_MASTER_CODE',reason:null,codes}:{source:'UNMAPPED',reason:'NO_MASTER_MEMBERS',codes};
+}
+function krxLookup(request,env){
+ const allowed=['PATH','HOME','LANG','LC_ALL','TZ','KRX_ID','KRX_PW','KRX_DATA_ID','KRX_DATA_PW'];
+ const subprocessEnv=Object.fromEntries(allowed.filter(k=>typeof env[k]==='string').map(k=>[k,env[k]]));
+ try{return JSON.parse(execFileSync('python',['scripts/rotation_krx_members.py'],{input:JSON.stringify(request),encoding:'utf8',timeout:180000,maxBuffer:2*1024*1024,env:subprocessEnv,stdio:['pipe','pipe','pipe']}));}
+ catch{return {error:'KRX_LOOKUP_UNAVAILABLE'};}
+}
+export async function resolveMembership(members,targets,day,lookup){
+ const resolved=new Map(),missing=[];
+ const key=g=>g.market+'/'+g.code;
+ for(const g of targets){
+   const result=masterMembership(members,g.market,g);
+   resolved.set(key(g),result);
+   if(!result.codes.size)missing.push(g);
+ }
+ if(!missing.length)return resolved;
+ let result;
+ try{result=await lookup({day,groups:missing});}catch{result=null;}
+ const known=new Map(missing.map(g=>[key(g),g]));
+ if(!result||result.day!==day||!Array.isArray(result.groups)||result.groups.length!==missing.length||new Set(result.groups.map(key)).size!==missing.length||result.groups.some(g=>!known.has(key(g)))){
+   for(const g of missing)resolved.set(key(g),{source:'UNMAPPED',reason:'KRX_LOOKUP_UNAVAILABLE',codes:new Set()});
+   return resolved;
+ }
+ for(const g of result.groups){
+   let codes=new Set(),reason='KRX_LOOKUP_UNAVAILABLE',source='UNMAPPED';
+   if(g.status==='AVAILABLE'&&g.reason===null&&/^\d{4,6}$/.test(g.krx_code)&&Array.isArray(g.members)&&g.members.length>0&&g.members.length<=3000&&g.members.every(c=>typeof c==='string'&&/^[0-9A-Z]{6}$/.test(c))&&new Set(g.members).size===g.members.length){
+     const eligible=new Set(members.filter(r=>r.market===g.market).map(r=>r.code));
+     codes=new Set(g.members.filter(c=>eligible.has(c)));
+     if(codes.size){source='KRX_INDEX_CONSTITUENTS';reason=null;}else reason='KRX_NO_ELIGIBLE_MEMBERS';
+   }else if(['NO_EXACT_INDEX_NAME','KRX_CATALOG_UNAVAILABLE','KRX_CONSTITUENTS_UNAVAILABLE','AMBIGUOUS_INDEX_NAME'].includes(g.reason))reason=g.reason;
+   resolved.set(key(g),{source,reason,codes});
+ }
+ return resolved;
 }
 function masterRows(master,now){
   const at=Date.parse(master?.observed_at_utc);
@@ -29,7 +88,8 @@ function masterRows(master,now){
   const seen=new Set();
   for(const r of master.rows){
     if(!['KOSPI','KOSDAQ'].includes(r.market)||!/^[0-9A-Z]{6}$/.test(r.code)||typeof r.name!=='string'||!r.name||r.name.length>100||
-      !Array.isArray(r.sectors)||!r.sectors.length||r.sectors.length>3||!r.sectors.every(s=>/^\d{4,5}$/.test(s))||
+      !Array.isArray(r.sectors)||r.sectors.length>3||!r.sectors.every(s=>/^\d{4,5}$/.test(s))||
+      (r.index_tags!==undefined&&(!Array.isArray(r.index_tags)||r.index_tags.length>30||!r.index_tags.every(t=>Object.hasOwn(tagNames,t))||new Set(r.index_tags).size!==r.index_tags.length))||(!r.sectors.length&&!r.index_tags?.length)||
       new Set(r.sectors).size!==r.sectors.length||seen.has(r.market+'/'+r.code))throw Error('MASTER_ROW_INVALID');
     seen.add(r.market+'/'+r.code);
   }
@@ -88,7 +148,7 @@ export async function selectAlignedTrend(read,receipt){
   }
   throw Error('LEADERS_EOD_HISTORY_REQUIRED');
 }
-export async function captureLeaders(env=process.env,{mode='plan',master=null,now=new Date(),factory=createClient}={}){
+export async function captureLeaders(env=process.env,{mode='plan',master=null,now=new Date(),factory=createClient,lookup=request=>krxLookup(request,env)}={}){
   if(mode==='plan')return {status:'PLAN_ONLY',turso_reads:0,turso_writes:0};
   if(!['inspect','apply'].includes(mode))throw Error('LEADERS_MODE_INVALID');
   const members=masterRows(master,now),receipt=kst(now);
@@ -147,30 +207,41 @@ export async function captureLeaders(env=process.env,{mode='plan',master=null,no
       if(page===59)throw Error('LEADERS_PAGE_LIMIT');
     }
     if(pageRows!==counts.get(day))throw Error('LEADERS_PAGED_COUNT_MISMATCH');
-    const markets=[];
+    const prepared=[];
     for(const m of trend.markets){
       if(!['KOSPI','KOSDAQ'].includes(m.market)||!Array.isArray(m.rows)||m.rows.length>100)throw Error('LEADERS_TREND_INVALID');
       const universe=m.rows.filter(s=>s.trend?.day===day&&s.trend.quadrant==='IMPROVING'&&Number.isFinite(s.trend.momentum)&&s.trend.momentum>0);
       const isNew=s=>s.trend.previous_day===dates[1]&&['LEADING','WEAKENING','LAGGING','NEUTRAL'].includes(s.trend.previous_quadrant);
       const sorted=universe.sort((a,b)=>Number(isNew(b))-Number(isNew(a))||b.trend.momentum-a.trend.momentum||a.code.localeCompare(b.code));
+      prepared.push({market:m.market,improving:universe.length,selected:sorted.slice(0,sectorsLimit)});
+    }
+    const targets=prepared.flatMap(m=>m.selected.map(s=>({market:m.market,code:s.code,name:s.name})));
+    const membership=await resolveMembership(members,targets,day,lookup);
+    const markets=prepared.map(m=>{
       const groupRows=rows.filter(r=>r.market===m.market);
-      const groups=sorted.slice(0,sectorsLimit).map(s=>{
-        const memberCount=members.filter(r=>r.market===m.market&&r.sectors.includes(s.code)).length;
-        const matched=groupRows.filter(r=>r.sectors.includes(s.code)).length;
+      const groups=m.selected.map(s=>{
+        const proof=membership.get(m.market+'/'+s.code);
+        const belongs=r=>proof.codes.has(r.code);
+        const memberCount=proof.codes.size;
+        const matched=groupRows.filter(belongs).length;
         const previous=s.trend.previous_day===dates[1]&&['LEADING','WEAKENING','IMPROVING','LAGGING','NEUTRAL'].includes(s.trend.previous_quadrant)?s.trend.previous_quadrant:null;
+        console.log('BLUE_LEADERS_MEMBERSHIP',JSON.stringify({market:m.market,sector_code:s.code,source:proof.source,reason:proof.reason,members:memberCount,matched}));
         return {code:s.code,name:s.name,rs10:s.trend.rs10,momentum:s.trend.momentum,previous_quadrant:previous,
           entry:previous===null?'UNKNOWN':previous==='IMPROVING'?'CONTINUING':'NEW_ENTRY',members:memberCount,matched,
-          ...classifyStocks(groupRows,s)};
+          membership_source:proof.source,membership_reason:proof.reason,...classifyStocks(groupRows,s,belongs)};
       });
-      markets.push({market:m.market,improving:universe.length,analyzed:groups.length,master_members:members.filter(r=>r.market===m.market).length,matched_members:groupRows.length,groups});
-    }
+      return {market:m.market,improving:m.improving,analyzed:groups.length,master_members:members.filter(r=>r.market===m.market).length,matched_members:groupRows.length,groups};
+    });
+    const mapped=markets.flatMap(m=>m.groups).filter(g=>g.members>0&&g.matched>0).length;
+    const totalGroups=targets.length;
+    const mapping_status=totalGroups===0?'NO_IMPROVING_GROUPS':mapped===totalGroups?'COMPLETE':mapped>0?'PARTIAL':'UNAVAILABLE';
     const snapshot={schema:'BLUE_ROTATION_LEADERS_V1',receipt_day:receipt,observed_at_utc:now.toISOString(),master_receipt_day:master.receipt_day,master_observed_at_utc:master.observed_at_utc,master_hashes:master.hashes,
-      trend_receipt_day:trend.receipt_day,trend_sha256:tr.payload_sha256,day,latest_trend_day,reference_basis,reference5:dates[5],reference10:dates[10],signal_status:signalStatus,thresholds,sector_limit:sectorsLimit,markets};
-    const summary={status:mode==='inspect'?'INSPECT_ONLY':'OK',day,latest_trend_day,reference_basis,master_receipt_day:master.receipt_day,signal_status:signalStatus,turso_reads:reads,
+      trend_receipt_day:trend.receipt_day,trend_sha256:tr.payload_sha256,day,latest_trend_day,reference_basis,reference5:dates[5],reference10:dates[10],signal_status:signalStatus,mapping_status,thresholds,sector_limit:sectorsLimit,markets};
+    const summary={status:mode==='inspect'?'INSPECT_ONLY':'OK',day,latest_trend_day,reference_basis,master_receipt_day:master.receipt_day,signal_status:signalStatus,mapping_status,turso_reads:reads,
       markets:markets.map(m=>({market:m.market,improving:m.improving,analyzed:m.analyzed,master_members:m.master_members,matched_members:m.matched_members,
         mapped_groups:m.groups.filter(g=>g.members>0).length,leaders:m.groups.reduce((a,g)=>a+g.leaders.length,0),followers:m.groups.reduce((a,g)=>a+g.followers.length,0),new_entries:m.groups.filter(g=>g.entry==='NEW_ENTRY').length}))};
     if(mode==='apply'){
-      if(markets.some(m=>m.improving>0&&!m.groups.some(g=>g.members>0&&g.matched>0)))return {...summary,status:'NO_MAPPED_IMPROVING_GROUPS'};
+      if(mapping_status==='UNAVAILABLE')return {...summary,status:'NO_MAPPED_IMPROVING_GROUPS'};
       const raw=JSON.stringify(snapshot),digest=hash(raw);
       if(Buffer.byteLength(raw)>48000)throw Error('LEADERS_PAYLOAD_TOO_LARGE');
       await db.execute('CREATE TABLE IF NOT EXISTS blue_rotation_leaders_v1 (receipt_day TEXT PRIMARY KEY,observed_at_utc TEXT NOT NULL,payload_json TEXT NOT NULL,payload_sha256 TEXT NOT NULL)');
