@@ -1,0 +1,71 @@
+name: BLUE Provisional Pattern Publish
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: 'dry_run validates only; apply writes isolated provisional pattern tables'
+        type: choice
+        options:
+          - dry_run
+          - apply
+        default: dry_run
+        required: true
+concurrency:
+  group: blue-provisional-pattern-publish
+  cancel-in-progress: false
+permissions:
+  contents: read
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: pip install pandas numpy requests pyarrow pykrx
+      - run: npm --prefix tools/turso install --no-audit --no-fund --ignore-scripts --no-package-lock
+      - name: Export saved quotes (read only)
+        env:
+          TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
+          TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
+        run: |
+          mkdir -p output/provisional
+          DAY=$(TZ=Asia/Seoul date +%F)
+          echo "DAY=$DAY" >> "$GITHUB_ENV"
+          node tools/turso/provisional-input-export.mjs "$DAY" output/provisional/quotes --quotes-only
+          python -c 'import json; m=json.load(open("output/provisional/quotes.meta.json")); print(m)'
+      - name: Prepare verified reference history
+        env:
+          KRX_DATA_ID: ${{ secrets.KRX_DATA_ID }}
+          KRX_DATA_PW: ${{ secrets.KRX_DATA_PW }}
+          KRX_AUTH_KEY: ${{ secrets.KRX_AUTH_KEY }}
+        run: |
+          REF=$(python -c 'import json; print(json.load(open("output/provisional/quotes.meta.json"))["reference"])')
+          python scripts/provisional_history.py --reference "$REF" --output output/provisional/history.csv
+      - name: Scan provisional patterns
+        run: |
+          python -c 'import json; assert json.load(open("output/provisional/quotes.meta.json"))["eligible"]>0,"NO_VALID_KIS_QUOTES"'
+          python scripts/provisional_pipeline.py --history output/provisional/history.csv --quote-prefix output/provisional/quotes --day "$DAY" --now "$(date -u +%FT%TZ)" --output output/provisional/result.json
+      - name: Validate and optionally publish provisional snapshot
+        env:
+          TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
+          TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
+          PUBLISH_MODE: ${{ inputs.mode }}
+        run: |
+          set -o pipefail
+          node tools/turso/provisional-pattern-publish.mjs output/provisional/result.json output/provisional/quotes.quotes.json "$PUBLISH_MODE" | tee output/provisional/publish.log
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: provisional-publication
+          path: |
+            output/provisional/*.meta.json
+            output/provisional/result.json
+            output/provisional/publish.log
+          if-no-files-found: ignore
+          retention-days: 3
