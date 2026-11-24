@@ -71,7 +71,30 @@ test('publication reports safe stage and provider code, never leaks provider mes
  await assert.rejects(()=>publishLeaders(snapshot,()=>({async execute(q){
    if(typeof q==='string')return {rows:[]};
    throw Object.assign(Error('SECRET URL token'),{code:'HRANA_WEBSOCKET_ERROR'});
- },close(){closed=true;}}),{}),{message:'LEADERS_STORAGE_WRITE_HRANA_WEBSOCKET_ERROR'});
+ },close(){closed=true;}}),{},{wait:async()=>{},attempts:1}),{message:'LEADERS_STORAGE_WRITE_HRANA_WEBSOCKET_ERROR'});
  assert.equal(closed,true);
  assert.equal(leaderStorageFailure('RUNTIME',new ReferenceError('secret')),'LEADERS_STORAGE_RUNTIME_UNKNOWN_REFERENCEERROR');
+});
+
+test('transient socket errors reopen connection and replay identical snapshot, including lost write acknowledgement',async()=>{
+ const snapshot={receipt_day:'2026-11-25',observed_at_utc:'2026-11-24T16:03:11Z',mapping_status:'PARTIAL',markets:[]};
+ let opened=0,closed=0,saved=null,writes=0;const waits=[];
+ const socket=()=>Object.assign(new TypeError('private provider message'),{cause:{code:'UND_ERR_SOCKET'}});
+ const factory=()=>{const attempt=++opened;return {async execute(q){
+   if(typeof q==='string'){if(attempt===1)throw socket();return {rows:[]};}
+   if(q.sql.startsWith('INSERT')){
+     writes++;if(saved)assert.deepEqual(q.args,saved);else saved=q.args;
+     if(attempt===2)throw socket();
+     return {rows:[]};
+   }
+   return {rows:[{payload_json:saved[2],payload_sha256:saved[3]}]};
+ },close(){closed++;}};};
+ await publishLeaders(snapshot,factory,{}, {wait:async ms=>{waits.push(ms);}});
+ assert.equal(opened,3);assert.equal(closed,3);assert.equal(writes,2);assert.deepEqual(waits,[750,1500]);
+});
+test('auth and proof errors do not retry',async()=>{
+ const snapshot={receipt_day:'2026-11-25',observed_at_utc:'2026-11-24T16:03:11Z'};let opened=0;
+ await assert.rejects(()=>publishLeaders(snapshot,()=>{opened++;return {async execute(){throw Object.assign(Error('secret'),{code:'AUTH_TOKEN_INVALID'});},close(){}};},{},{wait:async()=>{throw Error('unexpected retry');}}),/LEADERS_STORAGE_CREATE_AUTH_TOKEN_INVALID/);
+ assert.equal(opened,1);
+ await assert.rejects(()=>publishLeaders(snapshot,()=>({async execute(){return {rows:[]};},close(){}}),{},{wait:async()=>{throw Error('unexpected retry');}}),/LEADERS_READBACK_MISMATCH/);
 });
