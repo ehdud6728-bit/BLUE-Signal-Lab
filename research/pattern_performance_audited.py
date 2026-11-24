@@ -5,7 +5,8 @@ import argparse
 import json
 import re
 from pathlib import Path
-from pattern_performance_phase1 import HORIZONS, summarize
+from pattern_performance_phase1 import summarize
+HORIZONS = (1, 2, 3, 5, 10, 20)
 from datetime import date
 
 def candle(b):
@@ -43,7 +44,7 @@ def analyze(source):
             raise ValueError("invalid bar")
         bars[key] = b["close"]
     rows = []
-    candles, markets = [], []
+    candles, markets, details = [], [], []
     raw_bars = {(b['day'],b['code']):b for b in source['bars']}
     breadth = {b['day']:b for b in source.get('market_breadth_by_day',[]) if b['scope']=='ALL'}
     seen = set()
@@ -61,6 +62,21 @@ def analyze(source):
             regime=market_regime(breadth.get(d))
             candles.append((c,date.fromisoformat(d),p+"|"+shape,bars[d,c],future))
             markets.append((c,date.fromisoformat(d),p+"|"+regime,bars[d,c],future))
+            if shape != "UNKNOWN":
+                span=bar["high"]-bar["low"]
+                if span:
+                    body=abs(bar["close"]-bar["open"])/span
+                    position=(bar["close"]-bar["low"])/span
+                    body_bin="BODY_10_30" if body<0.3 else "BODY_30_50" if body<0.5 else "BODY_50_70" if body<0.7 else "BODY_70_PLUS"
+                    pos_bin="CLOSE_LOW" if position<0.33 else "CLOSE_MID" if position<0.67 else "CLOSE_HIGH"
+                    if shape=="BULL":
+                        for feature in (body_bin,pos_bin,"MARKET_"+regime):
+                            details.append((c,date.fromisoformat(d),p+"|BULL|"+feature,bars[d,c],future))
+                prev=bars.get((days[index[d]-1],c)) if index[d]>0 else None
+                if prev:
+                    change=100*(bars[d,c]/prev-1)
+                    band="NEGATIVE" if change<0 else "UP_0_2" if change<2 else "UP_2_5" if change<5 else "UP_5_10" if change<10 else "UP_10_PLUS"
+                    details.append((c,date.fromisoformat(d),p+"|"+shape+"|"+band,bars[d,c],future))
             for n in HORIZONS:
                 missing[n] += future[n] is None
     return {"schema":"BLUE_PATTERN_PERFORMANCE_AUDITED_V1",
@@ -74,6 +90,7 @@ def analyze(source):
             "rankings":summarize(rows),
             "candle_rankings":summarize(candles),
             "market_rankings":summarize(markets),
+            "detail_rankings":summarize(details),
             "subgroup_warning":"Exploratory only; small and overlapping samples; same-day close-known features; no independent holdout or corporate action adjustment."}
 
 if __name__ == "__main__":
