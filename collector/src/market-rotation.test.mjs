@@ -10,7 +10,7 @@ test('actual relative strength, provider share, and missing flows are distinct',
  assert.equal(m.sectors[0].turnover_share_pct,12.5);
  assert.deepEqual(parseFlows(flows,'2026-11-24'),[{day:'2026-11-24',foreign:'SELL',institution:'BUY',individual:null}]);
  const bad=structuredClone(category);bad.output2[0].bstp_nmix_prdy_ctrt='';
- assert.throws(()=>parseCategory(bad,'KOSPI','0001'),/CATEGORY_SECTOR_INVALID/);
+ assert.equal(parseCategory(bad,'KOSPI','0001').sector_coverage.excluded.invalid_change,1);
 });
 test('plan makes no calls; inspect does not write and apply verifies private snapshot',async()=>{
  const never=()=>{throw Error('forbidden');};
@@ -32,4 +32,16 @@ test('plan makes no calls; inspect does not write and apply verifies private sna
  assert.equal(result.status,'OK');assert.equal(writes,2);assert.equal(result.snapshot.quote_trade_day,null);
  assert.equal(result.snapshot.markets.length,2);assert.equal(calls,8);
  assert.equal(JSON.parse(saved).markets[0].flows[0].foreign,'SELL');
+});
+
+test('individual bad rows do not discard good rows; coverage reconciles',()=>{
+ const body=structuredClone(category);
+ const row=body.output2[0];
+ body.output2.push({...row,bstp_cls_code:'1',bstp_nmix_prpr:'0'}, {...row,bstp_cls_code:'0003',bstp_nmix_prpr:'0'},
+   {...row,bstp_cls_code:'0004',hts_kor_isnm:''},{...row,bstp_cls_code:'0005',bstp_nmix_prdy_ctrt:''},
+   {...row,bstp_cls_code:'0006'},{...row,bstp_cls_code:'6'}, {...row,bstp_cls_code:''});
+ const m=parseCategory(body,'KOSPI','0001');
+ assert.equal(m.sectors.length,1);
+ assert.deepEqual(m.sector_coverage,{received:8,accepted:1,summary_rows:1,excluded_rows:6,excluded:{invalid_code:1,invalid_name:1,invalid_index:1,invalid_change:1,duplicate:2},status:'PARTIAL'});
+ assert.deepEqual(parseFlows({rt_cd:'0',output:[{stck_bsop_date:'20261124'}]},'2026-11-24'),[]);
 });

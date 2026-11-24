@@ -21,6 +21,16 @@ function validated(row:Record<string,unknown>,now:Date){
       ![m.up,m.down,m.flat].every(count)||!Array.isArray(m.sectors)||!m.sectors.length||m.sectors.length>100||
       !['AVAILABLE','MISSING','UNAVAILABLE'].includes(m.flow_status)||!Array.isArray(m.flows)||m.flows.length>10)
       throw Error('INVALID_MARKET_SCOPE');
+    const coverage=m.sector_coverage;
+    if(coverage!==undefined){
+      const reasons=['invalid_code','invalid_name','invalid_index','invalid_change','duplicate'];
+      if(!coverage||![coverage.received,coverage.accepted,coverage.summary_rows,coverage.excluded_rows].every(n=>count(n)&&n!==null)||
+        coverage.received>250||coverage.accepted!==m.sectors.length||
+        coverage.received!==coverage.accepted+coverage.summary_rows+coverage.excluded_rows||
+        !coverage.excluded||!reasons.every(k=>count(coverage.excluded[k])&&coverage.excluded[k]!==null)||
+        reasons.reduce((n,k)=>n+coverage.excluded[k],0)!==coverage.excluded_rows||
+        coverage.status!==(coverage.excluded_rows?'PARTIAL':'COMPLETE_RESPONSE'))throw Error('INVALID_MARKET_SECTOR_COVERAGE');
+    }
     seen.add(m.market);
     const codes=new Set<string>();
     for(const x of m.sectors){
