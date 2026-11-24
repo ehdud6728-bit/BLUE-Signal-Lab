@@ -13,8 +13,12 @@ r=discover(source)
 assert any(x["direction"]=="UPSIDE" and x["status"]=="HOLDOUT_AGREES_EXPLORATORY" for x in r["rows"])
 assert any(x["direction"]=="DOWNSIDE" and x["status"]=="HOLDOUT_AGREES_EXPLORATORY" for x in r["rows"])
 assert all(x["window"]<=60 for x in r["rows"])
-assert all(x["train_base"]["up_pct"]==0 for x in r["rows"] if x["direction"]=="UPSIDE")
-assert all(x["train_base"]["up_pct"]==100 for x in r["rows"] if x["direction"]=="DOWNSIDE")
+assert all(x["train_base"]["up_pct"]==0 for x in r["rows"] if x["pattern"]=="ENV20|BULL")
+assert any(x["pattern"]=="ENV20|BULL" for x in r["rows"])
+assert all(x["train_base"]["up_pct"]==100 for x in r["rows"] if x["pattern"]=="ENV20|BEAR")
+assert any(x["pattern"]=="ENV20|BEAR" for x in r["rows"])
+for x in r["rows"]:
+    assert x["train"]["n"]+x["train_base"]["n"]==20*(x["train_sessions"]-x["horizon"])
 assert all(x["covered_sessions"]==x["actual_sessions"] for x in r["rows"])
 source["research_audited_dates"]=days[:-1]
 try:
