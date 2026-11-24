@@ -62,6 +62,6 @@ export default function TursoAiReadiness({api,active}:{api:string;active:boolean
       <li>다음 거래일 시가 진입, 익절·손절·최대 보유기간 중 첫 도달 검증</li>
       <li>최근 발생 신호와 이미 성과가 확정된 사례를 분리하고, 시장·업종 국면 및 비용을 검증한 뒤 AI 관찰 후보 제공</li>
     </ol>
-    <p className="turso-ai-coverage-note">시장 브리핑은 감사된 일봉의 규칙 기반 관측이며, 추천 점수·예상 수익·미래 시장 확률을 생성하지 않습니다. D1의 기존 AI 결과를 대신 가져오지 않습니다.</p>
+    <p className="turso-ai-coverage-note">시장 브리핑은 감사된 일봉의 규칙 기반 관측이며, 추천 점수·예상 수익·AI 시장 전망을 생성하지 않습니다. D1의 기존 AI 결과를 대신 가져오지 않습니다.</p>
   </section>;
 }
