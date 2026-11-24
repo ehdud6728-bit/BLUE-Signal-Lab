@@ -2,12 +2,12 @@ import {matchedRecent} from './recent-match';
 import {patternLabel} from './research-pattern-label';
 import {RECENT_ASOF,RECENT_ROWS} from './recent-pattern-data';
 export default function RecentPatternReference({day,signals,matched=false,features,onDetails}:{day:string;signals:string[];matched?:boolean;features?:unknown;onDetails?:()=>void}){
- if(day<=RECENT_ASOF)return null;
- const rec=matched?matchedRecent(day,signals,features)[0]:undefined;
+ if(day<=RECENT_ASOF&&!matched)return null;
+ const rec=matched?matchedRecent(day,signals,features,true)[0]:undefined;
  const base=signals.flatMap(name=>(RECENT_ROWS[name]??[]).filter(r=>r[0]===3&&r[1]>=30).map(r=>({name,r}))).sort((a,b)=>a.r[3]-b.r[3])[0];
  if(!rec&&(!base||base.r[3]>=50||base.r[5]>=0))return null;
  return <div className="r15106-search-pattern-evidence blue-research" role="note">
- {rec?<><strong className="r-research-gold-label">★ 단기 추천 조건 일치</strong><small>{patternLabel(rec.pattern)}</small><small>{rec.horizon_trading_days}일 상승 관측 {rec.positive_return_probability_pct.toFixed(2)}% · 중앙 {rec.median_return_pct.toFixed(2)}% · 표본 {rec.sample_count}건</small><small>최근 연구에서 양호한 성과를 보인 복합 조건입니다. 독립 검증 전입니다.</small></>:base&&<><strong>하락 위험 관찰 · {base.name}</strong><small>3일 상승 관측 {base.r[3].toFixed(2)}% · 중앙 {base.r[5].toFixed(2)}% · 표본 {base.r[1]}건. 반등을 단정하기 어렵습니다.</small></>}
+ {rec?<><strong className="r-research-gold-label">★ {day<=RECENT_ASOF?'과거 추천 조건 일치':'단기 추천 조건 일치'}</strong><small>{patternLabel(rec.pattern)}</small><small>{rec.horizon_trading_days}일 상승 관측 {rec.positive_return_probability_pct.toFixed(2)}% · 중앙 {rec.median_return_pct.toFixed(2)}% · 표본 {rec.sample_count}건</small><small>{day<=RECENT_ASOF?'최신 연구 조건의 과거 일치 사례이며 당시 추천이 아닙니다.':'최근 연구에서 양호한 성과를 보인 복합 조건입니다.'} 독립 검증 전입니다.</small></>:base&&<><strong>하락 위험 관찰 · {base.name}</strong><small>3일 상승 관측 {base.r[3].toFixed(2)}% · 중앙 {base.r[5].toFixed(2)}% · 표본 {base.r[1]}건. 반등을 단정하기 어렵습니다.</small></>}
  <small>{RECENT_ASOF} 기준 · 과거 관측 결과</small>
  {onDetails&&<button type="button" className="filter-toggle" onClick={e=>{e.stopPropagation();onDetails();}}>AI 패턴 상세 보기</button>}
  </div>;
