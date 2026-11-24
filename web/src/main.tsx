@@ -1100,6 +1100,19 @@ function App(){
           <TursoProvisionalToday api={API} day={date} query={appliedNameQuery}/>}
         {activeProvisional?<section className="panel result" ref={resultRef} id="results-panel">
           <div className="result-heading"><h2><BarChart3 size={18}/> 검색된 종목 <small>{activeProvisional.total}건</small></h2><span className="eod-pill"><Clock3 size={13}/> KIS 잠정</span></div>
+          <form className="r1599-active-filters" onSubmit={e=>{e.preventDefault();void search(1,false,gcFields,gcLogic,undefined,undefined,techFields,techLogic,{q:localQuery,sort:resultSort});}}>
+            <label>종목명·코드 <input value={localQuery} onChange={e=>setLocalQuery(e.target.value)} placeholder="종목명 또는 코드"/></label>
+            <button type="submit" disabled={busy}>검색</button>
+          </form>
+          <details className="ai-search-help"><summary>GC·이동평균·정렬 조건</summary>
+            <div className="r1599-active-filters">
+              <label>GC 조건 <select value={gcLogic} onChange={e=>changeGc(gcFields,e.target.value as 'any'|'all')}><option value="any">하나 이상</option><option value="all">모두</option></select></label>
+              {GC_OPTIONS.map(x=><label key={x.key}><input type="checkbox" checked={gcFields.includes(x.key)} onChange={()=>changeGc(gcFields.includes(x.key)?gcFields.filter(k=>k!==x.key):[...gcFields,x.key])}/>{x.label}</label>)}
+              <label>이동평균 조건 <select value={techLogic} onChange={e=>changeTech(techFields,e.target.value as 'any'|'all')}><option value="any">하나 이상</option><option value="all">모두</option></select></label>
+              {TECH_OPTIONS.map(x=><label key={x.key}><input type="checkbox" checked={techFields.includes(x.key)} onChange={()=>changeTech(techFields.includes(x.key)?techFields.filter(k=>k!==x.key):[...techFields,x.key])}/>{x.label}</label>)}
+              <label>정렬 <select value={resultSort} onChange={e=>{const sort=e.target.value as ResultSort;setResultSort(sort);void search(1,false,gcFields,gcLogic,undefined,undefined,techFields,techLogic,{sort});}}><option value="recent">종목코드순</option><option value="amount_surge">거래대금 증가율순</option><option value="amount_decline">거래대금 감소율순</option></select></label>
+            </div>
+          </details>
           <TursoProvisionalPatterns state={activeProvisional} loading={busy} onPage={p=>void search(p,false)} showSignal={showSignal}/>
         </section>:<section className="panel result" ref={resultRef} id="results-panel">
           <div className="result-heading"><h2><BarChart3 size={18}/> 검색된 종목 <small>{dataStatus==='NOT_IMPORTED'?'일봉 미수집':total===null?'검색 전':total+'건'}</small></h2><span className="eod-pill"><Clock3 size={13}/> EOD</span></div>
