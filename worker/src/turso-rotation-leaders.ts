@@ -29,7 +29,9 @@ export async function tursoRotationLeaders(env:Env,factory:Factory=createClient,
   if(s.latest_trend_day!==undefined&&(!day(s.latest_trend_day)||s.latest_trend_day<s.day||s.latest_trend_day>s.receipt_day||!['AUDITED_DATES_LEGACY','EXACT_BENCHMARK_DATES'].includes(s.reference_basis)))throw Error('LEADERS_ALIGNMENT_INVALID');
   const thresholds=s.thresholds;
   if(!thresholds||thresholds.minimum_turnover_krw!==500000000||thresholds.leader_min_return10_pct!==3||thresholds.follower_return10_min_pct!==-3||thresholds.follower_return10_max_pct!==3||thresholds.follower_return5_max_pct!==3||thresholds.follower_min_turnover_ratio!==1.2)throw Error('LEADERS_THRESHOLDS_INVALID');
+  if(s.mapping_status!==undefined&&!['COMPLETE','PARTIAL','NO_IMPROVING_GROUPS'].includes(s.mapping_status))throw Error('LEADERS_MAPPING_STATUS_INVALID');
   const markets=new Set<string>();
+  let groupsTotal=0,mappedTotal=0;
   for(const m of s.markets){
    if(!['KOSPI','KOSDAQ'].includes(m.market)||markets.has(m.market)||![m.improving,m.analyzed,m.master_members,m.matched_members].every(count)||
      m.analyzed!==Math.min(m.improving,s.sector_limit)||m.matched_members>m.master_members||!Array.isArray(m.groups)||m.groups.length!==m.analyzed)throw Error('LEADERS_SCOPE_INVALID');
@@ -41,6 +43,9 @@ export async function tursoRotationLeaders(env:Env,factory:Factory=createClient,
       ![g.members,g.matched,g.eligible].every(count)||g.matched>g.members||g.eligible>g.matched||
       !Array.isArray(g.leaders)||!Array.isArray(g.followers)||g.leaders.length>3||g.followers.length>3||g.leaders.length+g.followers.length>g.eligible||
       g.followers.length&&!g.leaders.length)throw Error('LEADERS_GROUP_INVALID');
+    groupsTotal++;if(g.members>0&&g.matched>0)mappedTotal++;
+    if(s.mapping_status!==undefined&&(!['KIS_MASTER_CODE','KIS_MASTER_FLAG','KRX_INDEX_CONSTITUENTS','UNMAPPED'].includes(g.membership_source)||
+      (g.membership_source==='UNMAPPED'?(g.members!==0||typeof g.membership_reason!=='string'||!g.membership_reason):g.members===0||g.membership_reason!==null)))throw Error('LEADERS_MEMBERSHIP_INVALID');
     codes.add(g.code);const stockCodes=new Set<string>();
     for(const [kind,rows] of [['leader',g.leaders],['follower',g.followers]] as const){
      for(const x of rows){
@@ -54,6 +59,7 @@ export async function tursoRotationLeaders(env:Env,factory:Factory=createClient,
     }
    }
   }
+  if(s.mapping_status!==undefined&&s.mapping_status!==(groupsTotal===0?'NO_IMPROVING_GROUPS':mappedTotal===groupsTotal?'COMPLETE':mappedTotal>0?'PARTIAL':'UNAVAILABLE'))throw Error('LEADERS_MAPPING_COUNT_MISMATCH');
   // Ensure current ranking is still bound to the exact source trend generation.
   const latest=(await q('SELECT payload_sha256 FROM blue_market_trends_v1 WHERE receipt_day<=? ORDER BY receipt_day DESC LIMIT 1',[today])).rows[0];
   return {status:'READY',...s,stale_receipt:s.receipt_day!==today,trend_superseded:latest?.payload_sha256!==s.trend_sha256};
