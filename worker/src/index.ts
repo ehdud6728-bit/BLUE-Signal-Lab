@@ -13,6 +13,7 @@ import {InvalidEodQuery,tursoEodDates,tursoEodSearch,tursoEodCompare} from './tu
 import {InvalidResearchQuery,tursoResearchDates,tursoResearchSearch,tursoResearchChart,tursoResearchCoverage,tursoPatternPulse,tursoExitStudyReport} from './turso-research';
 import {InvalidTursoResearchRequest,requestTursoResearch,tursoResearchRequestStatus} from './turso-research-request';
 import {InvalidProvisionalQuery,tursoProvisionalSearch} from './turso-provisional-search';
+import {tursoPublishedProvisional} from './turso-published-provisional';
 interface Env {
   DB: D1Database;
   TURSO_DATABASE_URL?:string;
@@ -128,6 +129,11 @@ export default {
       }
       // KIS quotes are an explicitly PARTIAL, provisional view of the current
       // KST date; neither a KRX EOD search nor a verified technical signal.
+      if(p==='/api/research/provisional-patterns'&&request.method==='GET'){
+        try{return respond(await tursoPublishedProvisional(env,u.searchParams));}
+        catch(e){if(e instanceof InvalidProvisionalQuery)return respond({error:e.message},400);
+          return respond({error:'TURSO_PROVISIONAL_PATTERNS_UNAVAILABLE'},503);}
+      }
       if(p==='/api/research/provisional'&&request.method==='GET'){
         try{return respond(await tursoProvisionalSearch(env,u.searchParams));}
         catch(e){if(e instanceof InvalidProvisionalQuery)return respond({error:e.message},400);
