@@ -4,7 +4,7 @@
 import {createClient} from '@libsql/client';
 import {createHash} from 'node:crypto';
 import {readFile} from 'node:fs/promises';
-import {execFileSync} from 'node:child_process';
+import {execFile} from 'node:child_process';
 import {pathToFileURL} from 'node:url';
 const hash=s=>createHash('sha256').update(s).digest('hex');
 const validDay=x=>typeof x==='string'&&/^20\d{2}-\d{2}-\d{2}$/.test(x)&&Number.isFinite(Date.parse(x))&&new Date(x+'T00:00:00Z').toISOString().slice(0,10)===x;
@@ -48,11 +48,20 @@ export function masterMembership(members,market,sector){
  const codes=new Set(scoped.filter(r=>r.sectors.includes(sector.code)).map(r=>r.code));
  return codes.size?{source:'KIS_MASTER_CODE',reason:null,codes}:{source:'UNMAPPED',reason:'NO_MASTER_MEMBERS',codes};
 }
-function krxLookup(request,env){
+export function krxLookup(request,env){
  const allowed=['PATH','HOME','LANG','LC_ALL','TZ','KRX_ID','KRX_PW','KRX_DATA_ID','KRX_DATA_PW'];
  const subprocessEnv=Object.fromEntries(allowed.filter(k=>typeof env[k]==='string').map(k=>[k,env[k]]));
- try{return JSON.parse(execFileSync('python',['scripts/rotation_krx_members.py'],{input:JSON.stringify(request),encoding:'utf8',timeout:180000,maxBuffer:2*1024*1024,env:subprocessEnv,stdio:['pipe','pipe','pipe']}));}
- catch{return {error:'KRX_LOOKUP_UNAVAILABLE'};}
+ // Keep the event loop and the HTTP pool responsive while Python queries KRX.
+ return new Promise(resolve=>{
+   try{
+     const child=execFile('python',['scripts/rotation_krx_members.py'],{encoding:'utf8',timeout:180000,maxBuffer:2*1024*1024,env:subprocessEnv},(error,stdout)=>{
+       if(error){resolve({error:'KRX_LOOKUP_UNAVAILABLE'});return;}
+       try{resolve(JSON.parse(stdout));}catch{resolve({error:'KRX_LOOKUP_UNAVAILABLE'});}
+     });
+     child.stdin.on('error',()=>{/* process callback handles failures */});
+     child.stdin.end(JSON.stringify(request));
+   }catch{resolve({error:'KRX_LOOKUP_UNAVAILABLE'});}
+ });
 }
 export async function resolveMembership(members,targets,day,lookup){
  const resolved=new Map(),missing=[];
@@ -155,7 +164,12 @@ export function leaderStorageFailure(stage,e){
   const kind=['TypeError','ReferenceError','RangeError','SyntaxError'].includes(e?.name)?'_'+e.name.toUpperCase():'';
   return 'LEADERS_STORAGE_'+stage+'_'+safe+kind;
 }
-export async function publishLeaders(snapshot,factory,opts){
+// Only transient network errors are retried; no retry on SQL, auth or proof mismatch.
+export function retryableTransport(e){
+ const code=String(e?.code||e?.cause?.code||'');
+ return ['UND_ERR_SOCKET','UND_ERR_CONNECT_TIMEOUT','UND_ERR_HEADERS_TIMEOUT','UND_ERR_BODY_TIMEOUT','ECONNRESET','ECONNREFUSED','ETIMEDOUT','EPIPE','EAI_AGAIN','HRANA_WEBSOCKET_ERROR','HRANA_WEBSOCKET_CLOSED','STREAM_EXPIRED'].includes(code);
+}
+async function publishLeadersOnce(snapshot,factory,opts){
   const raw=JSON.stringify(snapshot),digest=hash(raw);
   if(Buffer.byteLength(raw)>48000)throw Error('LEADERS_PAYLOAD_TOO_LARGE');
   let stage='CONNECT',db;
@@ -172,8 +186,20 @@ export async function publishLeaders(snapshot,factory,opts){
     const result=await db.execute({sql:'SELECT payload_json,payload_sha256 FROM blue_rotation_leaders_v1 WHERE receipt_day=?',args:[snapshot.receipt_day]});
     if(result.rows.length!==1||result.rows[0].payload_json!==raw||result.rows[0].payload_sha256!==digest)throw Error('LEADERS_READBACK_MISMATCH');
     console.log('BLUE_LEADERS_STORAGE_VERIFIED',JSON.stringify({receipt_day:snapshot.receipt_day,bytes:Buffer.byteLength(raw)}));
-  }catch(e){if(e?.message==='LEADERS_READBACK_MISMATCH')throw e;throw Error(leaderStorageFailure(stage,e));}
+  }catch(e){if(e?.message==='LEADERS_READBACK_MISMATCH')throw e;throw Object.assign(Error(leaderStorageFailure(stage,e)),{retryable:retryableTransport(e)});}
   finally{try{db?.close();}catch{/* closing cannot invalidate completed readback */}}
+}
+export async function publishLeaders(snapshot,factory,opts,{wait=ms=>new Promise(resolve=>setTimeout(resolve,ms)),attempts=3}={}){
+ // Replaying the exact payload is idempotent: the receipt-day upsert is
+ // monotonic, and successful completion requires exact payload/hash readback.
+ for(let attempt=1;attempt<=attempts;attempt++){
+   try{return await publishLeadersOnce(snapshot,factory,opts);}
+   catch(e){
+     if(!e?.retryable||attempt===attempts)throw e;
+     console.log('BLUE_LEADERS_STORAGE_RETRY',JSON.stringify({attempt,error:e.message}));
+     await wait(750*2**(attempt-1));
+   }
+ }
 }
 export async function captureLeaders(env=process.env,{mode='plan',master=null,now=new Date(),factory=createClient,lookup=request=>krxLookup(request,env)}={}){
   if(mode==='plan')return {status:'PLAN_ONLY',turso_reads:0,turso_writes:0};
@@ -182,6 +208,7 @@ export async function captureLeaders(env=process.env,{mode='plan',master=null,no
   const url=String(env.TURSO_DATABASE_URL||''),authToken=String(env.TURSO_AUTH_TOKEN||'');
   if(!/^(libsql|https):\/\//.test(url)||!authToken)throw Error('LEADERS_DB_NOT_CONFIGURED');
   const db=factory({url,authToken,intMode:'string'});
+  let readClosed=false;
   try{
     let reads=0;
     const read=async(sql,args=[])=>{reads++;return (await db.execute({sql,args})).rows;};
@@ -234,6 +261,8 @@ export async function captureLeaders(env=process.env,{mode='plan',master=null,no
       if(page===59)throw Error('LEADERS_PAGE_LIMIT');
     }
     if(pageRows!==counts.get(day))throw Error('LEADERS_PAGED_COUNT_MISMATCH');
+    // All audit/price reads are complete. Release before external lookup and publication.
+    db.close();readClosed=true;
     const prepared=[];
     for(const m of trend.markets){
       if(!['KOSPI','KOSDAQ'].includes(m.market)||!Array.isArray(m.rows)||m.rows.length>100)throw Error('LEADERS_TREND_INVALID');
@@ -274,7 +303,7 @@ export async function captureLeaders(env=process.env,{mode='plan',master=null,no
       await publishLeaders(snapshot,factory,{url,authToken,intMode:'string'});
     }
     return summary;
-  }finally{try{db.close();}catch{/* preserve original analysis or storage outcome */}}
+  }finally{if(!readClosed)try{db.close();}catch{/* preserve original analysis or storage outcome */}}
 }
 if(process.argv[1]&&import.meta.url===pathToFileURL(process.argv[1]).href){
   try{const mode=process.argv[2]||'plan',master=mode==='plan'?null:JSON.parse(await readFile(process.argv[3],'utf8'));
