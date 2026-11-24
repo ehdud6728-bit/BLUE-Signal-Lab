@@ -1,15 +1,25 @@
+import {RECENT_ASOF,RECENT_ROWS} from './recent-pattern-data';
 // Audited snapshot: Actions 45310116345 / artifact 14883270755.
 // Descriptive observations, not forecasts. Never attach a candle subgroup
 // to a stock without verified matching OHLC.
 export default function RecentPatternReference({day,signals,matched=false}:{day:string;signals:string[];matched?:boolean}){
- if(day<'2026-11-23'||!signals.includes('ENV20_LOWER_TOUCH'))return null;
+ const names=[...new Set(signals)].filter(n=>Object.prototype.hasOwnProperty.call(RECENT_ROWS,n));
+ if(day<=RECENT_ASOF||!names.length)return null;
+ const env=names.includes('ENV20_LOWER_TOUCH');
  return <div className="r15106-search-pattern-evidence" role="note">
   {matched&&<div className="r-research-gold-label">★ 단기 연구 후보 · 캔들 조건 일치 (독립 검증 전)</div>}
   <strong>최근 단기패턴 · 탐색적 연구</strong>
   <small>2026-11-23 기준 · 검증 일봉 28일 / 신호일 24일</small>
-  <small>ENV20 하단: 2일 상승 관측 51.47% (919건) · 3일 52.33% (900건) · 5일 50.69% (870건)</small>
+  {env&&<><small>ENV20 하단: 2일 상승 관측 51.47% (919건) · 3일 52.33% (900건) · 5일 50.69% (870건)</small>
   <small>3일 중앙 수익률 +0.49% · 신호 발생일 21일</small>
-  <small>별도 세부 연구: 일반 양봉 + 종가 중간 조건의 3일 상승 관측 87.23% (94건 / 11일), 중앙 +9.05%. {matched?'현재 종목의 검색일 캔들 조건 일치.':'현재 종목의 캔들 조건 미확인 또는 불일치.'}</small>
+  <small>별도 세부 연구: 일반 양봉 + 종가 중간 조건의 3일 상승 관측 87.23% (94건 / 11일), 중앙 +9.05%. {matched?'현재 종목의 검색일 캔들 조건 일치.':'현재 종목의 캔들 조건 미확인 또는 불일치.'}</small></>}
+  <details onClick={e=>e.stopPropagation()} onKeyDown={e=>e.stopPropagation()}>
+    <summary>해당 기술패턴 기간별 성과 ({names.length}개)</summary>
+    {names.map(name=><div key={name}><strong>{name}</strong>
+      <small>보유일 | 상승 관측률 | 평균 / 중앙 수익률 | 표본 / 신호일</small>
+      {RECENT_ROWS[name].map(([h,n,d,up,mean,med])=><small key={h}>{h}일 | {up.toFixed(2)}% | {mean.toFixed(2)}% / {med.toFixed(2)}% | {n}건 / {d}일</small>)}
+    </div>)}
+  </details>
   {matched&&<details onClick={e=>e.stopPropagation()} onKeyDown={e=>e.stopPropagation()}>
     <summary>매수 시점·익절·손절 연구 상세보기</summary>
     <small>동일 보유기간 3거래일 · 동일 표본 94건 / 11일</small>
