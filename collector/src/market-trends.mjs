@@ -47,8 +47,8 @@ export function rotation(series,benchmark){
   if(base.some(x=>!byDay.has(x.day)))return null;
   const ratio=base.map(x=>byDay.get(x.day)/x.close);
   const rel=(n,i)=>100*(ratio[i]/ratio[i-n]-1);
-  const rs5=rel(5,25),rs10=rel(10,25),rs20=rel(20,25),momentum=rs10-rel(10,20);
-  const quadrant=Math.abs(rs10)<.00005||Math.abs(momentum)<.00005?'NEUTRAL':rs10>0?momentum>0?'LEADING':'WEAKENING':momentum>0?'IMPROVING':'LAGGING';
+  const rs5=rounded(rel(5,25)),rs10=rounded(rel(10,25)),rs20=rounded(rel(20,25)),momentum=rounded(rel(10,25)-rel(10,20));
+  const quadrant=rs10===0||momentum===0?'NEUTRAL':rs10>0?momentum>0?'LEADING':'WEAKENING':momentum>0?'IMPROVING':'LAGGING';
   return {day:base[25].day,matched_sessions:26,rs5:rounded(rs5),rs10:rounded(rs10),rs20:rounded(rs20),momentum:rounded(momentum),quadrant};
 }
 export function globalSummary(series){
