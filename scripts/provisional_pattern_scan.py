@@ -31,16 +31,12 @@ def scan_provisional(history, quotes, day, reference, now, workers=1):
         o,h,l,c,v,a=(q.get(k) for k in ("open","high","low","close","volume","amount"))
         if any(type(x) is not int for x in (o,h,l,c,v,a)) or not 0<l<=min(o,c)<=max(o,c)<=h or v<=0 or a<=0:
             excluded+=1;continue
-        rows.append(dict(Date=target,Code=code,Name=q.get("name") or code,Market=q["market"],Open=o,High=h,Low=l,Close=c,Volume=v,Amount=a))
+        rows.append(dict(Date=target,Code=code,Name=q.get("name") or code,Market=str(ref.loc[code,"market"]),Open=o,High=h,Low=l,Close=c,Volume=v,Amount=a))
     if not rows: return dict(day=day,status="KIS_PROVISIONAL",observed=len(quotes),eligible=0,excluded=excluded,items=[])
     base=history.reset_index() if "Date" not in history.columns and history.index.name=="Date" else history.copy()
     base=base.loc[base.Code.astype(str).str.zfill(6).isin([r["Code"] for r in rows])]
     combined=pd.concat([base[COLS],pd.DataFrame(rows,columns=COLS)],ignore_index=True)
-    adjusted,_=adjust_verified_actions(normalise(combined),day)
-    # The shared scanner accepts the original provider column schema.
-    # Preserve action status columns and adjusted OHLC via the normalised aliases.
-    for upper,lower in zip(("Date","Code","Open","High","Low","Close","Volume","Amount"),("date","code","open","high","low","close","volume","amount")):
-        if lower in adjusted: adjusted[upper]=adjusted[lower]
+    adjusted,_=adjust_verified_actions(combined,target.date())
     matches,audit=scan_r08_parallel(adjusted,day,workers=workers)
     for r in matches:
         r.update(provisional=True,pattern_confirmed=False,observed_at_utc=times[r["code"]],source="KIS_PROVISIONAL",data_frequency="PROVISIONAL_DAILY")
