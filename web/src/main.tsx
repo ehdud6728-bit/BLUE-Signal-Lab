@@ -280,11 +280,11 @@ function App(){
             if(fetched.status==='DISABLED'||fetched.status==='MARKET_CLOSED'||
               fetched.status==='RATE_LIMITED'||fetched.status.startsWith('TURSO_TOKEN_'))break;
           }catch(e){if(ctrl.signal.aborted)break;}
-          // Twenty calls/minute is the instant-route server cap. Space
+          // Forty calls/minute is the instant-route server cap. Space
           // browser requests, and let the server refuse concurrent users.
           if(i<missing.length-1&&!ctrl.signal.aborted){
             await new Promise<void>(resolve=>{
-              const timer=window.setTimeout(done,3100);
+              const timer=window.setTimeout(done,1600);
               function done(){ctrl.signal.removeEventListener('abort',onAbort);resolve();}
               function onAbort(){window.clearTimeout(timer);done();}
               ctrl.signal.addEventListener('abort',onAbort,{once:true});

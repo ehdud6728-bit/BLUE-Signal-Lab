@@ -12,7 +12,7 @@ const MAX_PILOT_MS=30*60*1000;
 const MAX_SOURCE_AGE_DAYS=7;
 const INSTANT_PER_CODE_SECONDS=20;
 // Conservative first throughput step; shared KIS account must be monitored.
-const INSTANT_PER_MINUTE=20;
+const INSTANT_PER_MINUTE=40;
 // KRX stock codes include six-character uppercase alphanumerics (e.g. 00088K).
 // Match the validated EOD candidate and Turso price-comparison contracts.
 const CODE=/^[0-9A-Z]{6}$/;
@@ -204,7 +204,8 @@ export async function collectTursoInstant(env,code,now=new Date(),deps={}){
       buildTursoMirrorStatements([quote]),'write');
     return {status:'SAVED',code,market,price:quote.price,
       trade_date:day,received_at_utc:quote.received_at_utc};
-  }catch{
+  }catch(e){
+    if(e instanceof Error&&e.message==='KIS_RATE_LIMIT')return {status:'RATE_LIMITED'};
     // No credentials, raw provider payload, SQL or token ever reaches the API.
     return {status:'QUOTE_UNAVAILABLE'};
   }finally{client.close();}
