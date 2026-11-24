@@ -26,7 +26,7 @@ jobs:
           DAY=$(TZ=Asia/Seoul date +%F)
           echo "DAY=$DAY" >> "$GITHUB_ENV"
           node tools/turso/provisional-input-export.mjs "$DAY" output/provisional/quotes --quotes-only
-          python -c 'import json; m=json.load(open("output/provisional/quotes.meta.json")); print(m); assert m["eligible"]>0,"NO_VALID_KIS_TURNOVER"'
+          python -c 'import json; m=json.load(open("output/provisional/quotes.meta.json")); print(m)'
       - name: Prepare verified reference history
         env:
           KRX_DATA_ID: ${{ secrets.KRX_DATA_ID }}
@@ -37,6 +37,7 @@ jobs:
           python scripts/provisional_history.py --reference "$REF" --output output/provisional/history.csv
       - name: Scan provisional patterns
         run: |
+          python -c 'import json; assert json.load(open("output/provisional/quotes.meta.json"))["eligible"]>0,"NO_VALID_KIS_TURNOVER"'
           python scripts/provisional_pipeline.py --history output/provisional/history.csv --quote-prefix output/provisional/quotes --day "$DAY" --now "$(date -u +%FT%TZ)" --output output/provisional/result.json
       - uses: actions/upload-artifact@v4
         if: always()

@@ -3,6 +3,8 @@ on:
   pull_request:
     paths:
       - 'scripts/**'
+      - 'tools/turso/provisional-input-export*'
+      - '.github/workflows/blue_provisional_live_verify.yml'
       - 'tests/**'
       - '.github/workflows/blue_provisional_engine_test.yml'
   workflow_dispatch:
@@ -24,3 +26,9 @@ jobs:
       - run: node --check tools/turso/provisional-input-export.mjs
 
       - run: python -m unittest discover -s tests -p test_provisional_pipeline.py
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm --prefix tools/turso install --no-audit --no-fund --ignore-scripts --no-package-lock
+      - run: node --test tools/turso/provisional-input-export.test.mjs
