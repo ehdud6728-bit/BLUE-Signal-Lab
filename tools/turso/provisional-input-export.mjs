@@ -26,10 +26,10 @@ export async function exportInputs(client,day,now,sessions=260,{quotesOnly=false
   stats.joined++;if(!stats.newest||q.observed_at_utc>stats.newest)stats.newest=q.observed_at_utc;
   const amount=p.accumulated_amount_krw;
   if(!Object.hasOwn(p,'accumulated_amount_krw'))stats.absent++;else if(amount===null)stats.nullAmount++;
-  if(Number.isSafeInteger(amount)&&amount>0)stats.valid++;
-  if(!Number.isSafeInteger(amount)||amount<=0){missingAmount++;continue;}
   if(p.code!==q.code||p.trade_date_kst!==day||p.received_at_utc!==q.observed_at_utc||p.price!==Number(q.close)||p.accumulated_volume!==Number(q.volume))throw Error('QUOTE_MISMATCH');
-  eligible.push({code:String(q.code),name:String(q.listing_name||q.code),market:String(q.listing_market),day,reference_day:reference,observed_at_utc:String(q.observed_at_utc),source:String(q.source),open:Number(q.open),high:Number(q.high),low:Number(q.low),close:Number(q.close),volume:Number(q.volume),amount});
+  const validAmount=Number.isSafeInteger(amount)&&amount>0;
+  if(validAmount)stats.valid++;else missingAmount++;
+  eligible.push({code:String(q.code),name:String(q.listing_name||q.code),market:String(q.listing_market),day,reference_day:reference,observed_at_utc:String(q.observed_at_utc),source:String(q.source),open:Number(q.open),high:Number(q.high),low:Number(q.low),close:Number(q.close),volume:Number(q.volume),amount:validAmount?amount:null});
  }
  const codes=new Set(eligible.map(q=>q.code)),history=[];
  for(const d of (quotesOnly?[]:dates.slice().reverse())){
@@ -38,7 +38,7 @@ export async function exportInputs(client,day,now,sessions=260,{quotesOnly=false
   for(const r of rows)if(codes.has(String(r.code)))history.push([r.trade_day,r.code,r.name,r.market,r.open,r.high,r.low,r.close,r.volume,r.amount]);
  }
  const csv=v=>'"'+String(v??'').replaceAll('"','""')+'"';
- return {reference,quotes:eligible,history:['Date,Code,Name,Market,Open,High,Low,Close,Volume,Amount',...history.map(r=>r.map(csv).join(','))].join('\n')+'\n',coverage:{observations:observations.map(x=>({...x,n:Number(x.n)})),bySource,joined:quotes.length,missingAmount,eligible:eligible.length,historySessions:quotesOnly?0:dates.length,calendarVerified:false}};
+ return {reference,quotes:eligible,history:['Date,Code,Name,Market,Open,High,Low,Close,Volume,Amount',...history.map(r=>r.map(csv).join(','))].join('\n')+'\n',coverage:{observations:observations.map(x=>({...x,n:Number(x.n)})),bySource,joined:quotes.length,missingAmount,turnoverAvailable:eligible.length-missingAmount,eligible:eligible.length,historySessions:quotesOnly?0:dates.length,calendarVerified:false}};
 }
 if(process.argv[1]?.endsWith('/provisional-input-export.mjs')){
  const [day,prefix]=process.argv.slice(2);if(!prefix)throw Error('OUTPUT_REQUIRED');
