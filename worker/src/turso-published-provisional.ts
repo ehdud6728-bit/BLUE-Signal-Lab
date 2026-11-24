@@ -1,6 +1,8 @@
 /** Read-only, same-day published KIS pattern snapshot. Not verified EOD or research. */
 import {createClient} from '@libsql/client/web';
 import {InvalidProvisionalQuery} from './turso-provisional-search.ts';
+import {matchedRecent} from '../../web/src/recent-match.ts';
+import {RECENT_ASOF} from '../../web/src/recent-pattern-data.ts';
 type Env={TURSO_DATABASE_URL?:string;TURSO_AUTH_TOKEN?:string};
 type Client=Pick<ReturnType<typeof createClient>,'execute'|'close'>;
 type Factory=(options:{url:string;authToken:string;intMode:'string'})=>Client;
@@ -10,6 +12,18 @@ const check=(ok:unknown)=>{if(!ok)throw Error('INVALID_PUBLISHED_PROVISIONAL');}
 const CODE=/^[0-9A-Z]{6}$/;
 const DAY=/^20\d{2}-\d{2}-\d{2}$/;
 const HASH=/^[a-f0-9]{64}$/;
+export function provisionalCandleFeatures(raw:unknown,price:number):string[]|null{
+  if(!raw||typeof raw!=='object')return null;
+  const b=raw as Record<string,unknown>;
+  const [o,h,l,c]=[b.open,b.high,b.low,b.close];
+  if(typeof o!=='number'||typeof h!=='number'||typeof l!=='number'||typeof c!=='number'||
+    ![o,h,l,c].every(Number.isSafeInteger)||!(0<l&&l<=Math.min(o,c)&&Math.max(o,c)<=h)||c!==price)return null;
+  const span=h-l,body=span?Math.abs(c-o)/span:0,lower=span?(Math.min(o,c)-l)/span:0,upper=span?(h-Math.max(o,c))/span:0,pos=span?(c-l)/span:0;
+  const shape=!span?'FLAT':body<=0.1?'DOJI':lower>=0.6&&upper<=0.15?'LOWER_WICK':upper>=0.6&&lower<=0.15?'UPPER_WICK':body>=0.7?(c>o?'LONG_BULL':'LONG_BEAR'):(c>o?'BULL':'BEAR');
+  const features=[shape];
+  if(shape==='BULL')features.push(body<0.3?'BODY_10_30':body<0.5?'BODY_30_50':'BODY_50_70',pos<0.33?'CLOSE_LOW':pos<0.67?'CLOSE_MID':'CLOSE_HIGH');
+  return features;
+}
 // Only scanner diagnostics consumed by the standard result card and detail sheet.
 // Do not include historical outcome statistics or unaudited recommendations.
 const DIAGNOSTICS=['rsi','rsi_signal','rsi_gc','rsi_last_gc','slow_14_3_3_k','slow_14_3_3_d','slow_14_3_3_gc','slow_14_3_3_last_gc','slow_12_5_5_k','slow_12_5_5_d','slow_12_5_5_gc','slow_12_5_5_last_gc','slow_20_12_12_k','slow_20_12_12_d','slow_20_12_12_gc','slow_20_12_12_last_gc','macd_12_26_9','macd_signal_9','macd_gc','macd_last_gc','ma20','ma40','ma60','ma112','ma224','ma_to_up','ma112_cross','ma224_cross','amount_ratio20','valid_line_candidates_json','supply_strength_method','supply_strength_grade','supply_reference_price','supply_volume_est_shares','supply_bin_share_pct','supply_strength_relative_pct'];
@@ -39,10 +53,10 @@ export async function tursoPublishedProvisional(env:Env,p:URLSearchParams,factor
   const gc=names(p.get('gc')||'',k=>own(GC,k),5),tech=names(p.get('tech')||'',k=>own(TECH,k),3);
   const signalLogic=logic(p,'logic'),gcLogic=logic(p,'gc_logic'),techLogic=logic(p,'tech_logic');
   const amountText=p.get('min_amount_eok')||'0',amount=Number(amountText);
-  const sort=p.get('sort')||'recent';
-  if(!/^\d{1,5}$/.test(amountText)||amount>50000||!['recent','amount_surge','amount_decline'].includes(sort))throw new InvalidProvisionalQuery();
+  const sort=p.get('sort')||'recent',aiOnly=p.get('ai_only')||'0';
+  if(!/^\d{1,5}$/.test(amountText)||amount>50000||!['recent','amount_surge','amount_decline','recommended'].includes(sort)||!['0','1'].includes(aiOnly))throw new InvalidProvisionalQuery();
   const empty={storage:'TURSO',day,pattern_confirmed:false,complete_market:false,
-    data_status:'NOT_PUBLISHED',page,limit,total:0,matched_count:0,observed_count:0,
+    data_status:'NOT_PUBLISHED',page,limit,total:0,matched_count:0,observed_count:0,ai_count:null as number|null,ai_asof:RECENT_ASOF,ai_only:false,ai_evidence_count:0,unfiltered_total:0,
     eligible_count:0,turnover_available_count:0,reference_day:null as string|null,
     scan_asof_utc:null as string|null,latest_observed_utc:null as string|null,items:[] as unknown[]};
   const url=env.TURSO_DATABASE_URL?.trim()||'',authToken=env.TURSO_AUTH_TOKEN?.trim()||'';
@@ -83,11 +97,36 @@ export async function tursoPublishedProvisional(env:Env,p:URLSearchParams,factor
     if(amount>0){filters.push(field('turnover_available')+'=1 AND '+field('traded_amount_krw')+'>=?');args.push(amount*100000000);}
     const filter=filters.length?' AND '+filters.join(' AND '):'';
     const ratio=field('amount_ratio20');
-    const ordering=sort==='recent'?'code':ratio+(sort==='amount_surge'?' DESC':' ASC')+' NULLS LAST,code';
+    const ordering=sort==='recent'||sort==='recommended'?'code':ratio+(sort==='amount_surge'?' DESC':' ASC')+' NULLS LAST,code';
     const total=filters.length?Number((await run('SELECT COUNT(*) AS n FROM blue_provisional_pattern_rows_v1 WHERE snapshot_id=?'+filter,args)).rows[0]?.n):matched;
     check(count(total)&&total<=matched);
+    // Match over the full filtered pool, before paging. Read compact evidence
+    // in bounded pages instead of fetching every large diagnostic record.
+    const candidates:{code:string;features:string[]|null;rate:number|null}[]=[];
+    for(let offset=0;offset<total;offset+=40){
+      const chunk=await run("SELECT code,"+field('signals')+" AS signals,"+field('close')+" AS price,"+field('kis_candle')+" AS candle FROM blue_provisional_pattern_rows_v1 WHERE snapshot_id=?"+filter+' ORDER BY '+ordering+' LIMIT 40 OFFSET ?',[...args,offset]);
+      for(const r of chunk.rows){
+        let raw:unknown=null;
+        if(typeof r.candle==='string'){try{raw=JSON.parse(r.candle);}catch{/* fail closed */}}
+        const features=provisionalCandleFeatures(raw,Number(r.price));
+        const rec=features?matchedRecent(day,String(r.signals||'').split(','),features)[0]:undefined;
+        candidates.push({code:String(r.code),features,rate:rec?.positive_return_probability_pct??null});
+      }
+    }
+    check(candidates.length===total&&new Set(candidates.map(r=>r.code)).size===total);
+    const evidenceCount=candidates.filter(r=>r.features!==null).length;
+    const aiReady=day>RECENT_ASOF&&evidenceCount===total;
+    const aiCount=aiReady?candidates.filter(r=>r.rate!==null).length:null;
+    // Legacy snapshots without exact candle evidence must not report zero
+    // recommendations or silently pretend to honor an AI-only request.
+    const appliedAiOnly=aiOnly==='1'&&aiReady;
+    const pool=appliedAiOnly?candidates.filter(r=>r.rate!==null):candidates;
+    if(sort==='recommended'&&aiReady)pool.sort((a,b)=>(b.rate??-1)-(a.rate??-1)||a.code.localeCompare(b.code));
+    const slice=pool.slice((page-1)*limit,page*limit);
+    const codes=slice.map(r=>r.code);
+    const featuresByCode=new Map(slice.map(r=>[r.code,r.features]));
     // Project only display fields, not chart history or unverified research extras.
-    const records=await run("SELECT code,json_extract(record_json,'$.code') AS payload_code,"+displayName+" AS name,"+diagnosticJson+" AS diagnostics,json_extract(record_json,'$.date') AS day,json_extract(record_json,'$.close') AS price,json_extract(record_json,'$.signals') AS signals,json_extract(record_json,'$.observed_at_utc') AS observed_at_utc,json_extract(record_json,'$.traded_amount_krw') AS amount,json_extract(record_json,'$.turnover_available') AS turnover,json_extract(record_json,'$.provisional') AS provisional,json_extract(record_json,'$.pattern_confirmed') AS confirmed,json_extract(record_json,'$.source') AS source FROM blue_provisional_pattern_rows_v1 WHERE snapshot_id=?"+filter+' ORDER BY '+ordering+' LIMIT ? OFFSET ?',[...args,limit,(page-1)*limit]);
+    const records=codes.length?await run("SELECT code,json_extract(record_json,'$.code') AS payload_code,"+displayName+" AS name,"+diagnosticJson+" AS diagnostics,json_extract(record_json,'$.date') AS day,json_extract(record_json,'$.close') AS price,json_extract(record_json,'$.signals') AS signals,json_extract(record_json,'$.observed_at_utc') AS observed_at_utc,json_extract(record_json,'$.traded_amount_krw') AS amount,json_extract(record_json,'$.turnover_available') AS turnover,json_extract(record_json,'$.provisional') AS provisional,json_extract(record_json,'$.pattern_confirmed') AS confirmed,json_extract(record_json,'$.source') AS source FROM blue_provisional_pattern_rows_v1 WHERE snapshot_id=? AND code IN ('+codes.map(()=>'?').join(',')+')',[id,...codes]):{rows:[]};
     const items=records.rows.map(r=>{
       const code=String(r.code),price=Number(r.price),at=String(r.observed_at_utc);
       const signals=String(r.signals||'').split(',');
@@ -100,12 +139,13 @@ export async function tursoPublishedProvisional(env:Env,p:URLSearchParams,factor
       const diagnostics=JSON.parse(String(r.diagnostics));
       if(!available)diagnostics.amount_ratio20=null;
       return {code,name:String(r.name||code).slice(0,70),price,signals,observed_at_utc:at,turnover_available:available,traded_amount_krw:amount,
-        extras:{...diagnostics,traded_amount_krw:amount},provisional:true,pattern_confirmed:false};
+        extras:{...diagnostics,traded_amount_krw:amount,provisional_candle_features:featuresByCode.get(code)??null},provisional:true,pattern_confirmed:false};
     });
-    check(items.length===Math.min(limit,Math.max(0,total-(page-1)*limit)));
+    items.sort((a,b)=>codes.indexOf(a.code)-codes.indexOf(b.code));
+    check(items.length===codes.length&&items.every((r,i)=>r.code===codes[i]));
     // EOD takes priority even if it arrived while reading this generation.
     if((await eod()).rows.length)return {...empty,data_status:'VERIFIED_EOD_AVAILABLE'};
-    return {...empty,data_status:'KIS_PROVISIONAL_PATTERNS',q,sort,total,matched_count:matched,
+    return {...empty,data_status:'KIS_PROVISIONAL_PATTERNS',q,sort,total:pool.length,unfiltered_total:total,ai_count:aiCount,ai_only:appliedAiOnly,ai_evidence_count:evidenceCount,matched_count:matched,
       observed_count:meta.observed,eligible_count:meta.eligible,turnover_available_count:meta.quote_coverage.turnoverAvailable,
       reference_day:reference,scan_asof_utc:scan,latest_observed_utc:latest,snapshot_id:id,items};
   }finally{db.close();}

@@ -92,7 +92,11 @@ export function validateSnapshot(result,quotes){
       flags.length>0&&flags.every(x=>/^[A-Z0-9_]{2,60}$/.test(x))&&new Set(flags).size===flags.length&&
       v.turnover_available===(evidence.amount!==null)&&v.traded_amount_krw===evidence.amount&&
       (v.turnover_available||v.amount_ratio20===null),'INVALID_PROVISIONAL_RECORD');
-    const raw=JSON.stringify(v);
+    const {open,high,low,close}=evidence;
+    check([open,high,low,close].every(Number.isSafeInteger)&&0<low&&low<=Math.min(open,close)&&Math.max(open,close)<=high,'INVALID_PROVISIONAL_CANDLE');
+    // Bind the exact original quote to this immutable generation. Never use
+    // a later quote to infer the candle behind an earlier pattern.
+    const raw=JSON.stringify({...v,kis_candle:{open,high,low,close}});
     check(Buffer.byteLength(raw)<=64000,'INVALID_PROVISIONAL_RECORD_SIZE');
     rows.push({code:v.code,raw,hash:sha(raw)});
     events+=flags.length;last=v.code;
