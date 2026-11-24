@@ -160,13 +160,14 @@ test('main search requests published KIS snapshot before missing EOD fast path',
   assert.doesNotMatch(web,/<TursoProvisionalPatterns\b/);
   assert.match(web,/className="stock-card"/);
   assert.match(web,/r\.provisional\?'KIS 관측가':'종가'/);
-  assert.match(web,/canBasket=\(r:Signal\)=>!r\.provisional/);
+  assert.match(web,/canBasket=\(r:Signal\)=>\(!r\.provisional\|\|/);
+  assert.match(web,/kind:'KIS_PROVISIONAL',observedAt/);
   assert.match(web,/rows\.some\(r=>r\.provisional\)/);
   assert.match(web,/activeProvisional\?\.limit\?\?100/);
 });
 
 test('KIS AI matches require exact stored candle, count and sort before paging',async()=>{
-  const {tursoPublishedProvisional,provisionalCandleFeatures}=await import('../worker/src/turso-published-provisional.ts');
+  const {tursoPublishedProvisional,provisionalCandleFeatures,tursoProvisionalDetail}=await import('../worker/src/turso-published-provisional.ts');
   const {RECENT_ASOF}=await import('../web/src/recent-pattern-data.ts');
   const day=new Date(Date.parse(RECENT_ASOF+'T00:00:00Z')+86400000).toISOString().slice(0,10);
   const at=day+'T01:00:00Z',clock=new Date(day+'T02:00:00Z'),id='c'.repeat(64);
@@ -180,7 +181,8 @@ test('KIS AI matches require exact stored candle, count and sort before paging',
     for(let i=1;i<=12;i++){
       const code=String(i).padStart(6,'0');
       const candle=i===12?{open:80,high:125,low:75,close:100}:{open:100,high:125,low:75,close:100};
-      insert.run(id,code,JSON.stringify({code,name:code,market:'KOSPI',date:day,close:100,signals:'ENV20_LOWER_TOUCH',observed_at_utc:at,
+      const detail={reference:RECENT_ASOF,chart:{asof:day,pattern_confirmed:false,data_frequency:'PROVISIONAL_DAILY',bars:[{t:day,o:candle.open,h:candle.high,l:candle.low,c:candle.close}]},stats:{asof:day,history_end:RECENT_ASOF,setups:i===12||i===11?[{label:'prior setup',horizons:{'10':{n:i===12?4:8,up_pct:75,mean_return_pct:3,median_return_pct:2,cases:[]}}}]:[]}};
+      insert.run(id,code,JSON.stringify({code,name:code,market:'KOSPI',date:day,close:100,signals:'ENV20_LOWER_TOUCH',observed_at_utc:at,provisional_research:detail,
         provisional:true,pattern_confirmed:false,source:'KIS_PROVISIONAL',turnover_available:true,traded_amount_krw:100000000,kis_candle:candle}),'hash');
     }
     const factory=()=>({async execute(cmd){assert.match(cmd.sql,/^SELECT\b/);return {rows:db.prepare(cmd.sql).all(...cmd.args)};},close(){}});
@@ -189,7 +191,16 @@ test('KIS AI matches require exact stored candle, count and sort before paging',
     assert.equal(provisionalCandleFeatures({open:80,high:125,low:75,close:99},100),null);
     const ordinary=await query({});
     assert.equal(ordinary.total,12);assert.equal(ordinary.ai_count,1);assert.equal(ordinary.items.length,10);
-    assert.equal((await query({sort:'recommended'})).items[0].code,'000012');
+    assert.equal(ordinary.history_ready,true);
+    assert.equal((await query({sort:'recommended',min_pattern_n:'3'})).items[0].code,'000012');
+    const hot=await query({only_pattern:'1',min_pattern_n:'3',highlight_up:'70',sort:'recommended'});
+    assert.equal(hot.total,2);assert.equal(hot.pattern_filter_applied,true);
+    assert.equal(hot.items[0].extras.r159_pattern_n_10d,4);
+    assert.equal(hot.items[0].extras.r159_pattern_up_10d,75);
+    assert.equal((await query({only_pattern:'1',min_pattern_n:'8'})).total,1);
+    const detail=await tursoProvisionalDetail(env,new URLSearchParams({date:day,code:'000012',snapshot_id:id}),factory,clock);
+    assert.equal(detail.status,'READY');assert.equal(detail.chart.bars.at(-1).c,100);
+    assert.equal((await tursoProvisionalDetail(env,new URLSearchParams({date:day,code:'000012',snapshot_id:'d'.repeat(64)}),factory,clock)).status,'NOT_AVAILABLE');
     const only=await query({ai_only:'1'});
     assert.equal(only.total,1);assert.equal(only.unfiltered_total,12);assert.equal(only.ai_only,true);
     assert.equal(only.items[0].code,'000012');
@@ -198,5 +209,8 @@ test('KIS AI matches require exact stored candle, count and sort before paging',
     db.prepare("UPDATE blue_provisional_pattern_rows_v1 SET record_json=json_remove(record_json,'$.kis_candle') WHERE code=?").run('000012');
     const old=await query({ai_only:'1'});
     assert.equal(old.ai_count,null);assert.equal(old.ai_only,false);assert.equal(old.ai_evidence_count,11);
+    db.prepare("UPDATE blue_provisional_pattern_rows_v1 SET record_json=json_remove(record_json,'$.provisional_research') WHERE code=?").run('000012');
+    const legacy=await query({only_pattern:'1'});
+    assert.equal(legacy.history_ready,false);assert.equal(legacy.pattern_filter_applied,false);assert.equal(legacy.total,12);
   }finally{db.close();}
 });
