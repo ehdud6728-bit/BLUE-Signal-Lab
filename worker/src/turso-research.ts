@@ -385,7 +385,7 @@ export async function tursoResearchSearch(env:ResearchEnv,p:URLSearchParams,fact
         ...(sort==='lowest_return'?{observed_low_pct:r.observed_low_pct==null?null:Number(r.observed_low_pct)}:{}),
         ...(sort==='amount_surge'||sort==='amount_decline'?{amount_ratio20_sort:r.amount_ratio20_sort==null?null:Number(r.amount_ratio20_sort)}:{})};
     });
-    const rank=(r:typeof items[number])=>{const m=matchedRecent(r.day,r.signals,r.extras.audited_candle_features);const up=Number(r.extras.r159_pattern_up_10d);const tomato=highlight!=='off'&&Number.isFinite(up)&&up>=Number(highlight)&&Number(r.extras.r159_pattern_n_10d)>=floor;return {tier:(m.length?2:0)+(tomato?1:0),rate:m[0]?.positive_return_probability_pct??(tomato?up:0)};};
+    const rank=(r:typeof items[number])=>{const m=matchedRecent(r.day,r.signals,r.extras.audited_candle_features,aiSummary||aiOnly);const up=Number(r.extras.r159_pattern_up_10d);const tomato=highlight!=='off'&&Number.isFinite(up)&&up>=Number(highlight)&&Number(r.extras.r159_pattern_n_10d)>=floor;return {tier:(m.length?2:0)+(tomato?1:0),rate:m[0]?.positive_return_probability_pct??(tomato?up:0)};};
     const matches=(r:typeof items[number])=>matchedRecent(r.day,r.signals,r.extras.audited_candle_features,true).length>0;
     const aiCount=full?new Set(items.filter(matches).map(r=>r.code)).size:null;
     const aiRows=full?items.filter(matches).length:null;
