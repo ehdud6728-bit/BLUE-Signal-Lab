@@ -11,6 +11,7 @@
   "vars": {
     "COLLECTOR_ENABLED": "true",
     "TURSO_MIRROR_ENABLED": "false",
+    "TURSO_PROVISIONAL_QUOTES_ENABLED": "true",
     "BASKET_BATCH_LIMIT": "18",
     "CANDIDATE_LIMIT": "12",
     "CLOSED_DATES": ""

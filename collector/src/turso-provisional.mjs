@@ -175,7 +175,7 @@ export async function collectTursoProvisional(env,now=new Date(),deps={}){
     const found=deps.token?{status:'READY',token:await deps.token(client,env,now)}:
       await tursoDirectCachedToken(client,env,now);
     if(!found.token)return {status:found.status==='READY'?'TURSO_TOKEN_MISSING':found.status,asof:day};
-    const quotes=[];let rejected=0,previous=0,rateLimited=false;
+    const quotes=[];let rejected=0,previous=0,rateLimited=false;let turnoverValid=0,turnoverMissing=0;
     const reasons={};
     for(const r of selected.rows){
       const code=String(r.code||''),close=Number(r.close);
@@ -202,6 +202,7 @@ export async function collectTursoProvisional(env,now=new Date(),deps={}){
         q.provisional_date_basis=q.reported_trade_date?
           'KIS_REPORTED_TRADE_DATE':'COLLECTOR_KST_REGULAR_SESSION';
         q.is_confirmed_daily=false;
+        if(Number.isSafeInteger(q.accumulated_amount_krw)&&q.accumulated_amount_krw>0)turnoverValid++;else turnoverMissing++;
         quotes.push(q);
       }catch(e){
         rejected++;
@@ -235,6 +236,6 @@ export async function collectTursoProvisional(env,now=new Date(),deps={}){
     return {status:rateLimited?'SAVED_WITH_KIS_COOLDOWN':'SAVED',mode,asof:day,trade_day:kst.date,
       phase:afterClose?'KRX_POST_CLOSE':'KRX_REGULAR',
       page,pages,attempted:previous,saved:quotes.length,rejected,
-      rate_limited:rateLimited,batch_cap:batchCap,reasons};
+      rate_limited:rateLimited,batch_cap:batchCap,turnover_valid:turnoverValid,turnover_missing:turnoverMissing,reasons};
   }finally{client.close();}
 }

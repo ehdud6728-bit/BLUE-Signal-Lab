@@ -22,6 +22,7 @@ export default {
           ' phase='+(result.phase||'NONE')+
           ' attempted='+(result.attempted||0)+
           ' saved='+(result.saved||0)+' rejected='+(result.rejected||0)+
+          ' turnover_valid='+(result.turnover_valid||0)+' turnover_missing='+(result.turnover_missing||0)+
           ' reasons='+Object.entries(result.reasons||{})
             .map(([key,value])=>key+':'+value).join(',').slice(0,240)))
         .catch(()=>console.warn('BLUE_TURSO_PROVISIONAL_FAILED')));
@@ -66,6 +67,7 @@ export default {
     const u=new URL(request.url);
     if(request.method==='GET'&&u.pathname==='/health'){
       return Response.json({status:'ok',version:'R1.4.2',enabled:env.COLLECTOR_ENABLED==='true',
+        provisional_mode:tursoProvisionalMode(env,new Date()),
         schedule:'every minute; full market scan every five minutes; market gate Asia/Seoul',
         basket_batch_limit:Number(env.BASKET_BATCH_LIMIT||18),
         note:'No public manual-run endpoint.'},{headers:{'Cache-Control':'no-store'}});
