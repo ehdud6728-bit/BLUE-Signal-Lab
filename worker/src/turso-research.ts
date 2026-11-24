@@ -321,7 +321,8 @@ export async function tursoResearchSearch(env:ResearchEnv,p:URLSearchParams,fact
       args:[...args,limit,(page-1)*limit]});
     // Read only exact-day audited candles for candidates on this result page.
     const candleMatches=new Set<string>();
-    const candidates=result.rows.filter(r=>String(r.day)>'2026-11-23'&&String(r.signal_names).split(',').includes('ENV20_LOWER_TOUCH'));
+    const candleFeatures=new Map<string,string[]>();
+    const candidates=result.rows.filter(r=>String(r.day)>'2026-11-23');
     for(let i=0;i<candidates.length;i+=40){
       const chunk=candidates.slice(i,i+40);
       const candles=await client.execute({sql:`SELECT e.trade_day,e.code,e.open,e.high,e.low,e.close
@@ -332,9 +333,13 @@ export async function tursoResearchSearch(env:ResearchEnv,p:URLSearchParams,fact
       for(const b of candles.rows){
         const row=chunk.find(r=>r.day===b.trade_day&&r.code===b.code);
         const [o,h,l,c]=[b.open,b.high,b.low,b.close].map(Number);
-        if(!row||![o,h,l,c].every(Number.isFinite)||!(0<l&&l<=o&&o<c&&c<=h)||c!==Number(row.close_price))continue;
-        const span=h-l,body=(c-o)/span,lower=(o-l)/span,upper=(h-c)/span,pos=(c-l)/span;
-        if(body>0.1&&body<0.7&&!(lower>=0.6&&upper<=0.15)&&!(upper>=0.6&&lower<=0.15)&&pos>=0.33&&pos<0.67)
+        if(!row||![o,h,l,c].every(Number.isFinite)||!(0<l&&l<=Math.min(o,c)&&Math.max(o,c)<=h)||c!==Number(row.close_price))continue;
+        const span=h-l,body=span?Math.abs(c-o)/span:0,lower=span?(Math.min(o,c)-l)/span:0,upper=span?(h-Math.max(o,c))/span:0,pos=span?(c-l)/span:0;
+        const shape=!span?'FLAT':body<=0.1?'DOJI':lower>=0.6&&upper<=0.15?'LOWER_WICK':upper>=0.6&&lower<=0.15?'UPPER_WICK':body>=0.7?(c>o?'LONG_BULL':'LONG_BEAR'):(c>o?'BULL':'BEAR');
+        const features=[shape];
+        if(shape==='BULL')features.push(body<0.3?'BODY_10_30':body<0.5?'BODY_30_50':'BODY_50_70',pos<0.33?'CLOSE_LOW':pos<0.67?'CLOSE_MID':'CLOSE_HIGH');
+        candleFeatures.set(String(b.trade_day)+':'+String(b.code),features);
+        if(c>o&&String(row.signal_names).split(',').includes('ENV20_LOWER_TOUCH')&&body>0.1&&body<0.7&&!(lower>=0.6&&upper<=0.15)&&!(upper>=0.6&&lower<=0.15)&&pos>=0.33&&pos<0.67)
           candleMatches.add(String(b.trade_day)+':'+String(b.code));
       }
     }
@@ -345,6 +350,9 @@ export async function tursoResearchSearch(env:ResearchEnv,p:URLSearchParams,fact
         record.chart?.asof!==r.day)throw Error('TURSO_RESEARCH_ROW_CONFLICT');
       const extras={...record.extras};
       delete extras.recent_candle_match;
+      delete extras.audited_candle_features;
+      const features=candleFeatures.get(String(r.day)+':'+String(r.code));
+      if(features)extras.audited_candle_features=features;
       if(candleMatches.has(String(r.day)+':'+String(r.code)))extras.recent_candle_match='ENV20_BULL_CLOSE_MID_20261123';
       const setups=Array.isArray(record.stats?.setups)?record.stats.setups:[];
       const best=setups.filter(s=>{
