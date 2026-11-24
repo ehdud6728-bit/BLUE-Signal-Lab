@@ -168,7 +168,7 @@ export async function captureTrends(env=process.env,{mode='plan',now=new Date(),
       }else{
         for(const s of target)rows.push({code:s.code,name:s.name,status:'MISSING',reason:benchmark.reason||'BENCHMARK_INSUFFICIENT',trend:null});
       }
-      data.push({market,benchmark:globalSummary(base),benchmark_sessions:base.length,universe:m.sectors.length,attempted:target.length,rows});
+      data.push({market,benchmark:globalSummary(base),benchmark_sessions:base.length,benchmark_days:base.map(x=>x.day),universe:m.sectors.length,attempted:target.length,rows});
     }
     const snapshot={schema:'BLUE_ROTATION_TRENDS_V1',receipt_day:receipt,observed_at_utc:now.toISOString(),category_receipt_day:category.receipt_day,
       domestic_cutoff:end,overseas_cutoff:usEnd,markets:data,global};
