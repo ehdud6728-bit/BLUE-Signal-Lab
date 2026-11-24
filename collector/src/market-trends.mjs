@@ -161,6 +161,8 @@ export async function captureTrends(env=process.env,{mode='plan',now=new Date(),
         for(const s of target){
           const result=await safe(s.code);
           const trend=rotation(result.series,base);
+          const previous=base.length>=27?rotation(result.series,base.slice(0,-1)):null;
+          if(trend){trend.previous_day=previous?.day??null;trend.previous_quadrant=previous?.quadrant??null;}
           rows.push({code:s.code,name:s.name,status:trend?'AVAILABLE':'MISSING',reason:trend?null:result.reason||'INSUFFICIENT_MATCHED_SESSIONS',trend});
         }
       }else{
