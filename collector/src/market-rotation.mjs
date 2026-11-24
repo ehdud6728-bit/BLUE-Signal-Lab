@@ -19,18 +19,34 @@ export function parseCategory(body,market,code){
   if(a.length!==1)throw Error('CATEGORY_MARKET_SUMMARY_MISSING');
   const s=a[0],index=positive(s.bstp_nmix_prpr),change=number(s.bstp_nmix_prdy_ctrt);
   if(!index||change===null||Math.abs(change)>50)throw Error('CATEGORY_MARKET_INVALID');
-  const sectors=[],seen=new Set();
-  for(const r of rows(body.output2)){
-    const id=String(r.bstp_cls_code||'').trim(),name=label(r.hts_kor_isnm),p=positive(r.bstp_nmix_prpr),delta=number(r.bstp_nmix_prdy_ctrt);
-    if(!/^\d{4,5}$/.test(id)||!name||!p||delta===null||Math.abs(delta)>100||seen.has(id))throw Error('CATEGORY_SECTOR_INVALID');
-    seen.add(id);
-    if(id.replace(/^0(?=\d{4}$)/,'')===code)continue;
+  const raw=rows(body.output2);
+  if(!raw.length||raw.length>250)throw Error('CATEGORY_SECTOR_COUNT_INVALID');
+  const sectors=[],byCode=new Map(),excluded={invalid_code:0,invalid_name:0,invalid_index:0,invalid_change:0,duplicate:0};
+  let summary_rows=0;
+  for(const r of raw){
+    const id0=typeof r?.bstp_cls_code==='string'?r.bstp_cls_code.trim():'';
+    if(!/^\d{1,5}$/.test(id0)){excluded.invalid_code++;continue;}
+    const id=String(Number(id0)).padStart(4,'0');
+    if(id===code){summary_rows++;continue;}
+    const name=label(r.hts_kor_isnm),p=positive(r.bstp_nmix_prpr),delta=number(r.bstp_nmix_prdy_ctrt);
+    if(!name){excluded.invalid_name++;continue;}
+    if(!p){excluded.invalid_index++;continue;}
+    if(delta===null||Math.abs(delta)>100){excluded.invalid_change++;continue;}
     const share=positive(r.acml_tr_pbmn_rlim);
-    sectors.push({code:id,name,index:p,change_pct:delta,relative_pct:Math.round((delta-change)*100)/100,
-      turnover_share_pct:share!==null&&share<=100?share:null});
+    const item={code:id,name,index:p,change_pct:delta,relative_pct:Math.round((delta-change)*100)/100,
+      turnover_share_pct:share!==null&&share<=100?share:null};
+    if(!byCode.has(id))byCode.set(id,[]);
+    byCode.get(id).push(item);
   }
-  if(!sectors.length||sectors.length>100)throw Error('CATEGORY_SECTOR_COUNT_INVALID');
-  return {market,index,change_pct:change,up:count(s.ascn_issu_cnt),down:count(s.down_issu_cnt),flat:count(s.stnr_issu_cnt),sectors};
+  for(const group of byCode.values()){
+    // Duplicate codes can be conflicting classifications; do not choose arbitrarily.
+    if(group.length!==1){excluded.duplicate+=group.length;continue;}
+    sectors.push(group[0]);
+  }
+  const excluded_rows=Object.values(excluded).reduce((a,b)=>a+b,0);
+  const sector_coverage={received:raw.length,accepted:sectors.length,summary_rows,excluded_rows,excluded,
+    status:excluded_rows?'PARTIAL':'COMPLETE_RESPONSE'};
+  return {market,index,change_pct:change,up:count(s.ascn_issu_cnt),down:count(s.down_issu_cnt),flat:count(s.stnr_issu_cnt),sectors,sector_coverage};
 }
 export function parseFlows(body,day){
   if(body?.rt_cd!=='0')throw Error('FLOW_PROVIDER_REJECTED');
@@ -43,7 +59,8 @@ export function parseFlows(body,day){
     seen.add(date);
     // Unit has not been independently confirmed: retain only the sign.
     const direction=x=>{const v=number(x);return v===null?null:v>0?'BUY':v<0?'SELL':'FLAT';};
-    out.push({day:date,foreign:direction(r.frgn_ntby_tr_pbmn),institution:direction(r.orgn_ntby_tr_pbmn),individual:direction(r.prsn_ntby_tr_pbmn)});
+    const item={day:date,foreign:direction(r.frgn_ntby_tr_pbmn),institution:direction(r.orgn_ntby_tr_pbmn),individual:direction(r.prsn_ntby_tr_pbmn)};
+    if([item.foreign,item.institution,item.individual].some(x=>x!==null))out.push(item);
   }
   return out.sort((a,b)=>b.day.localeCompare(a.day)).slice(0,10);
 }
@@ -71,6 +88,7 @@ export async function capture(env=process.env,{mode='plan',now=new Date(),factor
     for(const [market,code,cls,flowCode] of markets){
       const category=await get('inquire-index-category-price','FHPUP02140000',{FID_COND_MRKT_DIV_CODE:'U',FID_INPUT_ISCD:code,FID_COND_SCR_DIV_CODE:'20214',FID_MRKT_CLS_CODE:cls,FID_BLNG_CLS_CODE:'0'});
       const item=parseCategory(category,market,code);
+      console.log('BLUE_MARKET_CATEGORY_COVERAGE',JSON.stringify({market,...item.sector_coverage}));
       let flow_status='AVAILABLE',flows=[];
       try{
         flows=parseFlows(await get('inquire-investor-daily-by-market','FHPTJ04040000',{FID_COND_MRKT_DIV_CODE:'U',FID_INPUT_ISCD:code,FID_INPUT_DATE_1:d,FID_INPUT_ISCD_1:flowCode,FID_INPUT_DATE_2:d,FID_INPUT_ISCD_2:code}),day);
@@ -78,6 +96,7 @@ export async function capture(env=process.env,{mode='plan',now=new Date(),factor
       }catch{flow_status='UNAVAILABLE';}
       data.push({...item,flow_status,flows});
     }
+    if(data.some(m=>!m.sectors.length||m.sectors.length>100))throw Error('CATEGORY_NO_USABLE_SECTORS');
     const snapshot={schema:'BLUE_KIS_MARKET_V1',observed_at_utc,receipt_day:day,quote_trade_day:null,source:'KIS_CATEGORY_AND_DAILY_INVESTOR',markets:data};
     const payload=JSON.stringify(snapshot);
     if(Buffer.byteLength(payload)>48000)throw Error('MARKET_PAYLOAD_TOO_LARGE');
@@ -87,7 +106,7 @@ export async function capture(env=process.env,{mode='plan',now=new Date(),factor
       const r=await db.execute({sql:'SELECT payload_json FROM blue_market_rotation_v1 WHERE receipt_day=?',args:[day]});
       if(r.rows[0]?.payload_json!==payload)throw Error('MARKET_READBACK_MISMATCH_OR_SUPERSEDED');
     }
-    return {status:mode==='apply'?'OK':'INSPECT_ONLY',kis_calls:calls,markets:data.map(m=>({market:m.market,sectors:m.sectors.length,flow_status:m.flow_status,flow_days:m.flows.length})),snapshot};
+    return {status:mode==='apply'?'OK':'INSPECT_ONLY',kis_calls:calls,markets:data.map(m=>({market:m.market,sectors:m.sectors.length,sector_coverage:m.sector_coverage,flow_status:m.flow_status,flow_days:m.flows.length})),snapshot};
   }finally{db.close();}
 }
 if(process.argv[1]&&import.meta.url===pathToFileURL(process.argv[1]).href){
