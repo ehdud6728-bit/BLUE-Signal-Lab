@@ -206,17 +206,20 @@ def _case_examples(d, indices, horizon, limit=12):
     return cases[-limit:]
 
 
-def backtest(history:pd.DataFrame,asof:str):
+def backtest(history:pd.DataFrame,asof:str, *, outcome_cutoff=None):
     """Find actual SAME-DAY active event anchors and up to three contemporaneous
     context factors across all supported technical/volume/supply families.
     Patterns chosen by today's state are *exploratory*, not confirmed predictive.
     """
     s=history.loc[history.date.le(pd.Timestamp(asof))].sort_values('date').reset_index(drop=True)
     if len(s)<260:return {'version':'R10_MULTIFACTOR_V2','asof':asof,'status':'INSUFFICIENT_HISTORY',
-                          'history_start':str(s.date.iloc[0].date()) if len(s) else None,'history_end':asof,
+                          'history_start':str(s.date.iloc[0].date()) if len(s) else None,'history_end':asof if outcome_cutoff is None else str(pd.Timestamp(outcome_cutoff).date()),
                           'active_factors':[],'setups':[], 'baseline':{},'sector_lag':{'status':'NOT_AVAILABLE'}}
     d=enrich(s)
     f,anchor_names=_feature_matrix(d)
+    # For a provisional candle, today's state selects factors, but no
+    # historical outcome may use today's unconfirmed close or intraday range.
+    outcome_data=d if outcome_cutoff is None else d.loc[d.date.le(pd.Timestamp(outcome_cutoff))].reset_index(drop=True)
     # Include rare MA transitions/crosses before the crowded BB signal family.
     anchor_priority=('MA_TO_UP','MA112_CROSS','MA224_CROSS')
     anchor_now=[n for n in anchor_priority if n in anchor_names and f[n][-1]]
@@ -238,7 +241,7 @@ def backtest(history:pd.DataFrame,asof:str):
     current=sorted(set(anchor_now+context_now))
     # Baseline is a coarse within-symbol reference, NOT market/sector matched.
     baseline_i=np.arange(249,max(249,len(d)-20),COOLDOWN,dtype=np.int64)
-    baseline=_summaries(d,baseline_i)
+    baseline=_summaries(outcome_data,baseline_i)
     baseline10=baseline.get('10',{})
     candidates=[];attempted=0
     for anchor in anchor_now:
@@ -252,7 +255,7 @@ def backtest(history:pd.DataFrame,asof:str):
                 attempted+=1
                 # Avoid data-mining from 1 or 2 coincidental outcomes.
                 if not len(selected):continue
-                summary=_summaries(d,selected)
+                summary=_summaries(outcome_data,selected)
                 x=summary['10'];n=x['n']
                 if n<3:continue
                 base_up=baseline10.get('up_pct')
@@ -278,12 +281,12 @@ def backtest(history:pd.DataFrame,asof:str):
         if key in keys:continue
         keys.add(key)
         for horizon in HORIZONS:
-            v['horizons'][str(horizon)]['cases']=_case_examples(d,v['_indices'],horizon)
+            v['horizons'][str(horizon)]['cases']=_case_examples(outcome_data,v['_indices'],horizon)
         v.pop('_indices',None)
         selected.append(v)
         if len(selected)>=12:break
     return {'version':'R10_MULTIFACTOR_V2','asof':asof,
-      'history_start':str(d.date.iloc[0].date()),'history_end':str(d.date.iloc[-1].date()),
+      'history_start':str(d.date.iloc[0].date()),'history_end':str(outcome_data.date.iloc[-1].date()),
       'status':'EXPLORATORY','active_factors':[{'code':x,'label':LABELS[x]} for x in current],
       'candidate_count':attempted,'eligible_candidate_count':len(candidates),'setups':selected,
       'baseline':baseline,'sector_lag':{'status':'NOT_AVAILABLE','reason':'업종 분류·대장주/동종주 일별 시계열 미확보'},

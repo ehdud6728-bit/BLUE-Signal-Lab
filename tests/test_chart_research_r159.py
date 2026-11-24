@@ -67,6 +67,24 @@ class R159(unittest.TestCase):
             (folder/'chart_snapshots.jsonl').write_text(json.dumps({'code':'005930','day':'2026-11-11','stats':{'setups':setups}})+'\n',encoding='utf-8')
             self.assertEqual(pattern_highlights(folder),{})
 
+    def test_provisional_outcomes_exclude_today_even_when_signal_is_active(self):
+        from unittest.mock import patch
+        s=normalise(sample(count=300,final=115))
+        day=str(s.date.iloc[-1].date())
+        ref=str(s.date.iloc[-2].date())
+        features,anchors=_feature_matrix(enrich(s))
+        for values in features.values():
+            values[:]=False
+        features['RSI_GC'][[249,259,269,279,289,299]]=True
+        with patch('chart_research_r10._feature_matrix',return_value=(features,anchors)):
+            confirmed=backtest(s,day)
+            provisional=backtest(s,day,outcome_cutoff=ref)
+        h=provisional['setups'][0]['horizons']['10']
+        self.assertEqual(confirmed['setups'][0]['horizons']['10']['n'],5)
+        self.assertEqual(h['n'],4)
+        self.assertEqual(provisional['history_end'],ref)
+        self.assertTrue(all(x['exit_day']<=ref for x in h['cases']))
+
     def test_asof_no_lookahead(self):
         s=normalise(sample())
         asof=str(s.date.iloc[-2].date())

@@ -9,6 +9,7 @@ from market_scan_r08 import COLS
 from corporate_actions import adjust_verified_actions
 from market_scan import normalise
 from turso_parallel_pattern_scan import scan_r08_parallel
+from chart_research_r10 import backtest,chart_rows
 
 def scan_provisional(history, quotes, day, reference, now, workers=1):
     target=pd.Timestamp(day)
@@ -57,11 +58,29 @@ def scan_provisional(history, quotes, day, reference, now, workers=1):
     combined=pd.concat([base,pd.DataFrame(rows,columns=COLS)],ignore_index=True)
     adjusted,_=adjust_verified_actions(combined,target.date())
     matches,audit=scan_r08_parallel(adjusted,day,workers=workers)
+    groups={code:g for code,g in normalise(adjusted).loc[lambda x:x.code.isin({r["code"] for r in matches})].groupby("code",sort=False)}
     for r in matches:
         r.update(provisional=True,pattern_confirmed=False,observed_at_utc=times[r["code"]],source="KIS_PROVISIONAL",data_frequency="PROVISIONAL_DAILY",turnover_available=r["code"] not in missing_amount)
         if not r["turnover_available"]:
             r["traded_amount_krw"]=None
             r["amount_ratio20"]=None
+        h=groups[r["code"]]
+        stats=backtest(h,day,outcome_cutoff=reference)
+        stats["limitations"]=stats.get("limitations",[])+["Current setup uses provisional KIS candle; completed outcomes end at prior reference; MARCAP history/calendar parity not independently certified."]
+        chart=chart_rows(h,day,points=121)
+        chart["data_frequency"]="PROVISIONAL_DAILY"
+        chart["pattern_confirmed"]=False
+        # Bound detail payload; preserve computed counts and returns, only trim
+        # example lists / plotted history if required for remote storage.
+        detail=dict(reference=reference,stats=stats,chart=chart)
+        for examples in (12,6,3,0):
+            for setup in stats["setups"]:
+                for horizon in setup["horizons"].values():
+                    horizon["cases"]=horizon.get("cases",[])[-examples:] if examples else []
+            if len(json.dumps(detail,ensure_ascii=False,separators=(",",":"),allow_nan=False).encode())<=42000:break
+        if len(json.dumps(detail,ensure_ascii=False,separators=(",",":"),allow_nan=False).encode())>42000:
+            chart["bars"]=chart["bars"][-60:]
+        r["provisional_research"]=detail
     return dict(day=day,status="KIS_PROVISIONAL",observed=len(quotes),eligible=audit["eligible_stocks"],excluded=excluded,items=matches,audit=audit,**coverage)
 
 if __name__=="__main__":

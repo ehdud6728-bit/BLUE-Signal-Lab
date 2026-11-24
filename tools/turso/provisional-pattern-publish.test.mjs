@@ -122,3 +122,15 @@ test('only temporary read errors are eligible for bounded retries',()=>{
   assert.equal(retryableRead({status:401}),false);
   assert.equal(retryableRead({code:'SQLITE_ERROR'}),false);
 });
+
+test('reject provisional research that includes the unconfirmed day as a historical outcome',()=>{
+  const data=fixture(),v=data.result.items[0],q=data.quotes[0];
+  const example={signal_day:'2026-11-02',entry_day:'2026-11-03',exit_day:reference,return_pct:3};
+  const h={n:1,up_pct:100,cases:[example]};
+  v.provisional_research={reference,chart:{asof:day,pattern_confirmed:false,data_frequency:'PROVISIONAL_DAILY',
+    bars:[{t:day,o:q.open,h:q.high,l:q.low,c:q.close}]},stats:{asof:day,history_end:reference,
+    setups:[{label:'test',horizons:{'5':h,'10':h,'20':h}}]}};
+  assert.equal(validateSnapshot(data.result,data.quotes).rows.length,2);
+  example.exit_day=day;
+  assert.throws(()=>validateSnapshot(data.result,data.quotes),/INVALID_PROVISIONAL_RESEARCH_CASE/);
+});

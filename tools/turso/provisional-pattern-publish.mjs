@@ -96,6 +96,27 @@ export function validateSnapshot(result,quotes){
     check([open,high,low,close].every(Number.isSafeInteger)&&0<low&&low<=Math.min(open,close)&&Math.max(open,close)<=high,'INVALID_PROVISIONAL_CANDLE');
     // Bind the exact original quote to this immutable generation. Never use
     // a later quote to infer the candle behind an earlier pattern.
+    const detail=v.provisional_research;
+    if(detail!==undefined){
+      const {chart,stats}=detail;
+      check(detail.reference===q.reference&&chart?.asof===r.day&&chart.pattern_confirmed===false&&chart.data_frequency==='PROVISIONAL_DAILY'&&
+        Array.isArray(chart.bars)&&chart.bars.length>0&&chart.bars.length<=121&&
+        chart.bars.every((b,i)=>validDay(b.t)&&b.t<=r.day&&(i===0||b.t>chart.bars[i-1].t)&&
+          [b.o,b.h,b.l,b.c].every(x=>typeof x==='number'&&Number.isFinite(x))&&0<b.l&&b.l<=Math.min(b.o,b.c)&&Math.max(b.o,b.c)<=b.h)&&
+        chart.bars.at(-1).t===r.day&&chart.bars.at(-1).c===close&&
+        stats?.asof===r.day&&stats.history_end<=q.reference&&Array.isArray(stats.setups)&&stats.setups.length<=12,
+        'INVALID_PROVISIONAL_RESEARCH');
+      for(const setup of stats.setups){
+        for(const h of ['5','10','20']){
+          const x=setup.horizons?.[h];
+          check(x&&count(x.n)&&(!x.n||typeof x.up_pct==='number'&&x.up_pct>=0&&x.up_pct<=100)&&
+            Array.isArray(x.cases)&&x.cases.length<=12&&x.cases.length<=x.n&&
+            x.cases.every(z=>validDay(z.signal_day)&&validDay(z.entry_day)&&validDay(z.exit_day)&&
+              z.signal_day<z.entry_day&&z.entry_day<=z.exit_day&&z.exit_day<=q.reference&&Number.isFinite(z.return_pct)),
+            'INVALID_PROVISIONAL_RESEARCH_CASE');
+        }
+      }
+    }
     const raw=JSON.stringify({...v,kis_candle:{open,high,low,close}});
     check(Buffer.byteLength(raw)<=64000,'INVALID_PROVISIONAL_RECORD_SIZE');
     rows.push({code:v.code,raw,hash:sha(raw)});

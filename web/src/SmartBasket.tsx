@@ -10,7 +10,7 @@ import './smart-basket.css';
 import './r15116-basket-priority.css';
 import './r158-long-watch.css';
 import './r15117-basket-discovery-layout.css';
-import {comparisonKey,fetchComparedTursoFirst,sourceName,type PriceCompare} from './price-compare';
+import {comparisonKey,fetchComparedTursoFirst,fetchComparedTursoOnly,refreshKisQuoteToTurso,sourceName,type PriceCompare} from './price-compare';
 import StopLossRow from './StopLossRow';
 import type {StopMethod} from './stop-loss';
 import BasketSupplyRecordRow from './BasketSupplyRecordRow';
@@ -51,12 +51,13 @@ const API=(import.meta.env.VITE_API_BASE||'https://blue-signal-lab-api-v2.ehdud6
 const STORE='blue_r15_basket_v1';
 const MAX_REGULAR=100, MAX_PROTECTED=20;
 export type BasketSelectionOrigin='SEARCH'|'ANALYSIS';
-export type BasketQuickItem={code:string;name:string|null;day:string;close_price:number|null;signals:string[];extras?:Record<string,unknown>;technicalBadges?:DiscoveryTechBadge[]};
+type ProvisionalDiscovery={kind:'KIS_PROVISIONAL';observedAt:string;snapshotId:string;aiMatch:boolean};
+export type BasketQuickItem={discovery?:ProvisionalDiscovery;code:string;name:string|null;day:string;close_price:number|null;signals:string[];extras?:Record<string,unknown>;technicalBadges?:DiscoveryTechBadge[]};
 export type BasketQuickAddRequest={serial:number;item:BasketQuickItem;selectionOrigin?:BasketSelectionOrigin;analysisMatched?:boolean};
 type SearchRow=BasketQuickItem;
 type AiPick={code:string;name:string;day:string;close_price:number;signals:string[];reason:string;risk:string;watch:string;source:'AI'};
 type AiResult={status:string;asof?:string;items?:AiPick[];generated_at?:string;model?:string;cached?:boolean;message?:string;error?:string};
-type BasketItem={id:string;source:'MANUAL'|'AI';code:string;name:string;day:string;baseline:number;
+type BasketItem={discovery?:ProvisionalDiscovery;id:string;source:'MANUAL'|'AI';code:string;name:string;day:string;baseline:number;
   added_at:string;signals:string[];memo:string;reason?:string;risk?:string;watch?:string;
   technicalBadges?:DiscoveryTechBadge[];
   selectionOrigin?:BasketSelectionOrigin;analysisMatched?:boolean;
@@ -82,9 +83,14 @@ function readItems():BasketItem[]{
   return Array.isArray(arr)?keepQuotas(arr.filter(validItem)):[];
  } catch{return [];}
 }
+function validDiscovery(x:any,day:string):x is ProvisionalDiscovery{
+ return !!x&&x.kind==='KIS_PROVISIONAL'&&typeof x.snapshotId==='string'&&/^[a-f0-9]{64}$/.test(x.snapshotId)&&typeof x.aiMatch==='boolean'&&
+ typeof x.observedAt==='string'&&Number.isFinite(Date.parse(x.observedAt))&&
+ new Date(Date.parse(x.observedAt)+9*3600000).toISOString().slice(0,10)===day;
+}
 function validItem(x:any):x is BasketItem{
  return x&&typeof x==='object'&&validCode(x.code)&&validDay(x.day)&&
-  (x.source==='MANUAL'||x.source==='AI')&&Number.isFinite(x.baseline)&&x.baseline>0&&
+  (x.source==='MANUAL'||x.source==='AI')&&(x.discovery===undefined||(x.source==='MANUAL'&&validDiscovery(x.discovery,x.day)))&&Number.isFinite(x.baseline)&&x.baseline>0&&
   typeof x.id==='string'&&x.id===`${x.source}:${x.code}:${x.day}`&&
   (x.selectionOrigin===undefined||(x.source==='MANUAL'&&['SEARCH','ANALYSIS'].includes(x.selectionOrigin)))&&
   (x.analysisMatched===undefined||(x.selectionOrigin==='ANALYSIS'&&typeof x.analysisMatched==='boolean'))&&
@@ -120,14 +126,14 @@ function selectedObservation(item:BasketItem,comp:PriceCompare|undefined,pr:Perf
  q:Quote|undefined):{price:number;day:string;source:string;at:string|null}|null{
  const choices:{price:number;day:string;source:string;at:string|null;priority:number}[]=[];
  const add=(price:number|null|undefined,day:string|null|undefined,source:string,at:string|null|undefined,priority:number)=>{
-  if(price&&Number.isFinite(price)&&price>0&&day&&day>item.day)
+  if(price&&Number.isFinite(price)&&price>0&&day&&(day>item.day||!!item.discovery&&day===item.day&&!!at&&Number.isFinite(Date.parse(at))&&Date.parse(at)>=Date.parse(item.discovery.observedAt)))
    choices.push({price,day,source,at:at||null,priority});
  };
  add(comp?.latest_price,comp?.latest_day,sourceName(comp?.latest_source),comp?.latest_at,4);
  add(pr?.quote_price,pr?.quote_day,'기존 KIS 수집기',pr?.quote_at,3);
  add(pr?.recent_close,pr?.recent_day,'기존 KIS 일봉',null,2);
- add(q?.price,q?.trade_date_kst,'KIS 저장 시세',q?.received_at_utc,1);
- choices.sort((a,b)=>b.day.localeCompare(a.day)||b.priority-a.priority);
+ if(!item.discovery)add(q?.price,q?.trade_date_kst,'KIS 저장 시세',q?.received_at_utc,1);
+ choices.sort((a,b)=>b.day.localeCompare(a.day)||(item.discovery&&a.day===item.day?(Date.parse(b.at||'')||0)-(Date.parse(a.at||'')||0):0)||b.priority-a.priority);
  return choices[0]||null;
 }
 // R151_QUICK_ADD: controlled one-tap requests from the search results list.
@@ -166,15 +172,23 @@ export default function SmartBasket({quickAddRequests,onItemsChange,onAddFeedbac
  const [quotes,setQuotes]=useState<Quotes|null>(null);
  const [performance,setPerformance]=useState<Record<string,Performance>>({});
  const [performanceError,setPerformanceError]=useState('');
+ const [provisionalRefreshing,setProvisionalRefreshing]=useState<string|null>(null);
+ async function refreshDiscovery(it:BasketItem){
+  if(!it.discovery||provisionalRefreshing)return;
+  setProvisionalRefreshing(it.id);
+  try{const result=await refreshKisQuoteToTurso(it.code);const compared=await fetchComparedTursoOnly([it]);setR1593Prices(old=>({...old,...compared}));setMessage(result.message);}
+  catch(e){setError(e instanceof Error?e.message:'KIS 조회 실패');}finally{setProvisionalRefreshing(null);}
+ }
  const [performanceChecked,setPerformanceChecked]=useState('');
  const idsKey=items.map(x=>perfId(x)).join(',');
+ const confirmedKey=items.filter(x=>!x.discovery).map(x=>perfId(x)).join(',');
  // Turso audited EOD first; the existing D1 comparison remains a failure fallback.
  const [r1593Prices,setR1593Prices]=useState<Record<string,PriceCompare>>({});
  const [r1593Error,setR1593Error]=useState('');
  useEffect(()=>{
   if(!active||!idsKey)return;const ctrl=new AbortController();let loading=false;
   const load=async()=>{if(loading||document.visibilityState==='hidden')return;loading=true;
-   try{const result=await fetchComparedTursoFirst(items,ctrl.signal,partial=>{if(!ctrl.signal.aborted)setR1593Prices(prev=>({...prev,...partial}));});if(!ctrl.signal.aborted){setR1593Prices(prev=>({...prev,...result}));setR1593Error('');}}
+   try{const apply=(partial:Record<string,PriceCompare>)=>{if(!ctrl.signal.aborted)setR1593Prices(prev=>({...prev,...partial}));};const result={...await fetchComparedTursoOnly(items.filter(x=>x.discovery),ctrl.signal,apply),...await fetchComparedTursoFirst(items.filter(x=>!x.discovery),ctrl.signal,apply)};if(!ctrl.signal.aborted){setR1593Prices(prev=>({...prev,...result}));setR1593Error('');}}
    catch(e){if(!ctrl.signal.aborted)setR1593Error(e instanceof Error?e.message:'최근 시세 확인 실패');}
    finally{loading=false;}
   };
@@ -185,10 +199,10 @@ export default function SmartBasket({quickAddRequests,onItemsChange,onAddFeedbac
  },[active,idsKey,refreshKey]);
  // Do not register an unchanged watch list to D1 while its tab is hidden.
  useEffect(()=>{
-   if(!active||!idsKey)return;
+   if(!active||!confirmedKey)return;
    let disposed=false;
    const register=async()=>{
-    const entries=idsKey.split(',').map(x=>{const pos=x.indexOf(':');return {code:x.slice(0,pos),day:x.slice(pos+1)};});
+    const entries=confirmedKey.split(',').map(x=>{const pos=x.indexOf(':');return {code:x.slice(0,pos),day:x.slice(pos+1)};});
     for(let i=0;i<entries.length;i+=20){
      if(disposed)break;
      try{const r=await fetch(API+'/api/basket/watch',{method:'POST',credentials:'include',
@@ -199,16 +213,16 @@ export default function SmartBasket({quickAddRequests,onItemsChange,onAddFeedbac
     }
    };
    void register();return()=>{disposed=true;};
- },[active,idsKey]);
+ },[active,confirmedKey]);
  // The UI checks frequently; server collection itself occurs via separate Cron.
  useEffect(()=>{
-   if(!active||!idsKey)return;
+   if(!active||!confirmedKey)return;
    let disposed=false,inFlight=false;
    const load=async()=>{
     if(inFlight||document.visibilityState==='hidden')return;
     inFlight=true;
     try{
-     const entries=idsKey.split(',');const found:Performance[]=[];
+     const entries=confirmedKey.split(',');const found:Performance[]=[];
      // The server intentionally caps each watch GET at 100 entries; the UI can
      // hold 100 ordinary + 20 protected discovery records.
      for(let i=0;i<entries.length;i+=70){
@@ -228,14 +242,14 @@ export default function SmartBasket({quickAddRequests,onItemsChange,onAddFeedbac
    const wake=()=>{if(document.visibilityState==='visible')void load();};
    document.addEventListener('visibilitychange',wake);
    return()=>{disposed=true;window.clearInterval(timer);document.removeEventListener('visibilitychange',wake);};
- },[active,idsKey,refreshKey]);
+ },[active,confirmedKey,refreshKey]);
  // R1.5.10.4: sample-floor changes must refresh verified basket evidence.
  // The API only reads D1 chart evidence, never performs a market/KIS request.
  useEffect(()=>{evidenceAttempted.current.clear();},[patternSampleMin]);
  useEffect(()=>{
   if(!active)return;let disposed=false;let cursor=0;
   const pending=[...new Map(items.map((x):[string,BasketItem]=>[perfId(x),x])).values()]
-    .filter(x=>!evidenceAttempted.current.has(perfId(x)));
+    .filter(x=>!x.discovery&&!evidenceAttempted.current.has(perfId(x)));
   if(!pending.length)return;
   const worker=async()=>{while(!disposed){
    const it=pending[cursor++];if(!it)return;const key=perfId(it);evidenceAttempted.current.add(key);
@@ -247,7 +261,7 @@ export default function SmartBasket({quickAddRequests,onItemsChange,onAddFeedbac
     // An absent or unaudited source must not create technical badges.
     const badges=discoveryTechnicalBadges(found.extras);
     if(!('patternN10d' in snapshot)&&!badges.length)continue;
-    setItems(old=>old.map(x=>perfId(x)===key?{
+    setItems(old=>old.map(x=>!x.discovery&&perfId(x)===key?{
       ...x,...snapshot,...(x.technicalBadges===undefined&&badges.length?{technicalBadges:badges}:{})
     }:x));
    }catch{/* Historical evidence is optional. Never invent it on network errors. */}
@@ -302,8 +316,9 @@ export default function SmartBasket({quickAddRequests,onItemsChange,onAddFeedbac
   finally{supplyLoading.current.delete(id);setSupplyBusy(list=>list.filter(x=>x!==id));}
  }
  function add(data:SearchRow|AiPick,source:'MANUAL'|'AI',selectionOrigin:BasketSelectionOrigin='SEARCH',analysisMatched?:boolean){
-  if(!validCode(data.code)||!validDay(data.day)||!Number.isFinite(data.close_price)||!data.close_price||data.close_price<=0){
-   const msg='확정 종가와 거래일이 있는 종목만 담을 수 있습니다.';
+  const discovery=source==='MANUAL'?(data as SearchRow).discovery:undefined;
+  if(!validCode(data.code)||!validDay(data.day)||!Number.isFinite(data.close_price)||!data.close_price||data.close_price<=0||(discovery!==undefined&&!validDiscovery(discovery,data.day))){
+   const msg='유효한 발견 가격과 거래일·시각이 필요합니다.';
    setError(msg);onAddFeedback?.(msg);return;
   }
   const id=`${source}:${data.code}:${data.day}`;
@@ -316,11 +331,11 @@ export default function SmartBasket({quickAddRequests,onItemsChange,onAddFeedbac
       discoveryTechnicalBadges((data as SearchRow).extras)):[];
   setItems(prev=>appendBasketRecord(prev,{id,source,code:data.code,name:data.name||data.code,day:data.day,
     baseline:data.close_price as number,added_at:new Date().toISOString(),signals:data.signals||[],memo:'',
-    technicalBadges,
+    technicalBadges,...(discovery?{discovery}:{}),
     ...(source==='MANUAL'?{selectionOrigin,...(selectionOrigin==='ANALYSIS'&&typeof analysisMatched==='boolean'?{analysisMatched}:{})}:{}),
     reason:p?.reason,risk:p?.risk,watch:p?.watch,...patternEvidence(data),
     ...(initialSupply?{supplyRecord:initialSupply}:{}),supplyMemo:''},MAX_REGULAR));
-  void captureSupply(id,data.code,data.day,data.close_price as number);
+  if(!discovery)void captureSupply(id,data.code,data.day,data.close_price as number);
   setError('');setMessage(`${data.name||data.code} 관찰함에 추가했습니다.`);
   onAddFeedback?.(`${data.name||data.code} · 장바구니에 저장했습니다.`);
  }
@@ -420,7 +435,7 @@ export default function SmartBasket({quickAddRequests,onItemsChange,onAddFeedbac
    (dayFilter==='ALL'||x.day===dayFilter)&&
    (!normalizedQuery||x.code.includes(normalizedQuery)||x.name.toLocaleLowerCase('ko-KR').includes(normalizedQuery)));
  const metricPrice=(x:BasketItem,basis:GainBasis):number|null=>{
-  const comp=r1593Prices[comparisonKey(x)],pr=performance[perfId(x)];
+  const comp=r1593Prices[comparisonKey(x)],pr=x.discovery?undefined:performance[perfId(x)];
   const recent=selectedObservation(x,comp,pr,latestQuote.get(x.code));
   if(basis==='CURRENT')return recent?.price??null;
   if(basis==='HIGH')return highestObservedPrice({discoveryDay:x.day,performance:pr,
@@ -525,7 +540,7 @@ export default function SmartBasket({quickAddRequests,onItemsChange,onAddFeedbac
        <ChevronDown size={17}/></button>}
      {(!groupSimilar||group.records.length===1||expandedCodes.includes(group.code))&&
        <div className="r1595-group-records">{group.records.map(it=>{const q=latestQuote.get(it.code);
-     const pr=performance[perfId(it)];
+     const pr=it.discovery?undefined:performance[perfId(it)];
      const signalChips=discoveredSignals(it.signals,pr?.signal_names);
      const comp=r1593Prices[comparisonKey(it)];
      const selected=selectedObservation(it,comp,pr,q);
@@ -540,8 +555,8 @@ export default function SmartBasket({quickAddRequests,onItemsChange,onAddFeedbac
      const lowest=lowestObservedPrice(it.day,comp);
      const minLow=lowest?.price??null,minLowDay=lowest?.day??null;
      const pending=!pr||['QUEUED','NOT_REGISTERED','HISTORY_PARTIAL'].includes(pr.status);
-     const state=pr?statusText(pr.status):'등록 확인 중';
-    return <article className={"basket-record"+(isHot(it)?" r1591-basket-tomato":"")} key={it.id}>
+     const state=it.discovery?'Turso 관찰 · 최초 발견가 보존':pr?statusText(pr.status):'등록 확인 중';
+    return <article className={"basket-record"+(isHot(it)?" r1591-basket-tomato":"")+(it.discovery?.aiMatch?" r-research-gold":"")} key={it.id}>
      <div className="basket-record-head"><div><span className={`basket-src ${it.source==='AI'?'ai':''}`}>{it.source==='AI'?'AI 선택':it.selectionOrigin==='ANALYSIS'?'사용자 선택 · 정밀분석':'사용자 선택 · 검색'}</span>
        <strong>{it.name}</strong> <small>{it.code}</small>{it.protected&&<span className="r158-locked">장기 관찰</span>}</div>
        <div className="r158-record-actions">
@@ -554,8 +569,10 @@ export default function SmartBasket({quickAddRequests,onItemsChange,onAddFeedbac
        </div></div>
      <div className="basket-discovery-primary" aria-label="종목 선택 기준가격">
        <div className="basket-discovery-value"><span>{it.selectionOrigin==='ANALYSIS'?'분석 기준가':'발견가'}</span><strong>{cash(it.baseline)}원</strong></div>
-       <small>{it.day} · {it.selectionOrigin==='ANALYSIS'?'분석 기준일':'발견일'} 확정 종가</small>
+       <small>{it.day} · {it.discovery?'KIS 최초 관측 '+observedTimeKst(it.discovery.observedAt)+' · 미확정':(it.selectionOrigin==='ANALYSIS'?'분석 기준일':'발견일')+' 확정 종가'}</small>
      </div>
+      {it.discovery?.aiMatch&&<p className="basket-selection-note">★ 발견 당시 AI 연구 조건 잠정 일치 · 독립 검증 전</p>}
+      {it.discovery&&<button type="button" disabled={provisionalRefreshing!==null} onClick={()=>void refreshDiscovery(it)}>{provisionalRefreshing===it.id?'조회 중':'KIS 최신가 확인'}</button>}
       {it.selectionOrigin==='ANALYSIS'&&<p className="basket-selection-note">정밀분석 후 사용자가 직접 담았습니다.{it.analysisMatched===false?' 해당 기준일 검색 신호는 미충족입니다.':''}</p>}
       {isHot(it)&&<div className="r1591-basket-evidence" title={it.patternLabel10d||'실제 과거 일봉 패턴 검증'}>
        과거 10일 상승 {it.patternUp10d!.toFixed(1)}% · 표본 {it.patternN10d}건 · 탐색적 결과
@@ -570,10 +587,10 @@ export default function SmartBasket({quickAddRequests,onItemsChange,onAddFeedbac
          과거 신호일 {it.patternDays10d.slice(-3).join(' · ')}{it.patternDays10d.length>3?' 외':''}
        </div>}
      <div className="basket-record-stats r153-price-grid basket-price-focus" aria-label="장바구니 주요 가격 지표">
-       <div className="basket-price-high"><span>검색 이후 관측 최고가</span><b>{maxHigh?`${cash(maxHigh)}원`:'—'}</b>
+       <div className="basket-price-high"><span>{it.discovery?'다음 거래일부터 관측 최고가':'검색 이후 관측 최고가'}</span><b>{maxHigh?`${cash(maxHigh)}원`:'—'}</b>
          <small>{maxHigh?<>최고 수익률 <strong className="basket-extreme-up">{pctText(pctChange(maxHigh,it.baseline))}</strong>
           {' · '}{maxHighDay||''}{comp&&!comp.high_complete?' · 부분 관측':''}</>:pending?'수집 중':'기간 고가 미확인'}</small></div>
-       <div className="basket-price-low"><span>검색 이후 관측 최저가</span><b>{minLow?`${cash(minLow)}원`:'—'}</b>
+       <div className="basket-price-low"><span>{it.discovery?'다음 거래일부터 관측 최저가':'검색 이후 관측 최저가'}</span><b>{minLow?`${cash(minLow)}원`:'—'}</b>
          <small>{minLow?<>최저 수익률 <strong className="basket-extreme-down">{pctText(pctChange(minLow,it.baseline))}</strong>
           {' · '}{minLowDay||''} · {sourceName(comp?.period_low_source)} · {comp?.low_complete?'확인 구간':'부분 관측'}</>:pending?'수집 중':'기간 저가 미확인'}</small></div>
        <div className="basket-price-recent"><span>최근시세</span><b>{shownRecent?`${cash(shownRecent)}원`:'—'}</b>
@@ -589,21 +606,21 @@ export default function SmartBasket({quickAddRequests,onItemsChange,onAddFeedbac
        </>:
          <small className="r154-no-signal">{it.selectionOrigin==='ANALYSIS'&&it.analysisMatched===false?'검색 신호 미충족 · 사용자 직접 선택':'원본 신호 확인 불가'}</small>}</div>
      </div>
-     <StopLossRow active={active} code={it.code} day={it.day} baseline={it.baseline}
+     {!it.discovery&&<StopLossRow active={active} code={it.code} day={it.day} baseline={it.baseline}
        signals={signalChips} highestObserved={maxHigh} highestDay={maxHighDay}
        selectedMethod={it.stopMethod} refreshKey={refreshKey}
-       onSelectMethod={(method:StopMethod)=>setItems(old=>old.map(x=>x.id===it.id?{...x,stopMethod:method}:x))}/>
-     <BasketSupplyRecordRow record={it.supplyRecord} day={it.day} baseline={it.baseline}
+       onSelectMethod={(method:StopMethod)=>setItems(old=>old.map(x=>x.id===it.id?{...x,stopMethod:method}:x))}/>}
+     {it.discovery&&!it.supplyRecord?<p className="basket-selection-note">발견 당시 매물대 자료가 없으며 다른 날짜 자료로 대체하지 않습니다.</p>:<BasketSupplyRecordRow record={it.supplyRecord} day={it.day} baseline={it.baseline}
        note={it.supplyMemo||''} loading={supplyBusy.includes(it.id)}
-       onFetch={()=>void captureSupply(it.id,it.code,it.day,it.baseline)}
-       onNoteChange={value=>setItems(old=>old.map(x=>x.id===it.id?{...x,supplyMemo:value}:x))}/>
+       onFetch={()=>{if(!it.discovery)void captureSupply(it.id,it.code,it.day,it.baseline);else setMessage('잠정 발견 시점의 매물대 기록을 보존합니다.');}}
+       onNoteChange={value=>setItems(old=>old.map(x=>x.id===it.id?{...x,supplyMemo:value}:x))}/>}
      <div className="r153-row-state" title={pr?.checked_at||''}>{state}{pr?.checked_at&&` · 최종 확인 ${new Date(pr.checked_at).toLocaleString('ko-KR')}`}</div>
      <details className="r152-record-more"><summary>메모 · 관찰 근거</summary>
        {it.source==='AI'&&<p className="basket-insight">AI 관찰 근거: {it.reason||'미기재'} · 위험: {it.risk||'미기재'}</p>}
        <label className="basket-memo">관찰 메모<input value={it.memo} maxLength={240} placeholder="추세선·거래량·다음 확인 항목" onChange={e=>setItems(old=>old.map(x=>x.id===it.id?{...x,memo:e.target.value}:x))}/></label>
      </details>
     </article>})}</div>}</section>)}</div>}
-  <p className="basket-foot">장기 관찰 보호는 이 브라우저에서의 목록 정리·삭제 방지 기능입니다. 캐시 삭제·기기 변경까지 보장하지 않으므로 JSON 백업을 보관하세요. R1.5.3 검색일 다음 거래일부터의 KIS 원주가 일봉 고가를 사용합니다. 액면분할·합병에 따른 가격 보정은 하지 않아 수익률 왜곡 가능성이 있습니다. 수집 토큰 상태·장외시간에 따라 2분 안에 값이 표시되지 않을 수 있습니다. 장중 확인가는 확정 종가와 다릅니다. 연구 전용 · 등록 기준은 실제 체결가가 아닌 과거 확정 종가입니다. 성과는 후속 KRX 수집 스냅샷이 있을 때만 참고 비교하며, 최신 체결 확인·수수료·세금·배당·수정주가를 반영하지 않습니다. AI 후보는 검증된 투자 우위가 아닙니다. 장바구니는 현재 브라우저에만 저장됩니다.</p>
+  <p className="basket-foot">장기 관찰 보호는 이 브라우저에서의 목록 정리·삭제 방지 기능입니다. 캐시 삭제·기기 변경까지 보장하지 않으므로 JSON 백업을 보관하세요. R1.5.3 검색일 다음 거래일부터의 KIS 원주가 일봉 고가를 사용합니다. 액면분할·합병에 따른 가격 보정은 하지 않아 수익률 왜곡 가능성이 있습니다. 수집 토큰 상태·장외시간에 따라 2분 안에 값이 표시되지 않을 수 있습니다. 장중 확인가는 확정 종가와 다릅니다. 연구 전용 · 등록 기준은 실제 체결가가 아닌 과거 확정 종가 또는 최초 KIS 관측가입니다. 성과는 후속 KRX 수집 스냅샷이 있을 때만 참고 비교하며, 최신 체결 확인·수수료·세금·배당·수정주가를 반영하지 않습니다. AI 후보는 검증된 투자 우위가 아닙니다. 장바구니는 현재 브라우저에만 저장됩니다.</p>
    <details className="r152-data-management"><summary>데이터 관리 · 기기 변경 시 백업</summary>
      <div className="basket-actions"><button type="button" onClick={saveBackup}><Download size={15}/> 백업 저장</button>
        <label className="basket-import"><Upload size={15}/> 백업 가져오기<input type="file" accept=".json,application/json" onChange={e=>{void importBackup(e.target.files?.[0]);e.target.value='';}}/></label>
