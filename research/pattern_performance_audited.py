@@ -31,6 +31,17 @@ def market_regime(b):
     ratio=b["up5"]/b["matched5"]
     return "BROAD_UP" if ratio>=0.6 else "BROAD_WEAK" if ratio<=0.4 else "MIXED"
 
+def recent_source(source, limit):
+    if limit < 1:
+        raise ValueError("invalid window")
+    days = [d["day"] for d in source["eod_days"]]
+    if days != sorted(set(days)):
+        raise ValueError("invalid session order")
+    selected = set(days[-limit:])
+    return {**source, "signals":[s for s in source["signals"] if s["day"] in selected],
+            "research_window_sessions":len(selected),
+            "research_window_start":min(selected) if selected else None}
+
 def analyze(source):
     if source.get("format") != "BLUE_TURSO_EXIT_SOURCE_V1" or source.get("audits_readback_verified") is not True:
         raise ValueError("audited source required")
@@ -114,6 +125,8 @@ def analyze(source):
     return {"schema":"BLUE_PATTERN_PERFORMANCE_AUDITED_V1",
             "status":"RESEARCH_ONLY_NO_PRODUCTION_PROMOTION",
             "asof":source["asof_day"],"audited_sessions":len(days),
+            "research_window_sessions":source.get("research_window_sessions",len(days)),
+            "research_window_start":source.get("research_window_start",days[0] if days else None),
             "research_audited_days":source["research_audited_days"],
             "excluded_research_days":source["research_excluded_days"],
             "signal_events":len(rows),"missing_by_horizon":missing,
@@ -133,7 +146,9 @@ if __name__ == "__main__":
     p=argparse.ArgumentParser()
     p.add_argument("--input",type=Path,required=True)
     p.add_argument("--output",type=Path,required=True)
+    p.add_argument("--recent-window",type=int)
     a=p.parse_args()
-    result=analyze(json.loads(a.input.read_text(encoding="utf-8")))
+    source=json.loads(a.input.read_text(encoding="utf-8"))
+    result=analyze(recent_source(source,a.recent_window) if a.recent_window is not None else source)
     a.output.parent.mkdir(parents=True,exist_ok=True)
     a.output.write_text(json.dumps(result,ensure_ascii=False,indent=2)+"\n",encoding="utf-8")
