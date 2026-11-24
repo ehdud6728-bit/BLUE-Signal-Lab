@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
-import {classifyStocks,captureLeaders,selectAlignedTrend} from './rotation-leaders.mjs';
+import {classifyStocks,captureLeaders,selectAlignedTrend,masterMembership,resolveMembership} from './rotation-leaders.mjs';
 const row=(code,r5,r10,ratio,signals=[],amount=600000000,sectors=['0002'])=>({code,name:code,close:1000,r5,r10,amount_ratio:ratio,signals,amount,sectors});
 test('leaders and recovering followers require liquidity, true group and price recovery',()=>{
  const r=classifyStocks([row('000001',4,15,2),row('000002',2,0,2,['ENV20_LOWER_TOUCH']),row('000003',1,1,3),row('000004',-1,-10,4),row('000005',1,0,null),row('000006',1,0,3,[],100),row('000007',1,0,3,[],600000000,['0003'])],{code:'0002'});
@@ -29,4 +29,24 @@ test('missing newest EOD can use older aligned trend but never mix dates',async(
  assert.equal(result.day,'2026-11-23');assert.equal(result.latest_trend_day,'2026-11-24');assert.equal(result.reference_basis,'EXACT_BENCHMARK_DATES');
  audits.splice(4,1);
  await assert.rejects(()=>selectAlignedTrend(read,'2026-11-25'),/LEADERS_EOD_HISTORY_REQUIRED/);
+});
+
+test('direct industry codes and documented index flags are separate exact membership paths',()=>{
+ const members=[{market:'KOSPI',code:'000001',sectors:['0010'],index_tags:['KOSPI200_건설']},{market:'KOSPI',code:'000002',sectors:['0010'],index_tags:['KOSPI200_금융']},{market:'KOSDAQ',code:'000003',sectors:['0010'],index_tags:['KOSDAQ150']}];
+ const a=masterMembership(members,'KOSPI',{code:'2010',name:'코스피 200 건설'});
+ assert.equal(a.source,'KIS_MASTER_FLAG');assert.deepEqual([...a.codes],['000001']);
+ const b=masterMembership(members,'KOSPI',{code:'0010',name:'건설'});
+ assert.equal(b.source,'KIS_MASTER_CODE');assert.equal(b.codes.size,2);
+ const c=masterMembership(members,'KOSPI',{code:'2010',name:'코스피200 건설 관련'});
+ assert.equal(c.source,'UNMAPPED');
+});
+test('KRX fallback requires exact requested day and group identities and intersects eligible market membership',async()=>{
+ const members=[{market:'KOSPI',code:'000001',sectors:['0010']},{market:'KOSPI',code:'000002',sectors:['0010']},{market:'KOSDAQ',code:'000003',sectors:['0010']}];
+ const targets=[{market:'KOSPI',code:'2010',name:'복합지수'}];
+ const res=await resolveMembership(members,targets,'2026-11-23',async req=>({day:req.day,groups:[{...targets[0],status:'AVAILABLE',reason:null,krx_code:'1234',members:['000001','000003','999999']}]}));
+ const r=res.get('KOSPI/2010');assert.equal(r.source,'KRX_INDEX_CONSTITUENTS');assert.deepEqual([...r.codes],['000001']);
+ const bad=await resolveMembership(members,targets,'2026-11-23',async req=>({day:'2026-11-22',groups:[]}));
+ assert.equal(bad.get('KOSPI/2010').source,'UNMAPPED');
+ const rows=[row('000001',4,15,2,[],600000000,['0010']),row('000002',5,20,2,[],600000000,['0010'])];
+ assert.deepEqual(classifyStocks(rows,targets[0],x=>r.codes.has(x.code)).leaders.map(x=>x.code),['000001']);
 });
