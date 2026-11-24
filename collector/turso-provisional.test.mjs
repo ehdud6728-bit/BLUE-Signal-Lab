@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {collectTursoProvisional,tursoProvisionalMode,provisionalStatements}
   from './src/turso-provisional.mjs';
-import {getKisDailyQuote} from './src/core.mjs';
+import {getKisDailyQuote,getKisChartDailyQuote} from './src/core.mjs';
 
 const NOW=new Date('2026-11-19T00:05:12.000Z');
 const POST_CLOSE=new Date('2026-11-19T11:44:12.000Z'); // 20:44 KST
@@ -306,3 +306,20 @@ test('provisional writer rejects a final-day or non-KRX quote even with valid OH
  const r=await collectTursoProvisional(env({TURSO_PROVISIONAL_QUOTES_ENABLED:'true'}),NOW,deps(db,{quote:async()=>quote(++n===1?{acml_tr_pbmn:'123456'}:{})}));
  assert.equal(r.turnover_valid,1);assert.equal(r.turnover_missing,1);
  });
+
+test('chart daily uses exact date, raw price and actual turnover',async()=>{
+ const day='2026-11-19';
+ const row={stck_bsop_date:'20261119',stck_clpr:'66500',stck_oprc:'66300',stck_hgpr:'67200',stck_lwpr:'65400',acml_vol:'700000',acml_tr_pbmn:'46550000000'};
+ const q=await getKisChartDailyQuote(env(),'cached','J','005930',day,async(url,opts)=>{
+  assert.ok(url.pathname.endsWith('/inquire-daily-itemchartprice'));
+  assert.equal(opts.headers.tr_id,'FHKST03010100');
+  assert.equal(url.searchParams.get('FID_ORG_ADJ_PRC'),'1');
+  assert.equal(url.searchParams.get('FID_INPUT_DATE_1'),'20261119');
+  assert.equal(url.searchParams.get('FID_INPUT_DATE_2'),'20261119');
+  return Response.json({rt_cd:'0',output2:[row]});
+ });
+ assert.equal(q.output.acml_tr_pbmn,'46550000000');
+ assert.equal(q.output.stck_prpr,'66500');
+ await assert.rejects(()=>getKisChartDailyQuote(env(),'cached','J','005930',day,async()=>Response.json({rt_cd:'0',output2:[{...row,stck_bsop_date:'20261118'}]})),/KIS_DAILY_EXACT_DATE_MISSING/);
+ await assert.rejects(()=>getKisChartDailyQuote(env(),'cached','J','005930',day,async()=>new Response('',{status:429})),/KIS_RATE_LIMIT/);
+});
