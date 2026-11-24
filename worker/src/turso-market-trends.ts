@@ -79,6 +79,6 @@ export async function tursoMarketTrends(env:Env,factory:Factory=createClient,now
         }
       }
     }catch{global_status='SEPARATE_UNAVAILABLE';}
-    return {status:'READY',...s,global,global_receipt_day,global_observed_at_utc,global_cutoff,global_status,stale_receipt:s.receipt_day!==today};
+    return {status:'READY',...s,trend_sha256:String(r.payload_sha256),global,global_receipt_day,global_observed_at_utc,global_cutoff,global_status,stale_receipt:s.receipt_day!==today};
   }finally{db.close();}
 }
