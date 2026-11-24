@@ -11,7 +11,8 @@ const MAX_PER_TICK=12;
 const MAX_PILOT_MS=30*60*1000;
 const MAX_SOURCE_AGE_DAYS=7;
 const INSTANT_PER_CODE_SECONDS=20;
-const INSTANT_PER_MINUTE=12;
+// Conservative first throughput step; shared KIS account must be monitored.
+const INSTANT_PER_MINUTE=20;
 // KRX stock codes include six-character uppercase alphanumerics (e.g. 00088K).
 // Match the validated EOD candidate and Turso price-comparison contracts.
 const CODE=/^[0-9A-Z]{6}$/;
