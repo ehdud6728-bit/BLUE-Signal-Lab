@@ -218,7 +218,7 @@ function App(){
   const [tursoStage,setTursoStage]=useState<TursoProgressStage>('REQUESTED');
   const [tursoStartedAt,setTursoStartedAt]=useState(0);
   const [tursoFinishedAt,setTursoFinishedAt]=useState(0);
-  const [filterOpen,setFilterOpen]=useState(true);
+  const [filterOpen,setFilterOpen]=useState(false);
   const [installPrompt,setInstallPrompt]=useState<InstallPrompt|null>(null);
   const [installGuide,setInstallGuide]=useState(false);
   const [standalone,setStandalone]=useState(false);
@@ -790,7 +790,7 @@ function App(){
       return;
     }
     if(target==='search'){
-      setFilterOpen(true);
+      setFilterOpen(false);
       window.setTimeout(()=>formRef.current?.scrollIntoView({behavior:'smooth',block:'start'}),35);
     }else if(target==='results'){
       window.setTimeout(()=>resultRef.current?.scrollIntoView({behavior:'smooth',block:'start'}),35);
