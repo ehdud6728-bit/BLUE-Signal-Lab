@@ -44,3 +44,10 @@
 - 최근 동일 벤치마크 관측일 26개 모두 일치한 업종만 5/10/20일 상대성과(업종/시장 가격비율 변화율) 및 10일 상대성과의 5관측일 전 대비 차이(%p) 산출. 부호에 따라 주도/개선/약화/소외/경계 분류. RRG 원리 참고한 자체 투명 산식, 정식 RRG 산식·순환 확률 아님. 거래일 달력·분류 변경·업종 구성·지수 사용 권한 및 독립 검증 남음.
 - 별도 `blue_market_trends_v1`에 압축된 파생 결과만 저장, 해시·read-back 검사, 별도 API/웹 카드. 외부 원시 자료·토큰·가격은 공개 Actions 로그에 출력하지 않음. 실제 수집 성공·운영 배포 미확인. 사분면의 시간 이동 연구, 대장/후발주, VIX 선물 구조, FOMC/기업 이벤트, 생성형 AI 및 시나리오 성과 추적은 후속.
 - 공식 문서: https://github.com/koreainvestment/open-trading-api/blob/main/backtester/kis_backtest/providers/kis/data.py ; https://github.com/koreainvestment/open-trading-api/tree/main/examples_llm/overseas_stock/inquire_daily_chartprice .
+
+
+## 2026-11-24 순환매 기간 분석 실제 검증
+- [실행 #45412545588](https://github.com/ehdud6728-bit/BLUE-Signal-Lab/actions/runs/45412545588) apply 성공: KIS 143회, KOSPI 37/37, KOSDAQ 99/99, 각각 벤치마크 38개 관측일, 사분면 및 5/10/20일 상대성과 저장/read-back 확인. 자동 테스트 3개 통과. 해외 5종은 모두 HISTORY_IDENTITY_UNVERIFIED로 미확보.
+- 해외 지수만 재검증하도록 global_inspect(읽기), global_apply(분리 테이블 저장) 추가. 점 있는 공식 예제 심볼 및 점 없는 HTS 심볼을 최대 10회 시도. 명시적으로 다른 종목코드는 거부, 코드 누락일 때만 제한된 정확 명칭으로 확인. 실제 응답 검증 전 가정값 미표시. 국내 저장분 재수집·덮어쓰기 없음. 해외 별도 수집일 및 해시 검증 표시.
+- 한국투자증권 공식 해외 기간별 시세 예제에는 미국 다우30/나스닥100/S&P500 제한 안내가 있음. SOX/VIX 제공 여부와 권한은 별도 확인 필요. HTS의 지수 시세 지원이 Open API 지원을 보장하지 않음. 해외 식별 및 운영 테스트는 아직 미확인.
+- 다음 우선순위: 실제 업종 구성원 데이터 확보, 주도/개선 업종 내 대장주·후발주 연구 및 시황 시나리오 검증. VIX 선물·이벤트·생성형 분석은 아직 미연동.

@@ -53,6 +53,32 @@ export async function tursoMarketTrends(env:Env,factory:Factory=createClient,now
         (x.status==='AVAILABLE')!==(x.summary!==null)||!summary(x.summary,s.overseas_cutoff))throw Error('TREND_GLOBAL_INVALID');
       gs.add(x.symbol);
     }
-    return {status:'READY',...s,stale_receipt:s.receipt_day!==today};
+    let global=s.global,global_receipt_day=s.receipt_day,global_observed_at_utc=s.observed_at_utc,global_cutoff=s.overseas_cutoff,global_status='EMBEDDED';
+    // The global-only capture must not invalidate or overwrite verified domestic results.
+    try{
+      if((await query("SELECT name FROM sqlite_master WHERE type='table' AND name='blue_global_trends_v1'")).rows.length){
+        const gr=(await query('SELECT receipt_day,observed_at_utc,payload_json,payload_sha256 FROM blue_global_trends_v1 WHERE receipt_day<=? ORDER BY receipt_day DESC LIMIT 1',[today])).rows[0];
+        if(gr){
+          const raw=String(gr.payload_json);
+          if(hex(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(raw)))!==gr.payload_sha256)throw Error('GLOBAL_HASH_MISMATCH');
+          const g=JSON.parse(raw);
+          if(g.schema!=='BLUE_GLOBAL_TRENDS_V1'||g.receipt_day!==gr.receipt_day||g.observed_at_utc!==gr.observed_at_utc||
+            !day(g.receipt_day)||g.receipt_day>today||!day(g.overseas_cutoff)||g.overseas_cutoff>=g.receipt_day||
+            !Number.isFinite(Date.parse(g.observed_at_utc))||Date.parse(g.observed_at_utc)>now.getTime()||
+            new Date(Date.parse(g.observed_at_utc)+32400000).toISOString().slice(0,10)!==g.receipt_day||
+            !Array.isArray(g.global)||g.global.length!==symbols.length)throw Error('GLOBAL_SNAPSHOT_INVALID');
+          const seen=new Set<string>();
+          for(const x of g.global){
+            if(!symbols.includes(x.symbol)||seen.has(x.symbol)||typeof x.name!=='string'||!['AVAILABLE','MISSING'].includes(x.status)||
+              (x.status==='AVAILABLE')!==(x.summary!==null)||!summary(x.summary,g.overseas_cutoff))throw Error('GLOBAL_ROW_INVALID');
+            seen.add(x.symbol);
+          }
+          if(Date.parse(g.observed_at_utc)>=Date.parse(s.observed_at_utc)||!s.global.some((x:any)=>x.summary)){
+            global=g.global;global_receipt_day=g.receipt_day;global_observed_at_utc=g.observed_at_utc;global_cutoff=g.overseas_cutoff;global_status='SEPARATE_VERIFIED';
+          }
+        }
+      }
+    }catch{global_status='SEPARATE_UNAVAILABLE';}
+    return {status:'READY',...s,global,global_receipt_day,global_observed_at_utc,global_cutoff,global_status,stale_receipt:s.receipt_day!==today};
   }finally{db.close();}
 }

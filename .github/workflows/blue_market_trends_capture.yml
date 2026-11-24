@@ -4,7 +4,7 @@ on:
     inputs:
       mode:
         type: choice
-        options: [plan, inspect, apply]
+        options: [plan, inspect, apply, global_inspect, global_apply]
         default: plan
         required: true
   pull_request:

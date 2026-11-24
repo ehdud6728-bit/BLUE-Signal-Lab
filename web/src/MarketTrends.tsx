@@ -3,7 +3,7 @@ type IndexSummary={day:string;close:number;previous_day:string;change_pct:number
 type Trend={day:string;matched_sessions:number;rs5:number;rs10:number;rs20:number;momentum:number;quadrant:string};
 type Sector={code:string;name:string;status:string;reason:string|null;trend:Trend|null};
 type Market={market:string;benchmark:IndexSummary|null;universe:number;attempted:number;rows:Sector[]};
-type Snapshot={status:string;receipt_day:string;category_receipt_day:string;domestic_cutoff:string;overseas_cutoff:string;stale_receipt:boolean;markets:Market[];global:{symbol:string;name:string;status:string;summary:IndexSummary|null}[]};
+type Snapshot={global_receipt_day?:string;global_status?:string;status:string;receipt_day:string;category_receipt_day:string;domestic_cutoff:string;overseas_cutoff:string;stale_receipt:boolean;markets:Market[];global:{symbol:string;name:string;status:string;summary:IndexSummary|null}[]};
 const label:Record<string,string>={LEADING:'주도',IMPROVING:'개선',WEAKENING:'약화',LAGGING:'소외',NEUTRAL:'경계'};
 const color:Record<string,string>={LEADING:'#15835a',IMPROVING:'#3977c5',WEAKENING:'#ad801e',LAGGING:'#c74b4b',NEUTRAL:'#8793a0'};
 const fmt=(v:number|null,unit='%')=>v===null?'미확인':(v>0?'+':'')+v.toFixed(2)+unit;
@@ -22,6 +22,7 @@ export default function MarketTrends({api}:{api:string}){
  {!busy&&!err&&data?.status!=='READY'&&<p className="blue-note">아직 기간별 지수 분석 자료가 없습니다. 시장 추세 수집 Actions를 실행해 주세요.</p>}
  {data?.status==='READY'&&<>
  <small>수집일 {data.receipt_day} · {data.stale_receipt?'이전 수집 자료 · ':''}현재 현지 날짜 제외 · 정규장 실시간 아님</small>
+ <small>해외 지수 별도 수집일 {data.global_receipt_day??data.receipt_day}{data.global_status==='SEPARATE_UNAVAILABLE'?' · 별도 자료 검증 실패, 기존 자료만 표시':''}</small>
  {data.global.map(g=><div className="blue-research-card" key={g.symbol}><strong>{g.name}</strong>{g.summary?<><div className="blue-metrics"><div className="blue-metric"><small>지수</small><b>{g.summary.close.toLocaleString('ko-KR')}</b></div><div className="blue-metric"><small>직전 관측 대비</small><b>{fmt(g.summary.change_pct)}</b></div><div className="blue-metric"><small>5관측일</small><b>{fmt(g.summary.change5_pct)}</b></div></div><small>미국 거래일 {g.summary.day} · KIS 일봉</small></>:<p>미확인 · API 조회 권한/코드/응답 확인 필요</p>}</div>)}
  <p className="blue-note">VIX는 현물 지수입니다. 선물 근월·차월 구조, 주요 경제 일정은 아직 연결되지 않았습니다. 해외 지수 날짜가 서로 다를 경우 같은 날로 해석하지 않습니다.</p>
  <strong>업종 순환 사분면 (RRG 원리 참고)</strong>
