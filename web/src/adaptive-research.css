@@ -1,0 +1,15 @@
+.blue-research{min-width:0;overflow-wrap:anywhere}
+.blue-research summary{cursor:pointer;font-weight:700;padding:12px 0;color:inherit}
+.blue-research small{display:block;line-height:1.55;margin:5px 0}
+.blue-research button[aria-pressed]{border:1px solid #aabbd2;border-radius:9px;background:transparent;color:inherit;padding:8px 11px;min-height:38px;font:inherit}
+.blue-research button[aria-pressed=true]{background:#245bd1;color:white;border-color:#245bd1;font-weight:700}
+.blue-research select{border:1px solid #aabbd2;border-radius:8px;padding:6px;color:inherit;background:transparent;font:inherit}
+.blue-research .blue-research-card{border:1px solid #91a5c455;border-radius:12px;padding:12px!important;margin:8px 0;background:#819bc00b;min-width:0}
+.blue-research .blue-research-card strong{display:block;font-size:14px;line-height:1.5}
+.blue-research .blue-research-card.recommended{border-color:#b58a29;border-left:3px solid #b58a29}
+.blue-research .blue-metrics{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px;margin:9px 0}
+.blue-research .blue-metric{border-radius:8px;background:#819bc015;padding:7px 5px;text-align:center;min-width:0}
+.blue-research .blue-metric small{font-size:11px;margin:0}
+.blue-research .blue-metric b{display:block;font-size:15px;font-variant-numeric:tabular-nums}
+.blue-research .gain{color:#c04436}.blue-research .loss{color:#2863c7}
+.blue-research .blue-meta{opacity:.8;font-size:12px}
