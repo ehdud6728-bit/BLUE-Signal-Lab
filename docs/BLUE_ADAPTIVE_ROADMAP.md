@@ -100,3 +100,11 @@
 ## 2026-11-25 API 배포 전 최근 연구 기준일 테스트 수정
 - [실행 #45508199119](https://github.com/ehdud6728-bit/BLUE-Signal-Lab/actions/runs/45508199119): API 오프라인 87/88 통과, 최근 캔들 OHLC 테스트 한 건 실패로 빌드·배포 미실행. PR #178의 read-only CI #45512025881에서도 동일 테스트 실패(96/97 통과).
 - 자동 생성 recent-pattern-data.ts의 RECENT_ASOF가 2026-11-24로 갱신되면서 고정 테스트 날짜 11/24가 신규 관찰일 조건(day > RECENT_ASOF)을 만족하지 않음. 테스트 데이터를 RECENT_ASOF 다음 날짜로 설정하고 기준일 당일 기본 검색에서 신규 판정 금지 및 명시적인 회고 분석에서 정확한 OHLC 검사 유지 테스트를 추가. 운영 검색 로직, 추천 판정 기준, 과거 자료, AI 기능 변경 없음. 수정 테스트·배포 실측은 미확인.
+
+
+## 2026-11-25 공식 경제 일정과 VIX 선물 접근권 경계
+- PR #179 병합 및 PR 안전성 CI #45512879612 성공 확인. 사용자는 배포 완료 보고(실제 배포 실행 ID/운영 AI 응답 미확인).
+- 연준 12월 공식 일정, BLS 12월 발표 달력, BEA 발표 일정에서 11/25~12/30 예정 9건을 검토해 `official-macro-calendar.ts`에 버전 관리. FOMC 회의일과 발표 시각 분리, ET→UTC→KST 표시, 과거 예정 시각 제거, 발표 예정/실제 결과 구분. 11/25 확인 스냅샷이며 12/09 이후 재검토 필요 표시 및 AI 입력 제외. 자동 갱신·실제 발표 수치·예상치·기업 일정은 미연동.
+- 출처: https://www.federalreserve.gov/newsevents/2026-december.htm , https://www.bls.gov/schedule/2026/12_sched_list.htm , https://www.bea.gov/news/schedule/ , https://www.bea.gov/news/2026/personal-income-and-outlays-september-2026 .
+- Cboe 공식 일별 선물 정산가 https://www.cboe.com/markets/us/futures/market-statistics/settlement/futures/daily 에 VX 월물 및 주물이 별도로 표시됨. https://www.cboe.com/terms/ 검토 결과 프로그램 비표시·외부 AI 전송 사용권은 확보되지 않음. 접근 권한 미확인 상태에서 자동 다운로드·값 저장·AI 전송하지 않음. UI 공식 출처 링크 및 월물 F2−F1 해석 방법 표시, 수치와 구조 null. VIX 현물로 선물 구조 추정 금지.
+- AI V2에 공식 일정 참조 ID, 시각 및 근거 추가; 일정 최신성 검토 필요 시 모델에서 제외. 기존 국내·해외·종목 후보 검증, D1 독립 캐시/하루 5회 제한 유지. V2로 캐시 새로 생성 가능(신규 생성은 사용자 클릭 필요). 테스트 및 배포 아직 검증 전.
