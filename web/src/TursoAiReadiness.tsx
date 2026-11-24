@@ -1,3 +1,4 @@
+import MarketBrief from './MarketBrief';
 import {useEffect,useState} from 'react';
 import {Database,ShieldCheck,Activity,AlertCircle} from 'lucide-react';
 import TursoPatternPulse from './TursoPatternPulse';
@@ -35,6 +36,7 @@ export default function TursoAiReadiness({api,active}:{api:string;active:boolean
       <div><h2>최근 패턴 AI 분석·관찰 후보</h2>
         <p>검증된 역사적 데이터가 충분히 쌓이기 전에는 AI 추천을 강제로 생성하지 않습니다.</p></div>
     </div>
+    <MarketBrief/>
     {busy&&<p role="status">Turso 감사 원장의 저장 기간을 확인하고 있습니다…</p>}
     {error&&<p className="turso-ai-readiness-error" role="alert"><AlertCircle size={15}/>{error}</p>}
     {coverage&&<>
@@ -60,6 +62,6 @@ export default function TursoAiReadiness({api,active}:{api:string;active:boolean
       <li>다음 거래일 시가 진입, 익절·손절·최대 보유기간 중 첫 도달 검증</li>
       <li>최근 발생 신호와 이미 성과가 확정된 사례를 분리하고, 시장·업종 국면 및 비용을 검증한 뒤 AI 관찰 후보 제공</li>
     </ol>
-    <p className="turso-ai-coverage-note">현재 화면은 준비 상태 확인용입니다. 추천 점수·예상 수익·AI 시장 전망을 생성하지 않습니다. D1의 기존 AI 결과를 대신 가져오지 않습니다.</p>
+    <p className="turso-ai-coverage-note">시장 브리핑은 감사된 일봉의 규칙 기반 관측이며, 추천 점수·예상 수익·미래 시장 확률을 생성하지 않습니다. D1의 기존 AI 결과를 대신 가져오지 않습니다.</p>
   </section>;
 }
