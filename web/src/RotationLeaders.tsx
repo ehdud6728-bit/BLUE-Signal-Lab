@@ -2,7 +2,7 @@ import {useEffect,useState} from 'react';
 type Stock={code:string;name:string;close:number;r5:number;r10:number;amount:number;amount_ratio:number|null;signals:string[]|null};
 type Group={code:string;name:string;rs10:number;momentum:number;entry:string;members:number;matched:number;eligible:number;leaders:Stock[];followers:Stock[]};
 type Market={market:string;improving:number;analyzed:number;master_members:number;matched_members:number;groups:Group[]};
-type Snapshot={status:string;receipt_day:string;master_receipt_day:string;trend_receipt_day:string;day:string;reference5:string;reference10:string;signal_status:string;sector_limit:number;stale_receipt:boolean;trend_superseded:boolean;markets:Market[]};
+type Snapshot={latest_trend_day?:string;reference_basis?:string;status:string;receipt_day:string;master_receipt_day:string;trend_receipt_day:string;day:string;reference5:string;reference10:string;signal_status:string;sector_limit:number;stale_receipt:boolean;trend_superseded:boolean;markets:Market[]};
 const fmt=(v:number)=> (v>0?'+':'')+v.toFixed(2)+'%';
 const entry=(x:string)=>x==='NEW_ENTRY'?'신규 개선 진입':x==='CONTINUING'?'개선 유지':'개선 관측 · 직전 상태 미확인';
 function Stocks({title,rows}:{title:string;rows:Stock[]}){
@@ -23,6 +23,8 @@ export default function RotationLeaders({api}:{api:string}){
  {busy&&<p>저장 자료 조회 중…</p>}{err&&<p role="alert">{err}</p>}
  {!busy&&!err&&data?.status!=='READY'&&<p>아직 후보 자료가 없습니다. BLUE Rotation Leaders Capture를 실행해 주세요.</p>}
  {data?.status==='READY'&&<>
+ {data.latest_trend_day&&data.latest_trend_day!==data.day&&<p className="blue-note">최신 업종 기준일 {data.latest_trend_day}의 일봉 검증 미완료 · 동일 날짜로 확인된 이전 후보 {data.day} 표시</p>}
+ <small>{data.reference_basis==='EXACT_BENCHMARK_DATES'?'시장 지수 관측일과 일치':'감사된 일봉 날짜 기준 · 전체 거래일 연속성 미검증'} · </small>
  <small>일봉 기준 {data.day} · 마스터 수집 {data.master_receipt_day} · 현재 분류를 과거 구성으로 간주하지 않음</small>
  {(data.stale_receipt||data.trend_superseded)&&<p className="blue-note">이전 후보 자료입니다. 최신 후보로 간주하지 말고 새 수집을 실행해 주세요.</p>}
  <p>대장주는 10관측일 +3% 이상 및 5관측일 상승, 거래대금 5억 이상인 종목 중 10일 수익률 상위 3개입니다. 후발주는 10관측일 -3~+3%, 5관측일 0% 초과~3%, 당일 거래대금 5억 이상·직전 5관측일 평균 1.2배 이상이며 대장주보다 덜 오른 종목입니다.</p>
