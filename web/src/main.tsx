@@ -11,6 +11,7 @@ import SymbolAnalysisPanel from './SymbolAnalysisPanel';
 import TursoEodRecovery, {type TursoDay} from './TursoEodRecovery';
 import TursoResearchProgress from './TursoResearchProgress';
 import TursoProvisionalToday from './TursoProvisionalToday';
+import TursoProvisionalPatterns from './TursoProvisionalPatterns';
 import TursoAiReadiness from './TursoAiReadiness';
 import {type TursoProgressStage} from './turso-research-progress';
 import {requestSearchPriority} from './search-priority';
@@ -1057,7 +1058,8 @@ function App(){
             }}/>}
         {storageMode==='turso'&&searchSource==='patterns'&&patternBackend==='turso'&&
           mode==='single'&&date===todayKST()&&(!rows.length||dataStatus==='NOT_IMPORTED')&&
-          <TursoProvisionalToday api={API} day={date} query={appliedNameQuery}/>}
+          <><TursoProvisionalPatterns key={date+'|'+appliedNameQuery} api={API} day={date} query={appliedNameQuery} showSignal={showSignal}/>
+          <TursoProvisionalToday api={API} day={date} query={appliedNameQuery}/></>}
         <section className="panel result" ref={resultRef} id="results-panel">
           <div className="result-heading"><h2><BarChart3 size={18}/> 검색된 종목 <small>{dataStatus==='NOT_IMPORTED'?'일봉 미수집':total===null?'검색 전':total+'건'}</small></h2><span className="eod-pill"><Clock3 size={13}/> EOD</span></div>
           <p className="r1599-active-filters">검색 결과 기준 · 거래대금 {(appliedAmountEok??amountEok)>0?(appliedAmountEok??amountEok).toLocaleString('ko-KR')+'억원 이상':'전체'} · 토마토 강조 {highlightMin===null?'꺼짐':highlightMin+'% 이상 · 표본 '+patternSampleMin+'건 이상'}{onlyPattern&&highlightMin!==null?' · 해당 종목만 보기':''}{appliedAmountEok!==null&&appliedAmountEok!==amountEok?' · 거래대금 변경 미적용(검색 버튼을 누르세요)':''}</p>
