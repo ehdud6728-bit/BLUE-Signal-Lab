@@ -137,7 +137,7 @@ export async function exportPatternExitSource(client,{sessions=60,mode='plan'}={
   const bars=[];const PAGE=2000;
   const validDays=[...researchDays.keys()];
   for(let offset=0;validDays.length&&offset<=350000;offset+=PAGE){
-    const result=await client.execute({sql:`SELECT e.trade_day AS day,e.code,e.market,e.open,e.high,e.low,e.close
+    const result=await client.execute({sql:`SELECT e.trade_day AS day,e.code,e.market,e.open,e.high,e.low,e.close,e.amount
       FROM blue_eod_daily_v1 e WHERE e.trade_day BETWEEN ? AND ? AND e.code IN
       (SELECT DISTINCT s.code FROM blue_research_signals_v1 s
        WHERE s.trade_day IN (${validDays.map(()=>'?').join(',')}))
@@ -153,7 +153,7 @@ export async function exportPatternExitSource(client,{sessions=60,mode='plan'}={
       }
       assert(prices.low<=Math.min(prices.open,prices.close)&&
         prices.high>=Math.max(prices.open,prices.close),'EXIT_EXPORT_INVALID_OHLC');
-      bars.push({day,code,market:marketScope,...prices});
+      bars.push({day,code,market:marketScope,...prices,amount:r.amount==null?null:n(r.amount,0,Number.MAX_SAFE_INTEGER)});
     }
     assert(bars.length<=350000,'EXIT_EXPORT_TOO_MANY_BARS');
     if(result.rows.length<PAGE)break;
