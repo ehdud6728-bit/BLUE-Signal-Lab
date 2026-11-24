@@ -11,7 +11,7 @@ def convert(report):
     day = report["asof"]
     if date.fromisoformat(day).isoformat() != day:
         raise ValueError("invalid date")
-    sessions = report["audited_sessions"]
+    sessions = report.get("research_window_sessions",report["audited_sessions"])
     if type(sessions) is not int or not 1 <= sessions <= 60:
         raise ValueError("not a short-window report")
     rows = {}
@@ -30,7 +30,7 @@ def convert(report):
         raise ValueError("empty snapshot")
     for rs in rows.values():
         rs.sort()
-    return {"asof":day,"audited_sessions":sessions,"rows":rows}
+    return {"asof":day,"audited_sessions":sessions,"window_start":report.get("research_window_start"),"rows":rows}
 
 def main():
     p=argparse.ArgumentParser()
