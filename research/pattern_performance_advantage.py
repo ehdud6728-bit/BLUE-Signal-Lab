@@ -5,7 +5,6 @@ split, and complete outcome paths. Never a brokerage signal or execution.
 """
 import argparse
 import json
-import math
 import re
 from collections import defaultdict
 from datetime import date
@@ -14,7 +13,7 @@ from statistics import mean, median
 from pattern_performance_audited import candle, market_regime
 
 WINDOWS = (28, 60, 120, 250)
-HORIZONS = (1, 3, 5, 10, 20)
+HORIZONS = (1, 2, 3, 5, 10, 20)
 TP, SL = 2.5, -4.5
 
 def valid_price(x):
@@ -68,14 +67,15 @@ def outcomes(entry, path):
     """
     if not path or not all(valid_bar(b) for b in path):
         return None
-    target, stop = entry*(1+TP/100), entry*(1+SL/100)
+    # Integer tick comparisons avoid floating-point threshold boundary errors.
+    target, stop = entry*1025, entry*955
     first = "NO_TOUCH"
     for b in path:
-        if b["open"]>=target:
+        if b["open"]*1000>=target:
             first="TARGET";break
-        if b["open"]<=stop:
+        if b["open"]*1000<=stop:
             first="STOP";break
-        up, down = b["high"]>=target, b["low"]<=stop
+        up, down = b["high"]*1000>=target, b["low"]*1000<=stop
         if up or down:
             first="AMBIGUOUS" if up and down else "TARGET" if up else "STOP"
             break
@@ -166,24 +166,27 @@ def research(source):
         result={h:outcomes(b["close"],[bars.get((day,c)) for day in days[i+1:i+h+1]]) if i+h<len(days) else None for h in HORIZONS}
         for p in sorted(set(s["names"])):
             groups[p].append((i,c,f,result))
-    rows=[]
+    rows=[]; diagnostics=[]
     for w in WINDOWS:
         if len(days)<w:continue
         start=len(days)-w;split=start+int(w*.7)
         complete=all(d in coverage for d in days[start:])
+        counts=defaultdict(int)
         for pattern,es in sorted(groups.items()):
             for condition in es[0][2]:
                 for h in HORIZONS:
                     train=compare(es,condition,h,start,split)
                     hold=compare(es,condition,h,split,len(days))
                     a,b=classify(train),classify(hold)
+                    counts[a]+=1
                     if a not in ("UPSIDE","DOWNSIDE"):continue
                     status=("INCOMPLETE_SIGNAL_COVERAGE" if not complete else "INSUFFICIENT_HOLDOUT" if b=="INSUFFICIENT" else "HOLDOUT_AGREES_EXPLORATORY" if a==b else "HOLDOUT_DISAGREES")
                     rows.append(dict(window=w,horizon=h,pattern=pattern,condition=condition,direction=a,status=status,
                         start=days[start],holdout_start=days[split],asof=days[-1],covered_sessions=sum(d in coverage for d in days[start:]),train=train,holdout=hold))
+        diagnostics.append(dict(window=w,covered_sessions=sum(d in coverage for d in days[start:]),train_classifications=dict(counts)))
     return dict(schema="BLUE_SAME_PATTERN_ADVANTAGE_V1",status="RESEARCH_ONLY_NO_PRODUCTION_PROMOTION",asof=days[-1],
         available_sessions=len(days),audited_signal_sessions=len(coverage),
-        windows=[w for w in WINDOWS if w<=len(days)],rows=rows,
+        windows=[w for w in WINDOWS if w<=len(days)],diagnostics=diagnostics,rows=rows,thresholds=dict(target_pct=TP,stop_pct=SL),
         limits=["Calendar/corporate actions not independently verified; horizons count audited sessions.",
           "Same-date disjoint known-feature controls, not matched by stock, sector or causal exposure.",
           "Market-wide regime has no within-day variation; no matched-date inference is possible for regime alone.",
@@ -191,9 +194,37 @@ def research(source):
           "Signal close is a hypothetical entry; first threshold touches are not executions; ambiguous and no-touch remain separate.",
           "No Kiwoom blue-dot parity; no live recommendations or rule promotion."])
 
+def markdown(report):
+    lines=["# Same-pattern advantage and risk (research only)",
+        "As of: "+report["asof"]+" | Audited sessions: "+str(report["available_sessions"])+" | Signal-audited: "+str(report["audited_signal_sessions"]),
+        "No recommendation promotion. Same-date controls; repeated historical holdout is not independent.",
+        "", "## Coverage / training candidates"]
+    for d in report["diagnostics"]:
+        lines.append("- "+str(d["window"])+" sessions: "+str(d["covered_sessions"])+" signal-audited; "+json.dumps(d["train_classifications"],sort_keys=True))
+    if not report["diagnostics"]:lines.append("- Fewer than 28 audited sessions: no requested window available.")
+    for direction in ("UPSIDE","DOWNSIDE"):
+        rows=[r for r in report["rows"] if r["direction"]==direction]
+        counts=defaultdict(int)
+        for r in rows:counts[r["status"]]+=1
+        lines.extend(["","## "+direction, "Candidate counts: "+json.dumps(dict(counts),sort_keys=True),
+            "| Pattern / condition | Window / horizon | Holdout n (condition/control) | Baseline up | Condition up | Equal-date lift (pp) | First stop / target | Status |",
+            "|---|---|---:|---:|---:|---:|---:|---|"])
+        # Rank by TRAIN results only. Never select the best holdout retrospectively.
+        rows.sort(key=lambda r:(-abs(r["train"]["equal_date_uplift_pp"]),r["pattern"],r["condition"],r["window"],r["horizon"]))
+        for r in rows[:15]:
+            h=r["holdout"];a=h["condition"];b=h["control"];t=h["exclusion_tradeoff"]
+            safe=lambda v:str(v).replace("|","\\|")
+            lines.append("| "+safe(r["pattern"])+" / "+safe(r["condition"])+" | "+str(r["window"])+"/"+str(r["horizon"])+" | "+str(a["n"])+"/"+str(b["n"])+" | "+safe(h["matched_baseline"]["up_pct"])+" | "+safe(a["up_pct"])+" | "+safe(h["equal_date_uplift_pp"])+" | "+str(t["avoided_first_stop"])+"/"+str(t["missed_first_target"])+" | "+r["status"]+" |")
+        if not rows:lines.append("No training candidates passed the fixed thresholds.")
+    lines.extend(["","## Limitations"]+["- "+x for x in report["limits"]])
+    return "\n".join(lines)+"\n"
+
 if __name__=="__main__":
     p=argparse.ArgumentParser()
     p.add_argument("--input",type=Path,required=True)
     p.add_argument("--output",type=Path,required=True)
+    p.add_argument("--summary",type=Path)
     a=p.parse_args()
-    a.output.write_text(json.dumps(research(json.loads(a.input.read_text())),ensure_ascii=False,allow_nan=False,indent=2)+"\n")
+    report=research(json.loads(a.input.read_text()))
+    a.output.write_text(json.dumps(report,ensure_ascii=False,allow_nan=False,indent=2)+"\n")
+    if a.summary:a.summary.write_text(markdown(report),encoding="utf-8")
