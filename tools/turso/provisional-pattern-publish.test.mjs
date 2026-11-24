@@ -5,7 +5,7 @@ import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {pathToFileURL} from 'node:url';
 import {createClient} from '@libsql/client';
-import {validateSnapshot,publishSnapshot,writeChunks,storageFailure} from './provisional-pattern-publish.mjs';
+import {validateSnapshot,publishSnapshot,writeChunks,storageFailure,retryableRead} from './provisional-pattern-publish.mjs';
 
 const day='2026-11-24',reference='2026-11-23',now=new Date('2026-11-24T12:10:00Z');
 function fixture(at='2026-11-24T11:55:00.000Z',scan='2026-11-24T12:00:00Z'){
@@ -51,9 +51,33 @@ test('actual local SQLite: publish, replay, reject stale, replace with zero matc
     await db.execute({sql:'INSERT INTO blue_eod_ingest_audit_v1 VALUES (?,1700)',args:[reference]});
     await db.execute({sql:"WITH RECURSIVE seq(n) AS (SELECT 1 UNION ALL SELECT n+1 FROM seq WHERE n<1700) INSERT INTO blue_eod_daily_v1 SELECT ?,printf('%06d',n) FROM seq",args:[reference]});
     const publish=data=>publishSnapshot({...data,mode:'apply',now,env:{TURSO_DATABASE_URL:'libsql://test.invalid',TURSO_AUTH_TOKEN:'test'},clientFactory:()=>createClient({url})});
-    const first=await publish(fixture());
+    // Reproduce a persistent multi-row read failure against actual SQLite,
+    // then prove single-row fallback still checks full record and hash.
+    let connections=0,failures=0;const progress=[];
+    const first=await publishSnapshot({...fixture(),mode:'apply',now,
+      env:{TURSO_DATABASE_URL:'libsql://test.invalid',TURSO_AUTH_TOKEN:'test'},
+      wait:async()=>{},onProgress:p=>progress.push(p),
+      clientFactory:()=>{
+        connections++;
+        const inner=createClient({url});
+        return {close:()=>inner.close(),execute:async input=>{
+          if(input.sql.includes('SELECT code,record_json,row_sha256')&&input.args.length>2){
+            failures++;throw Object.assign(Error('temporary'),{code:'SQLITE_UNKNOWN'});
+          }
+          return inner.execute(input);
+        }};
+      }});
+    assert.equal(failures,3);assert.equal(connections,3);
+    assert.ok(progress.some(p=>p.fallback==='SINGLE_ROW'));
     assert.equal(first.status,'OK');assert.equal(first.rows,2);
     assert.equal((await publish(fixture())).snapshot_id,first.snapshot_id);
+    // A corrupt saved record must never be retried away or published.
+    const broken=fixture('2026-11-24T11:56:00.000Z','2026-11-24T12:01:00Z');
+    const brokenId=validateSnapshot(broken.result,broken.quotes).id;
+    await db.execute({sql:'INSERT INTO blue_provisional_pattern_rows_v1 VALUES (?,?,?,?)',
+      args:[brokenId,'000660','CORRUPTED','bad']});
+    await assert.rejects(publish(broken),/PROVISIONAL_READBACK_MISMATCH/);
+    assert.equal((await db.execute('SELECT snapshot_id FROM blue_provisional_pattern_head_v1')).rows[0].snapshot_id,first.snapshot_id);
     const older=await publish(fixture('2026-11-24T11:54:00.000Z','2026-11-24T12:01:00Z'));
     assert.equal(older.status,'SKIPPED_STALE');
     const next=fixture('2026-11-24T11:56:00.000Z','2026-11-24T12:02:00Z');
@@ -87,4 +111,12 @@ test('storage error identifies phase and safe code without exposing provider det
     close(){closed=true;}
   })}),{message:'PROVISIONAL_STORAGE_CHECK_EOD_HRANA_WEBSOCKET_ERROR'});
   assert.equal(closed,true);
+});
+
+test('only temporary read errors are eligible for bounded retries',()=>{
+  assert.equal(retryableRead({code:'SQLITE_UNKNOWN'}),true);
+  assert.equal(retryableRead({status:503}),true);
+  assert.equal(retryableRead({code:'SQLITE_CONSTRAINT'}),false);
+  assert.equal(retryableRead({status:401}),false);
+  assert.equal(retryableRead({code:'SQLITE_ERROR'}),false);
 });

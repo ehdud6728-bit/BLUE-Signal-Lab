@@ -13,7 +13,14 @@ const count=n=>Number.isSafeInteger(n)&&n>=0&&n<=10000;
 const check=(ok,reason)=>{if(!ok)throw Error(reason);};
 const sha=s=>createHash('sha256').update(s).digest('hex');
 // Match the conservative request sizes used by the confirmed signal importer.
-const WRITE_PAGE=4,READ_PAGE=5,WRITE_BYTES=24000;
+const WRITE_PAGE=4,READ_PAGE=2,WRITE_BYTES=24000;
+const READ_ATTEMPTS=3;
+const sleep=ms=>new Promise(resolve=>setTimeout(resolve,ms));
+export function retryableRead(err){
+  const code=String(err?.code||err?.cause?.code||'');
+  const status=Number(err?.status??err?.statusCode??err?.cause?.status);
+  return /^(?:SQLITE_UNKNOWN|SQLITE_BUSY(?:_[A-Z0-9_]+)?|SQLITE_LOCKED(?:_[A-Z0-9_]+)?|HRANA_WEBSOCKET_ERROR|STREAM_EXPIRED|FETCH_ERROR|SERVER_ERROR|ECONNRESET|ETIMEDOUT|EPIPE|UND_ERR_CONNECT_TIMEOUT|UND_ERR_SOCKET)$/.test(code)||[408,429,500,502,503,504].includes(status);
+}
 export function* writeChunks(rows){
   let chunk=[],bytes=0;
   for(const row of rows){
@@ -98,7 +105,7 @@ export function validateSnapshot(result,quotes){
   return {day:r.day,reference:q.reference,scan,newest,id,metadata,rows};
 }
 
-export async function publishSnapshot({result,quotes,mode='dry_run',env=process.env,now=new Date(),clientFactory=createClient,onProgress=()=>{}}){
+export async function publishSnapshot({result,quotes,mode='dry_run',env=process.env,now=new Date(),clientFactory=createClient,onProgress=()=>{},wait=sleep}){
   check(['dry_run','apply'].includes(mode),'INVALID_PROVISIONAL_MODE');
   const s=validateSnapshot(result,quotes);
   const summary={day:s.day,snapshot_id:s.id,rows:s.rows.length,latest_observed_utc:s.newest};
@@ -113,6 +120,21 @@ export async function publishSnapshot({result,quotes,mode='dry_run',env=process.
     const run=async(next,sql,args=[])=>{
       stage=next;
       return client.execute({sql,args});
+    };
+    // Read-only retry: new connection after a transport/temporary DB error.
+    // Do not retry data mismatches, invalid SQL, or authentication failures.
+    const readQuery=async(sql,args)=>{
+      for(let attempt=1;attempt<=READ_ATTEMPTS;attempt++){
+        try{return await run('READ_ROWS',sql,args);}
+        catch(err){
+          if(!retryableRead(err)||attempt===READ_ATTEMPTS)throw err;
+          onProgress({stage:'READ_ROWS',retry:attempt,error:storageFailure('READ_ROWS',err)});
+          try{client.close();}catch{/* Reconnect even if the old stream is broken. */}
+          client=undefined;
+          await wait(500*2**(attempt-1));
+          client=clientFactory({url,authToken,intMode:'string'});
+        }
+      }
     };
     const current=await run('CHECK_EOD','SELECT trade_day FROM blue_eod_ingest_audit_v1 WHERE trade_day=? AND row_count>=1700',[s.day]);
     if(current.rows.length)return {...summary,status:'SKIPPED_VERIFIED_EOD',written:0};
@@ -137,15 +159,30 @@ export async function publishSnapshot({result,quotes,mode='dry_run',env=process.
     }
     let read=0;
     onProgress({stage:'READ_ROWS',done:0,total:s.rows.length});
-    for(let offset=0;offset<=s.rows.length;offset+=READ_PAGE){
-      const page=await run('READ_ROWS','SELECT code,record_json,row_sha256 FROM blue_provisional_pattern_rows_v1 WHERE snapshot_id=? ORDER BY code LIMIT ? OFFSET ?',[s.id,READ_PAGE,offset]);
-      for(const v of page.rows){
-        const expected=s.rows[read++];
-        check(expected&&String(v.code)===expected.code&&String(v.record_json)===expected.raw&&String(v.row_sha256)===expected.hash,'PROVISIONAL_READBACK_MISMATCH');
+    // Verify exact indexed keys instead of OFFSET pagination. Small pages
+    // limit response size; fall back to single rows only on retryable errors.
+    const verifyChunk=async(chunk)=>{
+      let page;
+      try{
+        page=await readQuery('SELECT code,record_json,row_sha256 FROM blue_provisional_pattern_rows_v1 WHERE snapshot_id=? AND code IN ('+chunk.map(()=>'?').join(',')+') ORDER BY code',[s.id,...chunk.map(v=>v.code)]);
+      }catch(err){
+        if(chunk.length===1||!retryableRead(err))throw err;
+        onProgress({stage:'READ_ROWS',fallback:'SINGLE_ROW'});
+        for(const row of chunk)await verifyChunk([row]);
+        return;
       }
-      if(read===s.rows.length||read%20===0)onProgress({stage:'READ_ROWS',done:read,total:s.rows.length});
-      if(page.rows.length<READ_PAGE)break;
-    }
+      check(page.rows.length===chunk.length,'PROVISIONAL_READBACK_MISMATCH');
+      for(let i=0;i<chunk.length;i++){
+        const v=page.rows[i],expected=chunk[i];
+        check(String(v.code)===expected.code&&String(v.record_json)===expected.raw&&String(v.row_sha256)===expected.hash,'PROVISIONAL_READBACK_MISMATCH');
+        read++;
+      }
+      if(read===s.rows.length||read%20<chunk.length)onProgress({stage:'READ_ROWS',done:read,total:s.rows.length});
+    };
+    const total=await readQuery('SELECT COUNT(*) AS n FROM blue_provisional_pattern_rows_v1 WHERE snapshot_id=?',[s.id]);
+    check(Number(total.rows[0]?.n)===s.rows.length,'PROVISIONAL_READBACK_MISMATCH');
+    for(let offset=0;offset<s.rows.length;offset+=READ_PAGE)
+      await verifyChunk(s.rows.slice(offset,offset+READ_PAGE));
     check(read===s.rows.length,'PROVISIONAL_READBACK_MISMATCH');
     // One SQL statement publishes a fully verified generation. Prevent both
     // out-of-order writers and promotion after an exact-day EOD audit arrives.
