@@ -148,6 +148,33 @@ export async function selectAlignedTrend(read,receipt){
   }
   throw Error('LEADERS_EOD_HISTORY_REQUIRED');
 }
+// Do not reuse an idle websocket after a blocking external constituent lookup.
+export function leaderStorageFailure(stage,e){
+  const code=String(e?.code||e?.cause?.code||'');
+  const safe=/^(?:SQLITE_[A-Z0-9_]+|HRANA_[A-Z0-9_]+|LIBSQL_[A-Z0-9_]+|SERVER_ERROR|HTTP_ERROR|FETCH_ERROR|STREAM_EXPIRED|TRANSACTION_TIMEOUT|TRANSACTION_CLOSED|CLIENT_CLOSED|URL_INVALID|AUTH_TOKEN_INVALID|ECONNRESET|ECONNREFUSED|ETIMEDOUT|EPIPE|ENOTFOUND|EAI_AGAIN|UND_ERR_[A-Z0-9_]+)$/.test(code)?code:'UNKNOWN';
+  const kind=['TypeError','ReferenceError','RangeError','SyntaxError'].includes(e?.name)?'_'+e.name.toUpperCase():'';
+  return 'LEADERS_STORAGE_'+stage+'_'+safe+kind;
+}
+export async function publishLeaders(snapshot,factory,opts){
+  const raw=JSON.stringify(snapshot),digest=hash(raw);
+  if(Buffer.byteLength(raw)>48000)throw Error('LEADERS_PAYLOAD_TOO_LARGE');
+  let stage='CONNECT',db;
+  try{
+    db=factory(opts);
+    stage='CREATE';
+    console.log('BLUE_LEADERS_STORAGE_STAGE',JSON.stringify({stage,bytes:Buffer.byteLength(raw)}));
+    await db.execute('CREATE TABLE IF NOT EXISTS blue_rotation_leaders_v1 (receipt_day TEXT PRIMARY KEY,observed_at_utc TEXT NOT NULL,payload_json TEXT NOT NULL,payload_sha256 TEXT NOT NULL)');
+    stage='WRITE';
+    console.log('BLUE_LEADERS_STORAGE_STAGE',JSON.stringify({stage}));
+    await db.execute({sql:'INSERT INTO blue_rotation_leaders_v1(receipt_day,observed_at_utc,payload_json,payload_sha256) VALUES(?,?,?,?) ON CONFLICT(receipt_day) DO UPDATE SET observed_at_utc=excluded.observed_at_utc,payload_json=excluded.payload_json,payload_sha256=excluded.payload_sha256 WHERE excluded.observed_at_utc>blue_rotation_leaders_v1.observed_at_utc',args:[snapshot.receipt_day,snapshot.observed_at_utc,raw,digest]});
+    stage='READBACK';
+    console.log('BLUE_LEADERS_STORAGE_STAGE',JSON.stringify({stage}));
+    const result=await db.execute({sql:'SELECT payload_json,payload_sha256 FROM blue_rotation_leaders_v1 WHERE receipt_day=?',args:[snapshot.receipt_day]});
+    if(result.rows.length!==1||result.rows[0].payload_json!==raw||result.rows[0].payload_sha256!==digest)throw Error('LEADERS_READBACK_MISMATCH');
+    console.log('BLUE_LEADERS_STORAGE_VERIFIED',JSON.stringify({receipt_day:snapshot.receipt_day,bytes:Buffer.byteLength(raw)}));
+  }catch(e){if(e?.message==='LEADERS_READBACK_MISMATCH')throw e;throw Error(leaderStorageFailure(stage,e));}
+  finally{try{db?.close();}catch{/* closing cannot invalidate completed readback */}}
+}
 export async function captureLeaders(env=process.env,{mode='plan',master=null,now=new Date(),factory=createClient,lookup=request=>krxLookup(request,env)}={}){
   if(mode==='plan')return {status:'PLAN_ONLY',turso_reads:0,turso_writes:0};
   if(!['inspect','apply'].includes(mode))throw Error('LEADERS_MODE_INVALID');
@@ -217,6 +244,7 @@ export async function captureLeaders(env=process.env,{mode='plan',master=null,no
     }
     const targets=prepared.flatMap(m=>m.selected.map(s=>({market:m.market,code:s.code,name:s.name})));
     const membership=await resolveMembership(members,targets,day,lookup);
+    console.log('BLUE_LEADERS_PHASE',JSON.stringify({stage:'CLASSIFY',targets:targets.length}));
     const markets=prepared.map(m=>{
       const groupRows=rows.filter(r=>r.market===m.market);
       const groups=m.selected.map(s=>{
@@ -240,20 +268,16 @@ export async function captureLeaders(env=process.env,{mode='plan',master=null,no
     const summary={status:mode==='inspect'?'INSPECT_ONLY':'OK',day,latest_trend_day,reference_basis,master_receipt_day:master.receipt_day,signal_status:signalStatus,mapping_status,turso_reads:reads,
       markets:markets.map(m=>({market:m.market,improving:m.improving,analyzed:m.analyzed,master_members:m.master_members,matched_members:m.matched_members,
         mapped_groups:m.groups.filter(g=>g.members>0).length,leaders:m.groups.reduce((a,g)=>a+g.leaders.length,0),followers:m.groups.reduce((a,g)=>a+g.followers.length,0),new_entries:m.groups.filter(g=>g.entry==='NEW_ENTRY').length}))};
+    console.log('BLUE_LEADERS_ANALYSIS_READY',JSON.stringify({...summary,status:'CALCULATED_NOT_STORED'}));
     if(mode==='apply'){
       if(mapping_status==='UNAVAILABLE')return {...summary,status:'NO_MAPPED_IMPROVING_GROUPS'};
-      const raw=JSON.stringify(snapshot),digest=hash(raw);
-      if(Buffer.byteLength(raw)>48000)throw Error('LEADERS_PAYLOAD_TOO_LARGE');
-      await db.execute('CREATE TABLE IF NOT EXISTS blue_rotation_leaders_v1 (receipt_day TEXT PRIMARY KEY,observed_at_utc TEXT NOT NULL,payload_json TEXT NOT NULL,payload_sha256 TEXT NOT NULL)');
-      await db.execute({sql:'INSERT INTO blue_rotation_leaders_v1 VALUES(?,?,?,?) ON CONFLICT(receipt_day) DO UPDATE SET observed_at_utc=excluded.observed_at_utc,payload_json=excluded.payload_json,payload_sha256=excluded.payload_sha256 WHERE excluded.observed_at_utc>blue_rotation_leaders_v1.observed_at_utc',args:[receipt,now.toISOString(),raw,digest]});
-      const check=(await read('SELECT payload_json,payload_sha256 FROM blue_rotation_leaders_v1 WHERE receipt_day=?',[receipt]))[0];
-      if(check?.payload_json!==raw||check?.payload_sha256!==digest)throw Error('LEADERS_READBACK_MISMATCH');
+      await publishLeaders(snapshot,factory,{url,authToken,intMode:'string'});
     }
     return summary;
-  }finally{db.close();}
+  }finally{try{db.close();}catch{/* preserve original analysis or storage outcome */}}
 }
 if(process.argv[1]&&import.meta.url===pathToFileURL(process.argv[1]).href){
   try{const mode=process.argv[2]||'plan',master=mode==='plan'?null:JSON.parse(await readFile(process.argv[3],'utf8'));
     const r=await captureLeaders(process.env,{mode,master});console.log('BLUE_ROTATION_LEADERS',JSON.stringify(r));if(!['PLAN_ONLY','INSPECT_ONLY','OK'].includes(r.status))process.exitCode=1;
-  }catch(e){console.error('BLUE_ROTATION_LEADERS_FAILED',/^[A-Z_]+$/.test(e?.message||'')?e.message:'SANITIZED_FAILURE');process.exitCode=1;}
+  }catch(e){console.error('BLUE_ROTATION_LEADERS_FAILED',/^[A-Z_]+$/.test(e?.message||'')?e.message:leaderStorageFailure('RUNTIME',e));process.exitCode=1;}
 }
