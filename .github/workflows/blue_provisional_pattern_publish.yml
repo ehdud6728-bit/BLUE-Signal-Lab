@@ -58,7 +58,7 @@ jobs:
           PUBLISH_MODE: ${{ inputs.mode }}
         run: |
           set -o pipefail
-          node tools/turso/provisional-pattern-publish.mjs output/provisional/result.json output/provisional/quotes.quotes.json "$PUBLISH_MODE" | tee output/provisional/publish.log
+          node tools/turso/provisional-pattern-publish.mjs output/provisional/result.json output/provisional/quotes.quotes.json "$PUBLISH_MODE" 2>&1 | tee output/provisional/publish.log
       - uses: actions/upload-artifact@v4
         if: always()
         with:
