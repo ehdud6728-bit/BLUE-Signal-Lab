@@ -1,7 +1,12 @@
 import unittest
-from pattern_performance_audited import analyze
+from pattern_performance_audited import analyze, candle, market_regime
 
 class TestAudited(unittest.TestCase):
+    def test_features(self):
+        self.assertEqual(candle(dict(open=100,high=110,low=100,close=109)), "LONG_BULL")
+        self.assertEqual(candle(dict(open=108,high=110,low=90,close=109)), "DOJI")
+        self.assertEqual(market_regime(dict(matched5=90,universe=100,up5=60)), "BROAD_UP")
+        self.assertEqual(market_regime(dict(matched5=70,universe=100,up5=60)), "UNKNOWN")
     def test_exact_session_missing(self):
         days=["2026-11-02","2026-11-03","2026-11-04","2026-11-05","2026-11-06","2026-11-09"]
         source={"format":"BLUE_TURSO_EXIT_SOURCE_V1","audits_readback_verified":True,
