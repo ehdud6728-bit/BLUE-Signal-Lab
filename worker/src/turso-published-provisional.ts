@@ -10,6 +10,10 @@ const check=(ok:unknown)=>{if(!ok)throw Error('INVALID_PUBLISHED_PROVISIONAL');}
 const CODE=/^[0-9A-Z]{6}$/;
 const DAY=/^20\d{2}-\d{2}-\d{2}$/;
 const HASH=/^[a-f0-9]{64}$/;
+// Only scanner diagnostics consumed by the standard result card and detail sheet.
+// Do not include historical outcome statistics or unaudited recommendations.
+const DIAGNOSTICS=['rsi','rsi_signal','rsi_gc','rsi_last_gc','slow_14_3_3_k','slow_14_3_3_d','slow_14_3_3_gc','slow_14_3_3_last_gc','slow_12_5_5_k','slow_12_5_5_d','slow_12_5_5_gc','slow_12_5_5_last_gc','slow_20_12_12_k','slow_20_12_12_d','slow_20_12_12_gc','slow_20_12_12_last_gc','macd_12_26_9','macd_signal_9','macd_gc','macd_last_gc','ma20','ma40','ma60','ma112','ma224','ma_to_up','ma112_cross','ma224_cross','amount_ratio20','valid_line_candidates_json','supply_strength_method','supply_strength_grade','supply_reference_price','supply_volume_est_shares','supply_bin_share_pct','supply_strength_relative_pct'];
+const diagnosticJson="json_object("+DIAGNOSTICS.map(k=>"'"+k+"',json_extract(record_json,'$."+k+"')").join(',')+")";
 const GC:Record<string,string>={rsi:'rsi_gc',slow14:'slow_14_3_3_gc',slow12:'slow_12_5_5_gc',slow20:'slow_20_12_12_gc',macd:'macd_gc'};
 const field=(key:string)=>"json_extract(record_json,'$."+key+"')";
 const flag=(key:string)=>"LOWER(CAST("+field(key)+" AS TEXT)) IN ('true','1')";
@@ -63,9 +67,16 @@ export async function tursoPublishedProvisional(env:Env,p:URLSearchParams,factor
     if(String(refs.rows[0]?.trade_day)!==reference)return empty;
     const rows=await run('SELECT COUNT(*) AS n FROM blue_provisional_pattern_rows_v1 WHERE snapshot_id=?',[id]);
     check(Number(rows.rows[0]?.n)===matched);
+    const directory=await run("SELECT name FROM sqlite_master WHERE type='table' AND name='blue_symbol_directory_v1'");
+    // Stored KIS names can be ticker placeholders. Resolve names before
+    // filtering and pagination, not just on the displayed page.
+    const storedName="NULLIF(NULLIF(TRIM(json_extract(record_json,'$.name')),''),code)";
+    const directoryName=directory.rows.length?
+      "(SELECT NULLIF(TRIM(n.name),'') FROM blue_symbol_directory_v1 n WHERE n.code=blue_provisional_pattern_rows_v1.code AND n.market=json_extract(record_json,'$.market') AND n.name<>n.code ORDER BY n.asof_day DESC LIMIT 1)":'NULL';
+    const displayName="COALESCE("+storedName+","+directoryName+",code)";
     const filters:string[]=[],args:(string|number)[]=[id];
     if(q){const needle='%'+q.replace(/[\\%_]/g,'\\$&')+'%';
-      filters.push("(code LIKE ? ESCAPE '\\' OR json_extract(record_json,'$.name') LIKE ? ESCAPE '\\')");args.push(needle,needle);}
+      filters.push("(code LIKE ? ESCAPE '\\' OR "+displayName+" LIKE ? ESCAPE '\\')");args.push(needle,needle);}
     if(selected.length){filters.push('('+selected.map(()=>"instr(','||"+field('signals')+"||',',?)>0").join(signalLogic)+')');args.push(...selected.map(s=>','+s+','));}
     if(gc.length)filters.push('('+gc.map(k=>flag(GC[k])).join(gcLogic)+')');
     if(tech.length)filters.push('('+tech.map(k=>TECH[k]).join(techLogic)+')');
@@ -76,7 +87,7 @@ export async function tursoPublishedProvisional(env:Env,p:URLSearchParams,factor
     const total=filters.length?Number((await run('SELECT COUNT(*) AS n FROM blue_provisional_pattern_rows_v1 WHERE snapshot_id=?'+filter,args)).rows[0]?.n):matched;
     check(count(total)&&total<=matched);
     // Project only display fields, not chart history or unverified research extras.
-    const records=await run("SELECT code,json_extract(record_json,'$.code') AS payload_code,json_extract(record_json,'$.name') AS name,json_extract(record_json,'$.date') AS day,json_extract(record_json,'$.close') AS price,json_extract(record_json,'$.signals') AS signals,json_extract(record_json,'$.observed_at_utc') AS observed_at_utc,json_extract(record_json,'$.traded_amount_krw') AS amount,json_extract(record_json,'$.turnover_available') AS turnover,json_extract(record_json,'$.provisional') AS provisional,json_extract(record_json,'$.pattern_confirmed') AS confirmed,json_extract(record_json,'$.source') AS source FROM blue_provisional_pattern_rows_v1 WHERE snapshot_id=?"+filter+' ORDER BY '+ordering+' LIMIT ? OFFSET ?',[...args,limit,(page-1)*limit]);
+    const records=await run("SELECT code,json_extract(record_json,'$.code') AS payload_code,"+displayName+" AS name,"+diagnosticJson+" AS diagnostics,json_extract(record_json,'$.date') AS day,json_extract(record_json,'$.close') AS price,json_extract(record_json,'$.signals') AS signals,json_extract(record_json,'$.observed_at_utc') AS observed_at_utc,json_extract(record_json,'$.traded_amount_krw') AS amount,json_extract(record_json,'$.turnover_available') AS turnover,json_extract(record_json,'$.provisional') AS provisional,json_extract(record_json,'$.pattern_confirmed') AS confirmed,json_extract(record_json,'$.source') AS source FROM blue_provisional_pattern_rows_v1 WHERE snapshot_id=?"+filter+' ORDER BY '+ordering+' LIMIT ? OFFSET ?',[...args,limit,(page-1)*limit]);
     const items=records.rows.map(r=>{
       const code=String(r.code),price=Number(r.price),at=String(r.observed_at_utc);
       const signals=String(r.signals||'').split(',');
@@ -86,7 +97,10 @@ export async function tursoPublishedProvisional(env:Env,p:URLSearchParams,factor
         r.provisional!=null&&Number(r.provisional)===1&&r.confirmed!=null&&Number(r.confirmed)===0&&r.source==='KIS_PROVISIONAL'&&
         r.turnover!=null&&[0,1].includes(Number(r.turnover))&&
         (available?amount!==null&&Number.isSafeInteger(amount)&&amount>0:amount===null));
-      return {code,name:String(r.name||code).slice(0,70),price,signals,observed_at_utc:at,turnover_available:available,traded_amount_krw:amount,provisional:true,pattern_confirmed:false};
+      const diagnostics=JSON.parse(String(r.diagnostics));
+      if(!available)diagnostics.amount_ratio20=null;
+      return {code,name:String(r.name||code).slice(0,70),price,signals,observed_at_utc:at,turnover_available:available,traded_amount_krw:amount,
+        extras:{...diagnostics,traded_amount_krw:amount},provisional:true,pattern_confirmed:false};
     });
     check(items.length===Math.min(limit,Math.max(0,total-(page-1)*limit)));
     // EOD takes priority even if it arrived while reading this generation.
