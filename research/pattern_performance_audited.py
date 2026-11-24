@@ -84,8 +84,8 @@ def analyze(source):
         for p in s["names"]:
             for label in labels:
                 turnover.append((c,date.fromisoformat(d),p+"|"+label,bars[d,c],future))
-                if shape=="BULL":
-                    turnover.append((c,date.fromisoformat(d),p+"|BULL|"+label,bars[d,c],future))
+                if shape!="UNKNOWN":
+                    turnover.append((c,date.fromisoformat(d),p+"|"+shape+"|"+label,bars[d,c],future))
             for n in HORIZONS:
                 path=[raw_bars.get((day,c)) for day in days[index[d]+1:index[d]+n+1]]
                 if len(path)!=n or any(not b or "high" not in b or "low" not in b for b in path):
