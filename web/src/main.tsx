@@ -1,3 +1,4 @@
+import {matchedRecent} from './recent-match';
 import {RECENT_ASOF,RECENT_RECOMMENDATIONS} from './recent-pattern-data';
 import RecentPatternReference from './RecentPatternReference';
 import RecentPatternRanking from './RecentPatternRanking';
@@ -690,7 +691,7 @@ function App(){
   // Never promote frequency growth or exploratory tomato observations to gold.
   // Only a future, independently verified Turso v2 recommendation can qualify.
   const goldSignal=(r:Signal)=>validatedResearchSignal(r,storageMode==='turso'&&searchSource==='patterns'&&patternBackend==='turso');
-  const recentMatch=(r:Signal)=>patternBackend==='turso'&&r.day>RECENT_ASOF&&r.signals.includes('ENV20_LOWER_TOUCH')&&r.extras?.recent_candle_match==='ENV20_BULL_CLOSE_MID_20261123'&&RECENT_RECOMMENDATIONS.some(x=>x.tier==='SHORT_RECOMMENDATION'&&x.group==='detail_rankings'&&x.pattern==='ENV20_LOWER_TOUCH|BULL|CLOSE_MID');
+  const recentMatch=(r:Signal)=>patternBackend==='turso'&&matchedRecent(r.day,r.signals,r.extras?.audited_candle_features).length>0;
   const stockHighlight=(r:Signal)=>researchCardClasses(goldSignal(r)!==null||recentMatch(r),patternUp(r)!==null);
   const goldEvidenceBlock=(r:Signal)=>{const signal=goldSignal(r);
     return signal?<div className="r-research-gold-label" role="note">★ 검증 연구 추천 패턴 · {showSignal(signal)}</div>:null;};
@@ -1179,7 +1180,7 @@ function App(){
                  <div><b>{displayName(r)}</b><div className="small">{r.code} · {amountLabel(r)}</div>
                  <div className="r15125-amount-change">{amountChange(r)}{sortedPercent(r)&&<span> · {sortedPercent(r)}</span>}</div>
                  {goldEvidenceBlock(r)}
-              <RecentPatternReference day={r.day} signals={r.signals} matched={recentMatch(r)} onDetails={storageMode==="turso"?()=>{setAiResearchTab(recentMatch(r)?"recommend":"ranking");nav("ai");}:undefined}/>
+              <RecentPatternReference day={r.day} signals={r.signals} matched={recentMatch(r)} features={r.extras?.audited_candle_features} onDetails={storageMode==="turso"?()=>{setAiResearchTab(recentMatch(r)?"recommend":"ranking");nav("ai");}:undefined}/>
                  {patternEvidenceBlock(r)}
                  {patternDays(r).length>0&&<div className="r1599-pattern-dates" title={patternDays(r).join(' · ')}>과거 신호일 {patternDays(r).slice(-3).join(' · ')}{patternDays(r).length>3?' 외':''}</div>}</div>
                  <button type="button" className={'r151-quick-add '+(inBasket(r)?'saved':'')}
@@ -1208,7 +1209,7 @@ function App(){
                 aria-label={`${displayName(r)} 상세 분석 보기`}>
               <div className="stock-top"><div className="stock-identity"><strong>{displayName(r)}</strong><span>{r.code} <span className="stock-dot">·</span> {r.day}</span></div><div className="stock-price"><b>{money(r.close_price)}<small>원</small></b><span>종가</span></div><ChevronRight size={19} className="stock-chevron"/></div>
               {goldEvidenceBlock(r)}
-              <RecentPatternReference day={r.day} signals={r.signals} matched={recentMatch(r)} onDetails={storageMode==="turso"?()=>{setAiResearchTab(recentMatch(r)?"recommend":"ranking");nav("ai");}:undefined}/>
+              <RecentPatternReference day={r.day} signals={r.signals} matched={recentMatch(r)} features={r.extras?.audited_candle_features} onDetails={storageMode==="turso"?()=>{setAiResearchTab(recentMatch(r)?"recommend":"ranking");nav("ai");}:undefined}/>
               {patternEvidenceBlock(r)}
               <PriceCompareMini compact data={r1593Prices[comparisonKey(r)]} baseline={r.close_price} loading={r1593Busy&&!r1593Prices[comparisonKey(r)]}
                 onRequest={()=>{void requestMissingQuote(r);}} requesting={r1595Requesting===comparisonKey(r)}
