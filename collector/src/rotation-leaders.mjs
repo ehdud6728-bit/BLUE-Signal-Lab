@@ -80,7 +80,7 @@ export async function captureLeaders(env=process.env,{mode='plan',master=null,no
     const rows=[];
     // Exact date matches and prior 5 observed daily amounts (excluding current).
     // Page by code; no request to KIS quote API and no D1 dependency.
-    let cursor='';
+    let cursor='',pageRows=0;
     const masterByKey=new Map(members.map(r=>[r.market+'/'+r.code,r]));
     for(let page=0;page<60;page++){
       const rs=await read("SELECT e.code,e.market,e.name,e.close,e.amount,p5.close AS c5,p10.close AS c10,"+
@@ -91,7 +91,7 @@ export async function captureLeaders(env=process.env,{mode='plan',master=null,no
         [...dates.slice(1,6),...dates.slice(1,6),dates[5],dates[10],day,cursor]);
       for(const r of rs){
         if(typeof r.code!=='string'||r.code<=cursor)throw Error('LEADERS_PAGE_INVALID');
-        cursor=r.code;
+        cursor=r.code;pageRows++;
         const m=masterByKey.get(r.market+'/'+r.code);
         if(!m)continue;
         const close=num(r.close),c5=num(r.c5),c10=num(r.c10),amount=num(r.amount),avg=num(r.a5);
@@ -104,11 +104,13 @@ export async function captureLeaders(env=process.env,{mode='plan',master=null,no
       if(rs.length<100)break;
       if(page===59)throw Error('LEADERS_PAGE_LIMIT');
     }
+    if(pageRows!==counts.get(day))throw Error('LEADERS_PAGED_COUNT_MISMATCH');
     const markets=[];
     for(const m of trend.markets){
       if(!['KOSPI','KOSDAQ'].includes(m.market)||!Array.isArray(m.rows)||m.rows.length>100)throw Error('LEADERS_TREND_INVALID');
       const universe=m.rows.filter(s=>s.trend?.day===day&&s.trend.quadrant==='IMPROVING'&&Number.isFinite(s.trend.momentum)&&s.trend.momentum>0);
-      const sorted=universe.sort((a,b)=>Number(b.trend.previous_quadrant&&b.trend.previous_quadrant!=='IMPROVING')-Number(a.trend.previous_quadrant&&a.trend.previous_quadrant!=='IMPROVING')||b.trend.momentum-a.trend.momentum||a.code.localeCompare(b.code));
+      const isNew=s=>s.trend.previous_day===dates[1]&&['LEADING','WEAKENING','LAGGING','NEUTRAL'].includes(s.trend.previous_quadrant);
+      const sorted=universe.sort((a,b)=>Number(isNew(b))-Number(isNew(a))||b.trend.momentum-a.trend.momentum||a.code.localeCompare(b.code));
       const groupRows=rows.filter(r=>r.market===m.market);
       const groups=sorted.slice(0,sectorsLimit).map(s=>{
         const memberCount=members.filter(r=>r.market===m.market&&r.sectors.includes(s.code)).length;
@@ -128,7 +130,7 @@ export async function captureLeaders(env=process.env,{mode='plan',master=null,no
     if(mode==='apply'){
       if(markets.some(m=>m.improving>0&&!m.groups.some(g=>g.members>0&&g.matched>0)))return {...summary,status:'NO_MAPPED_IMPROVING_GROUPS'};
       const raw=JSON.stringify(snapshot),digest=hash(raw);
-      if(Buffer.byteLength(raw)>64000)throw Error('LEADERS_PAYLOAD_TOO_LARGE');
+      if(Buffer.byteLength(raw)>48000)throw Error('LEADERS_PAYLOAD_TOO_LARGE');
       await db.execute('CREATE TABLE IF NOT EXISTS blue_rotation_leaders_v1 (receipt_day TEXT PRIMARY KEY,observed_at_utc TEXT NOT NULL,payload_json TEXT NOT NULL,payload_sha256 TEXT NOT NULL)');
       await db.execute({sql:'INSERT INTO blue_rotation_leaders_v1 VALUES(?,?,?,?) ON CONFLICT(receipt_day) DO UPDATE SET observed_at_utc=excluded.observed_at_utc,payload_json=excluded.payload_json,payload_sha256=excluded.payload_sha256 WHERE excluded.observed_at_utc>blue_rotation_leaders_v1.observed_at_utc',args:[receipt,now.toISOString(),raw,digest]});
       const check=(await read('SELECT payload_json,payload_sha256 FROM blue_rotation_leaders_v1 WHERE receipt_day=?',[receipt]))[0];
