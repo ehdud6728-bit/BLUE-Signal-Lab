@@ -10,12 +10,33 @@ const check=(ok:unknown)=>{if(!ok)throw Error('INVALID_PUBLISHED_PROVISIONAL');}
 const CODE=/^[0-9A-Z]{6}$/;
 const DAY=/^20\d{2}-\d{2}-\d{2}$/;
 const HASH=/^[a-f0-9]{64}$/;
+const GC:Record<string,string>={rsi:'rsi_gc',slow14:'slow_14_3_3_gc',slow12:'slow_12_5_5_gc',slow20:'slow_20_12_12_gc',macd:'macd_gc'};
+const field=(key:string)=>"json_extract(record_json,'$."+key+"')";
+const flag=(key:string)=>"LOWER(CAST("+field(key)+" AS TEXT)) IN ('true','1')";
+const TECH:Record<string,string>={ma112:flag('ma112_cross'),ma224:flag('ma224_cross'),
+ inverse:"("+['ma20','ma40','ma60'].map(k=>"json_type(record_json,'$."+k+"') IN ('integer','real') AND "+field(k)+">0").join(' AND ')+" AND "+field('ma20')+"<"+field('ma40')+" AND "+field('ma40')+"<"+field('ma60')+")"};
+const SIGNALS=new Set(['BB20','BB30','BB40','ENV20','ENV40','BB20_LOWER','BB30_LOWER','BB40_LOWER','BB20_ALT','BB30_ALT','BB40_ALT','BB20_LOWER_ALT','BB30_LOWER_ALT','BB40_LOWER_ALT','BB30_LOWER_RECLAIM','ENV20_LOWER_TOUCH']);
+const own=(o:object,k:string)=>Object.prototype.hasOwnProperty.call(o,k);
+function names(raw:string,allowed:(k:string)=>boolean,max:number){
+ const values=raw?raw.split(','):[];
+ if(values.length>max||new Set(values).size!==values.length||values.some(k=>!allowed(k)))throw new InvalidProvisionalQuery();
+ return values;
+}
+function logic(p:URLSearchParams,key:string){
+ const v=p.get(key)||'any';if(v!=='any'&&v!=='all')throw new InvalidProvisionalQuery();return v==='all'?' AND ':' OR ';
+}
 
 export async function tursoPublishedProvisional(env:Env,p:URLSearchParams,factory:Factory=createClient,now=new Date()){
   const day=p.get('date')||'',q=(p.get('q')||'').trim(),pageText=p.get('page')||'1';
   if(day!==kstDay(now)||!DAY.test(day)||q.length>50||/[\u0000-\u001f]/.test(q)||
     !/^[1-9]\d{0,2}$/.test(pageText)||Number(pageText)>1000)throw new InvalidProvisionalQuery();
   const page=Number(pageText),limit=10;
+  const selected=names(p.get('signals')||'',k=>SIGNALS.has(k),20);
+  const gc=names(p.get('gc')||'',k=>own(GC,k),5),tech=names(p.get('tech')||'',k=>own(TECH,k),3);
+  const signalLogic=logic(p,'logic'),gcLogic=logic(p,'gc_logic'),techLogic=logic(p,'tech_logic');
+  const amountText=p.get('min_amount_eok')||'0',amount=Number(amountText);
+  const sort=p.get('sort')||'recent';
+  if(!/^\d{1,5}$/.test(amountText)||amount>50000||!['recent','amount_surge','amount_decline'].includes(sort))throw new InvalidProvisionalQuery();
   const empty={storage:'TURSO',day,pattern_confirmed:false,complete_market:false,
     data_status:'NOT_PUBLISHED',page,limit,total:0,matched_count:0,observed_count:0,
     eligible_count:0,turnover_available_count:0,reference_day:null as string|null,
@@ -42,13 +63,20 @@ export async function tursoPublishedProvisional(env:Env,p:URLSearchParams,factor
     if(String(refs.rows[0]?.trade_day)!==reference)return empty;
     const rows=await run('SELECT COUNT(*) AS n FROM blue_provisional_pattern_rows_v1 WHERE snapshot_id=?',[id]);
     check(Number(rows.rows[0]?.n)===matched);
-    const filter=q?" AND (code LIKE ? ESCAPE '\\' OR json_extract(record_json,'$.name') LIKE ? ESCAPE '\\')":'';
-    const needle='%'+q.replace(/[\\%_]/g,'\\$&')+'%';
-    const args=q?[id,needle,needle]:[id];
-    const total=q?Number((await run('SELECT COUNT(*) AS n FROM blue_provisional_pattern_rows_v1 WHERE snapshot_id=?'+filter,args)).rows[0]?.n):matched;
+    const filters:string[]=[],args:(string|number)[]=[id];
+    if(q){const needle='%'+q.replace(/[\\%_]/g,'\\$&')+'%';
+      filters.push("(code LIKE ? ESCAPE '\\' OR json_extract(record_json,'$.name') LIKE ? ESCAPE '\\')");args.push(needle,needle);}
+    if(selected.length){filters.push('('+selected.map(()=>"instr(','||"+field('signals')+"||',',?)>0").join(signalLogic)+')');args.push(...selected.map(s=>','+s+','));}
+    if(gc.length)filters.push('('+gc.map(k=>flag(GC[k])).join(gcLogic)+')');
+    if(tech.length)filters.push('('+tech.map(k=>TECH[k]).join(techLogic)+')');
+    if(amount>0){filters.push(field('turnover_available')+'=1 AND '+field('traded_amount_krw')+'>=?');args.push(amount*100000000);}
+    const filter=filters.length?' AND '+filters.join(' AND '):'';
+    const ratio=field('amount_ratio20');
+    const ordering=sort==='recent'?'code':ratio+(sort==='amount_surge'?' DESC':' ASC')+' NULLS LAST,code';
+    const total=filters.length?Number((await run('SELECT COUNT(*) AS n FROM blue_provisional_pattern_rows_v1 WHERE snapshot_id=?'+filter,args)).rows[0]?.n):matched;
     check(count(total)&&total<=matched);
     // Project only display fields, not chart history or unverified research extras.
-    const records=await run("SELECT code,json_extract(record_json,'$.code') AS payload_code,json_extract(record_json,'$.name') AS name,json_extract(record_json,'$.date') AS day,json_extract(record_json,'$.close') AS price,json_extract(record_json,'$.signals') AS signals,json_extract(record_json,'$.observed_at_utc') AS observed_at_utc,json_extract(record_json,'$.traded_amount_krw') AS amount,json_extract(record_json,'$.turnover_available') AS turnover,json_extract(record_json,'$.provisional') AS provisional,json_extract(record_json,'$.pattern_confirmed') AS confirmed,json_extract(record_json,'$.source') AS source FROM blue_provisional_pattern_rows_v1 WHERE snapshot_id=?"+filter+' ORDER BY code LIMIT ? OFFSET ?',[...args,limit,(page-1)*limit]);
+    const records=await run("SELECT code,json_extract(record_json,'$.code') AS payload_code,json_extract(record_json,'$.name') AS name,json_extract(record_json,'$.date') AS day,json_extract(record_json,'$.close') AS price,json_extract(record_json,'$.signals') AS signals,json_extract(record_json,'$.observed_at_utc') AS observed_at_utc,json_extract(record_json,'$.traded_amount_krw') AS amount,json_extract(record_json,'$.turnover_available') AS turnover,json_extract(record_json,'$.provisional') AS provisional,json_extract(record_json,'$.pattern_confirmed') AS confirmed,json_extract(record_json,'$.source') AS source FROM blue_provisional_pattern_rows_v1 WHERE snapshot_id=?"+filter+' ORDER BY '+ordering+' LIMIT ? OFFSET ?',[...args,limit,(page-1)*limit]);
     const items=records.rows.map(r=>{
       const code=String(r.code),price=Number(r.price),at=String(r.observed_at_utc);
       const signals=String(r.signals||'').split(',');
@@ -63,7 +91,7 @@ export async function tursoPublishedProvisional(env:Env,p:URLSearchParams,factor
     check(items.length===Math.min(limit,Math.max(0,total-(page-1)*limit)));
     // EOD takes priority even if it arrived while reading this generation.
     if((await eod()).rows.length)return {...empty,data_status:'VERIFIED_EOD_AVAILABLE'};
-    return {...empty,data_status:'KIS_PROVISIONAL_PATTERNS',total,matched_count:matched,
+    return {...empty,data_status:'KIS_PROVISIONAL_PATTERNS',q,sort,total,matched_count:matched,
       observed_count:meta.observed,eligible_count:meta.eligible,turnover_available_count:meta.quote_coverage.turnoverAvailable,
       reference_day:reference,scan_asof_utc:scan,latest_observed_utc:latest,snapshot_id:id,items};
   }finally{db.close();}

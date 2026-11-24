@@ -114,7 +114,7 @@ test('published provisional endpoint reads only promoted generation; EOD takes p
     const meta={day,status:'KIS_PROVISIONAL',pattern_confirmed:false,scan_asof_utc:at,observed:3,eligible:2,
       quote_coverage:{reference:ref,turnoverAvailable:1},history_metadata:{reference:ref},audit:{matched_stocks:2}};
     db.prepare('INSERT INTO blue_provisional_pattern_head_v1 VALUES(?,?,?,?,?,?,?)').run(day,ref,id,at,at,2,JSON.stringify(meta));
-    const row=(code,name,amount)=>JSON.stringify({code,name,date:day,close:100,signals:'ENV20,BB20',observed_at_utc:at,
+    const row=(code,name,amount)=>JSON.stringify({code,name,date:day,close:100,signals:code==='000660'?'ENV20,BB20':'ENV40',rsi_gc:code==='000660',ma112_cross:code==='000660',ma20:10,ma40:20,ma60:30,amount_ratio20:amount===null?null:2,observed_at_utc:at,
       provisional:true,pattern_confirmed:false,source:'KIS_PROVISIONAL',turnover_available:amount!==null,traded_amount_krw:amount});
     const insert=db.prepare('INSERT INTO blue_provisional_pattern_rows_v1 VALUES(?,?,?,?)');
     insert.run(id,'000660',row('000660','SK하이닉스',100000000),'hash');
@@ -127,10 +127,27 @@ test('published provisional endpoint reads only promoted generation; EOD takes p
     assert.deepEqual(result.items[0].signals,['ENV20','BB20']);
     assert.equal((await query({q:'삼성'})).items[0].code,'005930');
     assert.equal((await query({q:'%'})).total,0);
+    assert.equal((await query({signals:'ENV20,ENV40',logic:'any'})).total,2);
+    assert.equal((await query({signals:'ENV20,BB20',logic:'all'})).total,1);
+    assert.equal((await query({signals:'ENV20,ENV40',logic:'all'})).total,0);
+    assert.equal((await query({min_amount_eok:'1'})).total,1);
+    assert.equal((await query({min_amount_eok:'2'})).total,0);
+    assert.equal((await query({gc:'rsi',tech:'ma112,inverse',tech_logic:'all'})).total,1);
+    assert.equal((await query({tech:'inverse'})).total,2);
+    assert.equal((await query({sort:'amount_decline'})).items[0].code,'000660');
+    await assert.rejects(query({gc:'constructor'}),InvalidProvisionalQuery);
+    await assert.rejects(query({min_amount_eok:'-1'}),InvalidProvisionalQuery);
     assert.equal((await query({page:'2'})).items.length,0);
     db.prepare('DELETE FROM blue_provisional_pattern_rows_v1 WHERE code=?').run('005930');
     await assert.rejects(query({}),/INVALID_PUBLISHED_PROVISIONAL/);
     db.exec("INSERT INTO blue_eod_ingest_audit_v1 VALUES('2026-11-20',2660)");
     assert.equal((await query({})).data_status,'VERIFIED_EOD_AVAILABLE');
   }finally{db.close();}
+});
+
+test('main search requests published KIS snapshot before missing EOD fast path',()=>{
+  const web=readFileSync(new URL('../web/src/main.tsx',import.meta.url),'utf8');
+  assert.ok(web.indexOf("API+'/api/research/provisional-patterns'")<web.indexOf('// Fast path: a day later'));
+  assert.match(web,/setTotal\(live\.total\)/);
+  assert.match(web,/TursoProvisionalPatterns state=\{activeProvisional\}/);
 });
