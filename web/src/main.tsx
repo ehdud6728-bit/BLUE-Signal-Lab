@@ -1,4 +1,5 @@
 import RecentPatternReference from './RecentPatternReference';
+import RecentPatternRanking from './RecentPatternRanking';
 import StockChart from './StockChart';
 import LiveMarket from './LiveMarket';
 import SmartBasket, {type BasketQuickAddRequest} from './SmartBasket';
@@ -1014,6 +1015,7 @@ function App(){
           </section>}
         </div>
         <div className={'r151-research-content '+(activeView==='research'?'':'r151-hidden')}>
+          <RecentPatternRanking/>
         {storageMode==='turso'&&searchSource==='daily'&&<TursoEodRecovery key={eodRefresh} api={API} dates={tursoDays} onUnavailable={onTursoUnavailable}/>}
         <div className="stats" ref={summaryRef} id="summary-panel">
           <div className="metric"><span>검색 결과</span><strong>{total==null?'—':total.toLocaleString()}</strong><small>종목</small></div>
