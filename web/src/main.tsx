@@ -3,6 +3,7 @@ import {RECENT_ASOF,RECENT_RECOMMENDATIONS} from './recent-pattern-data';
 import RecentPatternReference from './RecentPatternReference';
 import RecentPatternRanking from './RecentPatternRanking';
 import AdaptiveRadar from './AdaptiveRadar';
+import MarketRotation from './MarketRotation';
 import StockChart from './StockChart';
 import LiveMarket from './LiveMarket';
 import SmartBasket, {type BasketQuickAddRequest} from './SmartBasket';
@@ -227,7 +228,7 @@ function App(){
   const [tursoStartedAt,setTursoStartedAt]=useState(0);
   const [tursoFinishedAt,setTursoFinishedAt]=useState(0);
   const [filterOpen,setFilterOpen]=useState(false);
-  const [aiResearchTab,setAiResearchTab]=useState<'overview'|'ranking'|'recommend'|'radar'>('overview');
+  const [aiResearchTab,setAiResearchTab]=useState<'overview'|'ranking'|'recommend'|'radar'|'market'>('market');
   const [installPrompt,setInstallPrompt]=useState<InstallPrompt|null>(null);
   const [installGuide,setInstallGuide]=useState(false);
   const [standalone,setStandalone]=useState(false);
@@ -1072,7 +1073,7 @@ function App(){
         <div className={'r152-ai-content '+(activeView==='ai'?'':'r151-hidden')}>
           {storageMode==='d1'&&mode==='single'&&latest&&date>latest&&<p className="r159-data-note">{date}에는 저장된 확정 일봉이 없어, AI 시황은 최근 저장일 {latest} 기준으로 조회합니다.</p>}
           {storageMode==='turso'&&activeView==='ai'&&<section ref={aiRef} id="ai-panel" className="r152-ai-section">
-            <div className="blue-research"><div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:12}}>{(["overview","ranking","recommend","radar"] as const).map((t,i)=><button type="button" key={t} aria-pressed={aiResearchTab===t} onClick={()=>setAiResearchTab(t)}>{["종합","패턴 순위","단기 추천","시장 변화·이력"][i]}</button>)}</div>{aiResearchTab==="overview"?<TursoAiReadiness key={r1594AiRefresh} api={API} active={true}/>:aiResearchTab==="radar"?<AdaptiveRadar/>:<RecentPatternRanking section={aiResearchTab}/>}</div>
+            <div className="blue-research"><div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:12}}>{(["market","overview","ranking","recommend","radar"] as const).map((t,i)=><button type="button" key={t} aria-pressed={aiResearchTab===t} onClick={()=>setAiResearchTab(t)}>{["시황·순환매","종합","패턴 순위","단기 추천","시장 변화·이력"][i]}</button>)}</div>{aiResearchTab==="market"?<MarketRotation key={r1594AiRefresh} api={API}/>:aiResearchTab==="overview"?<TursoAiReadiness key={r1594AiRefresh} api={API} active={true}/>:aiResearchTab==="radar"?<AdaptiveRadar/>:<RecentPatternRanking section={aiResearchTab}/>}</div>
           </section>}
           {storageMode==='d1'&&<section ref={aiRef} id="ai-panel" className="r152-ai-section">
             <AiWidget key={'market-'+aiReportDay+'-'+r1594AiRefresh} kind="market"
