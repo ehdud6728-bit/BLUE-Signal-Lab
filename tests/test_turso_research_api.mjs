@@ -7,14 +7,14 @@ import {InvalidResearchQuery,tursoResearchDates,tursoResearchSearch,tursoResearc
 const env={TURSO_DATABASE_URL:'libsql://unit.invalid',TURSO_AUTH_TOKEN:'dummy'};
 const day='2026-11-18';
 function setup({partial=false,backendError=false,wrongSource=false,additionalDays=false,
-  publishedReport=false,unsafeReport=false,pathReport=false,invalidPath=false}={}){
+  publishedReport=false,unsafeReport=false,pathReport=false,invalidPath=false,recentCandles=false}={}){
   const db=new DatabaseSync(':memory:');
   db.exec(`CREATE TABLE blue_research_signal_audit_v1 (
     trade_day TEXT,row_count INT,observed_stocks INT,signal_events INT,source_payload_sha256 TEXT);
     CREATE TABLE blue_research_signals_v1 (
     trade_day TEXT,code TEXT,run_id TEXT,signal_names TEXT,close_price INT,
     row_sha256 TEXT,source_payload_sha256 TEXT,record_json TEXT);
-    CREATE TABLE blue_eod_daily_v1 (trade_day TEXT,code TEXT,high INT,low INT);
+    CREATE TABLE blue_eod_daily_v1 (trade_day TEXT,code TEXT,high INT,low INT,open INT,close INT);
     CREATE TABLE blue_eod_ingest_audit_v1 (trade_day TEXT,row_count INT);`);
   const make=(code,price,names,extras,up)=>JSON.stringify({trade_day:day,code,
     run_id:'blue_market_20261118',signal_names:names,close_price:price,
@@ -49,7 +49,19 @@ function setup({partial=false,backendError=false,wrongSource=false,additionalDay
     }
   }
   db.prepare('INSERT INTO blue_eod_ingest_audit_v1 VALUES (?,?)').run('2026-11-19',2660);
-  db.prepare('INSERT INTO blue_eod_daily_v1 VALUES (?,?,?,?)').run('2026-11-19','005930',11100,9000);
+  db.prepare('INSERT INTO blue_eod_daily_v1 (trade_day,code,high,low) VALUES (?,?,?,?)').run('2026-11-19','005930',11100,9000);
+  if(recentCandles){
+    const d='2026-11-24';
+    const fixtures=[['000001',100,120,80,90,100],['000002',100,105,80,90,100],['000003',100,null,null,null,null],['000004',100,120,80,90,101]];
+    db.prepare('INSERT INTO blue_research_signal_audit_v1 VALUES (?,?,?,?,?)').run(d,fixtures.length,2660,fixtures.length,'abc');
+    db.prepare('INSERT INTO blue_eod_ingest_audit_v1 VALUES (?,?)').run(d,2660);
+    for(const [code,price,h,l,o,c] of fixtures){
+      const record=JSON.parse(make(code,price,'ENV20_LOWER_TOUCH',{recent_candle_match:'forged'},75));
+      record.trade_day=d;record.chart.asof=d;
+      db.prepare('INSERT INTO blue_research_signals_v1 VALUES (?,?,?,?,?,?,?,?)').run(d,code,'blue_market_20261124','ENV20_LOWER_TOUCH',price,'hash','abc',JSON.stringify(record));
+      if(h!==null)db.prepare('INSERT INTO blue_eod_daily_v1 VALUES (?,?,?,?,?,?)').run(d,code,h,l,o,c);
+    }
+  }
   if(publishedReport){
     db.exec(`CREATE TABLE blue_pattern_exit_reports_v1 (
       asof_day TEXT,report_json TEXT,report_sha256 TEXT)`);
@@ -269,4 +281,13 @@ test('missing secrets and Turso outage never trigger implicit D1 access',async()
   assert.equal(db.calls.length,0);
   await assert.rejects(()=>tursoResearchDates(env,db.factory),/Turso test offline/);
   assert.equal(db.closed,1);
+});
+
+test('recent candle match requires exact audited OHLC, rejects missing and conflicting bars',async()=>{
+ const db=setup({recentCandles:true});
+ const out=await tursoResearchSearch(env,new URLSearchParams({date:'2026-11-24'}),db.factory);
+ assert.equal(out.total,4);
+ assert.deepEqual(out.items.filter(r=>r.extras.recent_candle_match).map(r=>r.code),['000001']);
+ assert.equal(out.items.find(r=>r.code==='000001').extras.recent_candle_match,'ENV20_BULL_CLOSE_MID_20261123');
+ assert.equal(db.closed,1);
 });
