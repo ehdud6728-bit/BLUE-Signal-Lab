@@ -47,6 +47,10 @@ def analyze(source):
     candles, markets, details = [], [], []
     raw_bars = {(b['day'],b['code']):b for b in source['bars']}
     breadth = {b['day']:b for b in source.get('market_breadth_by_day',[]) if b['scope']=='ALL'}
+    from collections import defaultdict
+    from statistics import median
+    excursions=defaultdict(list)
+    turnover=[]
     seen = set()
     missing = {n:0 for n in HORIZONS}
     for s in source["signals"]:
@@ -55,7 +59,34 @@ def analyze(source):
             raise ValueError("invalid signal")
         seen.add((d,c))
         future = {n:bars.get((days[index[d]+n],c)) if index[d]+n<len(days) else None for n in HORIZONS}
+        bar=raw_bars[d,c]
+        shape=candle(bar) if all(k in bar for k in ("open","high","low")) else "UNKNOWN"
+        labels=[]
+        for lookback in (5,10,20):
+            prior=[raw_bars.get((day,c),{}).get("amount") for day in days[max(0,index[d]-lookback):index[d]]]
+            amount=bar.get("amount")
+            if len(prior)==lookback and all(type(x) is int and x>=0 for x in prior) and sum(prior)>0 and type(amount) is int and amount>=0:
+                ratio=amount*lookback/sum(prior)
+                band="LT_0_5" if ratio<0.5 else "0_5_1" if ratio<1 else "1_1_5" if ratio<1.5 else "1_5_2" if ratio<2 else "2_3" if ratio<3 else "GE_3"
+                labels.append(f"AMOUNT_{lookback}|{band}")
         for p in s["names"]:
+            for label in labels:
+                turnover.append((c,date.fromisoformat(d),p+"|"+label,bars[d,c],future))
+                if shape=="BULL":
+                    turnover.append((c,date.fromisoformat(d),p+"|BULL|"+label,bars[d,c],future))
+            for n in HORIZONS:
+                path=[raw_bars.get((day,c)) for day in days[index[d]+1:index[d]+n+1]]
+                if len(path)!=n or any(not b or "high" not in b or "low" not in b for b in path):
+                    continue
+                entry=bars[d,c]
+                hi=max(0,max(100*(b["high"]/entry-1) for b in path))
+                lo=min(0,min(100*(b["low"]/entry-1) for b in path))
+                keys=[p,p+"|"+shape]
+                if shape=="BULL" and bar["high"]>bar["low"] and 0.33<=(bar["close"]-bar["low"])/(bar["high"]-bar["low"])<0.67:
+                    keys.append(p+"|BULL|CLOSE_MID")
+                for key in keys:
+                    excursions[key,n].append((hi,lo))
+
             rows.append((c,date.fromisoformat(d),p,bars[d,c],future))
             bar=raw_bars[d,c]
             shape=candle(bar) if all(k in bar for k in ("open","high","low")) else "UNKNOWN"
@@ -91,6 +122,9 @@ def analyze(source):
             "candle_rankings":summarize(candles),
             "market_rankings":summarize(markets),
             "detail_rankings":summarize(details),
+            "turnover_rankings":summarize(turnover),
+            "excursions":[{"pattern":p,"horizon":n,"sample_count":len(v),"median_mfe_pct":round(median(x[0] for x in v),3),"median_mae_pct":round(median(x[1] for x in v),3),"target_hit_pct":{str(t):round(100*sum(x[0]>=t for x in v)/len(v),2) for t in (3,5,7,10)},"stop_hit_pct":{str(t):round(100*sum(x[1]<=-t for x in v)/len(v),2) for t in (2,3,5)}} for (p,n),v in sorted(excursions.items())],
+            "excursion_warning":"Independent threshold touches, not execution or first-touch order; full future path required.",
             "subgroup_warning":"Exploratory only; small and overlapping samples; same-day close-known features; no independent holdout or corporate action adjustment."}
 
 if __name__ == "__main__":
