@@ -1,5 +1,6 @@
 import {useEffect,useState} from 'react';
 import MarketTrends from './MarketTrends';
+import RotationLeaders from './RotationLeaders';
 type Sector={code:string;name:string;change_pct:number;relative_pct:number;turnover_share_pct:number|null;relative_delta_pp:number|null;share_delta_pp:number|null};
 type Flow={day:string;foreign:string|null;institution:string|null;individual:string|null};
 type Market={sector_coverage?:{received:number;accepted:number;summary_rows:number;excluded_rows:number;status:string};market:string;index:number;change_pct:number;up:number|null;down:number|null;flat:number|null;breadth_pct:number|null;sectors:Sector[];flow_status:string;flows:Flow[]};
@@ -25,6 +26,7 @@ export default function MarketRotation({api}:{api:string}){
  {data.markets.map(m=><div className="blue-research-card" key={m.market}><strong>{m.market}</strong><div className="blue-metrics"><div className="blue-metric"><small>지수</small><b>{m.index.toLocaleString('ko-KR')}</b></div><div className="blue-metric"><small>전일 대비</small><b>{fmt(m.change_pct)}</b></div><div className="blue-metric"><small>상승 종목 비율</small><b>{m.breadth_pct===null?'미확인':m.breadth_pct.toFixed(1)+'%'}</b></div></div><p>상승 {m.up??'—'} · 하락 {m.down??'—'} · 보합 {m.flat??'—'}</p><small>투자자 일별 방향 · 금액 단위 검증 전</small>{m.flows.length?m.flows.slice(0,5).map(f=><p key={f.day}>{f.day} · 외국인 {flow(f.foreign)} · 기관 {flow(f.institution)} · 개인 {flow(f.individual)}</p>):<p>수급 미확인</p>}</div>)}
  <div className="blue-research-card"><strong>향후 시나리오 및 대응 체크포인트</strong><p>반등 지속: 지수 상승과 상승 종목 확산, 주도 업종 강세 및 외국인 수급 개선이 함께 확인될 때 지속 여부를 검토합니다. 폭 축소·수급 반전은 반대 증거입니다.</p><p>횡보·바닥 확인: 지수와 시장 폭이 엇갈리거나 주도 업종이 반복 교체되면 추가 확인을 우선합니다. 직전 저점 이탈은 무효화 조건입니다.</p><p>재하락: 지수 하락과 하락 종목 확산, 외국인 순매도가 함께 이어지는지 확인합니다. 관찰 강화·위험 노출 축소 여부를 검토할 수 있습니다. 지수·폭 회복은 반대 증거입니다.</p><small>해외 지수·VIX는 아래의 별도 일봉 분석을 참고합니다. VIX 선물 구조 및 주요 경제 일정은 아직 미연동입니다.</small></div>
  <MarketTrends api={api}/>
+ <RotationLeaders api={api}/>
  <strong>업종 상대강도 레이더</strong><p>시장 대비 등락률 차이(%p)와 KIS가 제공하는 거래대금 비중입니다. 비중은 순매수 금액이 아니며 업종 분류가 중복될 수 있습니다.</p>
  <div className="blue-periods">{['KOSPI','KOSDAQ'].map(m=><button type="button" key={m} aria-pressed={scope===m} onClick={()=>{setScope(m);setAll(false);}}>{m}</button>)}</div>
  {market?.sector_coverage&&<p className="blue-note">업종 응답 {market.sector_coverage.received}행 · 유효 {market.sector_coverage.accepted} · 시장 요약 제외 {market.sector_coverage.summary_rows} · 오류 제외 {market.sector_coverage.excluded_rows}{market.sector_coverage.status==='PARTIAL'?' · 일부 업종만 비교':''}</p>}
@@ -32,7 +34,7 @@ export default function MarketRotation({api}:{api:string}){
  <small>{data.comparison_receipt_day?'직전 수집일 '+data.comparison_receipt_day+' 비교 · 거래일 동일성 미검증':'비교할 이전 수집 자료 없음'} · 확보 수집일 {data.capture_days}일(최근 최대 6일)</small>
  {sectors.slice(0,all?100:10).map(s=><div className="blue-research-card" key={s.code}><strong>{s.name} <small>{s.code}</small></strong><div className="blue-metrics"><div className="blue-metric"><small>등락률</small><b>{fmt(s.change_pct)}</b></div><div className="blue-metric"><small>시장 대비</small><b>{fmt(s.relative_pct,'%p')}</b></div><div className="blue-metric"><small>거래대금 비중</small><b>{s.turnover_share_pct===null?'미확인':s.turnover_share_pct.toFixed(2)+'%'}</b></div></div><p>강도 변화 {fmt(s.relative_delta_pp,'%p')} · 비중 변화 {fmt(s.share_delta_pp,'%p')}</p></div>)}
  {sectors.length>10&&<button type="button" onClick={()=>setAll(x=>!x)}>{all?'상위 10개만':'전체 업종 보기'}</button>}
- <p className="blue-note">아직 업종 내 대장주·후발주, 테마 분류, RRG 사분면, 선후행 및 순환매 성공률은 미검증입니다. 현재 상대강도 순위는 관찰 자료로만 활용합니다.</p>
+ <p className="blue-note">대장주·후발주 관찰은 위의 별도 분석을 참고합니다. 테마 분류, 선후행 및 순환매 성공률은 미검증입니다. 현재 상대강도 순위는 관찰 자료로만 활용합니다.</p>
  </>}
  </div>;
 }
