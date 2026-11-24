@@ -10,7 +10,7 @@ import {validateSnapshot,publishSnapshot,writeChunks,storageFailure,retryableRea
 const day='2026-11-24',reference='2026-11-23',now=new Date('2026-11-24T12:10:00Z');
 function fixture(at='2026-11-24T11:55:00.000Z',scan='2026-11-24T12:00:00Z'){
   const quotes=[{code:'000660',amount:123456,close:100},{code:'005930',amount:null,close:200}]
-    .map(v=>({...v,day,reference_day:reference,observed_at_utc:at,source:'KIS_REST_INQUIRE_DAILY_PRICE_PROVISIONAL'}));
+    .map(v=>({...v,open:v.close-5,high:v.close+10,low:v.close-10,day,reference_day:reference,observed_at_utc:at,source:'KIS_REST_INQUIRE_DAILY_PRICE_PROVISIONAL'}));
   const items=quotes.map(v=>({code:v.code,date:day,close:v.close,signals:'ENV20',market:'KOSPI',
     source:'KIS_PROVISIONAL',data_frequency:'PROVISIONAL_DAILY',provisional:true,pattern_confirmed:false,
     observed_at_utc:at,turnover_available:v.amount!==null,traded_amount_krw:v.amount,amount_ratio20:v.amount===null?null:1.5}));
@@ -26,12 +26,14 @@ test('dry run validates without opening database, including real null turnover',
   const result=await publishSnapshot({...data,clientFactory:()=>{throw Error('DB forbidden')}});
   assert.equal(result.status,'DRY_RUN');assert.equal(result.rows,2);assert.equal(result.written,0);
   assert.equal(result.snapshot_id,validateSnapshot(data.result,data.quotes).id);
+  assert.deepEqual(JSON.parse(validateSnapshot(data.result,data.quotes).rows[0].raw).kis_candle,{open:95,high:110,low:90,close:100});
 });
 test('reject altered turnover, close, coverage, future observation and confirmed labels',()=>{
   for(const change of [
     d=>{d.result.items[1].traded_amount_krw=0;},
     d=>{d.result.items[0].traded_amount_krw=123457;},
     d=>{d.result.items[0].close=999;},
+    d=>{d.quotes[0].high=90;},
     d=>{d.result.items[0].pattern_confirmed=true;},
     d=>{d.result.audit.signal_events=3;},
     d=>{d.quotes[0].observed_at_utc='2026-11-24T12:01:00Z';},
