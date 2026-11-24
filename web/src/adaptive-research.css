@@ -13,3 +13,11 @@
 .blue-research .blue-metric b{display:block;font-size:15px;font-variant-numeric:tabular-nums}
 .blue-research .gain{color:#c04436}.blue-research .loss{color:#2863c7}
 .blue-research .blue-meta{opacity:.8;font-size:12px}
+
+.blue-research.r15106-search-pattern-evidence,.blue-research .blue-research-card{display:block!important;width:100%!important;max-width:none!important;box-sizing:border-box;align-self:stretch;justify-self:stretch}
+.blue-research .blue-research-card{margin:8px 0!important;padding:12px!important}
+.blue-research .blue-research-card p{font-size:13px;line-height:1.55;margin:7px 0}
+.blue-research .blue-research-card strong{overflow-wrap:anywhere}
+.blue-research .blue-periods{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:5px;margin:10px 0}
+.blue-research .blue-periods button{padding:7px 2px;min-width:0}
+.blue-research .blue-note{font-size:13px;line-height:1.55;padding:10px;border-radius:9px;background:#819bc015;margin:8px 0}
