@@ -13,6 +13,7 @@ import {InvalidEodQuery,tursoEodDates,tursoEodSearch,tursoEodCompare} from './tu
 import {tursoMarketRotation} from './turso-market-rotation';
 import {tursoMarketTrends} from './turso-market-trends';
 import {tursoRotationLeaders} from './turso-rotation-leaders';
+import {handleTursoMarketAi} from './turso-market-ai';
 import {InvalidResearchQuery,tursoResearchDates,tursoResearchSearch,tursoResearchChart,tursoResearchCoverage,tursoPatternPulse,tursoExitStudyReport} from './turso-research';
 import {InvalidTursoResearchRequest,requestTursoResearch,tursoResearchRequestStatus} from './turso-research-request';
 import {InvalidProvisionalQuery,tursoProvisionalSearch} from './turso-provisional-search';
@@ -146,6 +147,17 @@ export default {
         try{return respond(await tursoProvisionalSearch(env,u.searchParams));}
         catch(e){if(e instanceof InvalidProvisionalQuery)return respond({error:e.message},400);
           return respond({error:'TURSO_PROVISIONAL_UNAVAILABLE'},503);}
+      }
+      // Independent Turso market AI. Never accept client-supplied facts or use D1.
+      if(p==='/api/research/market-ai'&&['GET','POST'].includes(request.method)){
+        if(request.method==='POST'&&request.headers.get('Origin')!==origin)return respond({error:'ORIGIN_DENIED'},403);
+        if(!access)return respond({error:'ACCESS_REQUIRED',message:'Cloudflare Access 로그인 필요'},401);
+        const safe=async(fn:()=>Promise<unknown>)=>{try{return await fn();}catch{return {status:'UNAVAILABLE'};}};
+        const rotation=await safe(()=>tursoMarketRotation(env));
+        const trends=await safe(()=>tursoMarketTrends(env));
+        const leaders=await safe(()=>tursoRotationLeaders(env));
+        const upstream=await handleTursoMarketAi(request,env,{rotation,trends,leaders});
+        return new Response(upstream.body,{status:upstream.status,headers:{...cors,'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store','X-Content-Type-Options':'nosniff'}});
       }
       if(p==='/api/research/rotation-leaders'&&request.method==='GET'){
         try{return respond(await tursoRotationLeaders(env));}
