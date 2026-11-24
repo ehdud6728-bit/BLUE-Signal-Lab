@@ -2,7 +2,7 @@ import './compact-ai-evidence.css';
 import {matchedRecent} from './recent-match';
 import {patternLabel} from './research-pattern-label';
 import {RECENT_ASOF,RECENT_ROWS} from './recent-pattern-data';
-export default function RecentPatternReference({day,signals,matched=false,features,onDetails}:{day:string;signals:string[];matched?:boolean;features?:unknown;onDetails?:()=>void}){
+export default function RecentPatternReference({day,signals,matched=false,features,onDetails,provisional=false}:{provisional?:boolean;day:string;signals:string[];matched?:boolean;features?:unknown;onDetails?:()=>void}){
  if(day<=RECENT_ASOF&&!matched)return null;
  const rec=matched?matchedRecent(day,signals,features,true)[0]:undefined;
  const base=signals.flatMap(name=>(RECENT_ROWS[name]??[]).filter(r=>r[0]===3&&r[1]>=30).map(r=>({name,r}))).sort((a,b)=>a.r[3]-b.r[3])[0];
@@ -14,8 +14,8 @@ export default function RecentPatternReference({day,signals,matched=false,featur
  <div><span>중앙 수익률</span><b className={rec.median_return_pct>0?'positive':rec.median_return_pct<0?'negative':''}>{rec.median_return_pct>0?'+':''}{rec.median_return_pct.toFixed(2)}%</b></div>
  <div><span>표본</span><b>{rec.sample_count}건</b></div>
  </div>
- <div className="blue-compact-ai-footer"><span>{RECENT_ASOF.slice(5).replace('-','.')} 연구 · {day<=RECENT_ASOF?'과거 조건 일치':'독립 검증 전'}</span>
- <details><summary aria-label="연구 성과 안내">ⓘ</summary><p>{day<=RECENT_ASOF?'최신 연구 조건의 과거 일치 사례이며 당시 추천이 아닙니다. ':''}독립 검증 전의 과거 관측 성과입니다.</p></details>
+ <div className="blue-compact-ai-footer"><span>{RECENT_ASOF.slice(5).replace('-','.')} 연구 · {provisional?'KIS 잠정 일치':day<=RECENT_ASOF?'과거 조건 일치':'독립 검증 전'}</span>
+ <details><summary aria-label="연구 성과 안내">ⓘ</summary><p>{day<=RECENT_ASOF?'최신 연구 조건의 과거 일치 사례이며 당시 추천이 아닙니다. ':''}{provisional?'당일 미확정 캔들의 조건 일치이며 종가 확정 시 달라질 수 있습니다. ':''}독립 검증 전의 과거 관측 성과입니다.</p></details>
  {onDetails&&<button type="button" onClick={e=>{e.stopPropagation();onDetails();}}>상세 ›</button>}</div>
  </div>;
  return <div className="r15106-search-pattern-evidence blue-research" role="note">
