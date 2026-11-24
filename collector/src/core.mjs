@@ -135,7 +135,9 @@ export function parseQuote(candidate, market, phase, json, received, day){
    const prevPct=prevRaw!==''?Number(prevRaw):NaN;
    const changeFromPrev=Number.isFinite(prevPct)&&prevPct>=-100&&prevPct<=1000
      ?Math.round(prevPct*100)/100:null;
-  return {code:candidate.code,name:candidate.name,market,market_label:market==='J'?'KRX':'NXT',phase,
+  const amountRaw=String(o.acml_tr_pbmn??'').trim();
+  const amount=/^\d+$/.test(amountRaw)?Number(amountRaw):NaN;
+  return {accumulated_amount_krw:Number.isSafeInteger(amount)&&amount>=0?amount:null,code:candidate.code,name:candidate.name,market,market_label:market==='J'?'KRX':'NXT',phase,
     trade_date_kst:day,received_at_utc:received.toISOString(),
     price,open,high,low,accumulated_volume:volume,
     change_from_eod_pct:Math.round((price/candidate.eod_close-1)*1e6)/1e4,
@@ -198,7 +200,7 @@ export async function getKisDailyQuote(env,token,market,code,day,fetchFn=fetch){
       stck_bsop_date:row.stck_bsop_date,
       stck_prpr:row.stck_clpr,stck_oprc:row.stck_oprc,
       stck_hgpr:row.stck_hgpr,stck_lwpr:row.stck_lwpr,
-      acml_vol:row.acml_vol,prdy_ctrt:row.prdy_ctrt,
+      acml_vol:row.acml_vol,acml_tr_pbmn:row.acml_tr_pbmn,prdy_ctrt:row.prdy_ctrt,
     }};
   }finally{clearTimeout(abort);}
 }
