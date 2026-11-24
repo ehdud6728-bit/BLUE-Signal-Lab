@@ -13,7 +13,7 @@ def recommendations(report):
             h = r["horizon_trading_days"]
             n, d, stocks = (r[k] for k in ("sample_count", "distinct_signal_dates", "distinct_stocks"))
             rate, mean, median = (r[k] for k in ("positive_return_probability_pct", "mean_return_pct", "median_return_pct"))
-            if not re.fullmatch(r"[A-Z0-9_]+(?:\\|[A-Z0-9_]+)*", p) or h not in (1,2,3,5,10,20):
+            if not all(re.fullmatch(r"[A-Z0-9_]+", part) for part in p.split("|")) or h not in (1,2,3,5,10,20):
                 raise ValueError("invalid recommendation condition")
             if not all(type(x) is int for x in (n,d,stocks)) or not 1 <= d <= n or not 1 <= stocks <= n:
                 raise ValueError("invalid recommendation counts")
