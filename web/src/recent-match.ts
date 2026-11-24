@@ -1,6 +1,6 @@
 import {RECENT_ASOF,RECENT_RECOMMENDATIONS} from './recent-pattern-data.ts';
-export function matchedRecent(day:string,signals:string[],features:unknown){
- if(day<=RECENT_ASOF||!Array.isArray(features))return [];
+export function matchedRecent(day:string,signals:string[],features:unknown,retrospective=false){
+ if((!retrospective&&day<=RECENT_ASOF)||!Array.isArray(features))return [];
  return RECENT_RECOMMENDATIONS.filter(r=>{
  if(r.tier!=='SHORT_RECOMMENDATION')return false;
  const [base,shape,detail,...rest]=r.pattern.split('|');

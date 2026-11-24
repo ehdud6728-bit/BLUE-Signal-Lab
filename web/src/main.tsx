@@ -47,6 +47,7 @@ import './r15125-result-tools.css';
 // R1581_SCAN_RESUME: persistent scan status across tabs and reloads.
 import './r1581-scan-monitor.css';
 import './r-research-gold-outline.css';
+import './ai-search-summary.css';
 
 // Keep the existing production API and Cloudflare Access cookies.
 const API = (import.meta.env.VITE_API_BASE || 'https://blue-signal-lab-api-v2.ehdud6728.workers.dev').replace(/\/+$/, '');
@@ -141,6 +142,7 @@ function App(){
   const [logic,setLogic]=useState('any');
   const [rows,setRows]=useState<Signal[]>([]);
   const [days,setDays]=useState<Day[]>([]);
+  const [aiCount,setAiCount]=useState<number|null>(null),[aiOnly,setAiOnly]=useState(false),[allCount,setAllCount]=useState<number|null>(null);
   const [total,setTotal]=useState<number|null>(null);
   const [page,setPage]=useState(1);
   const [busy,setBusy]=useState(false);
@@ -414,7 +416,7 @@ function App(){
     }catch(e){
       setPatternStatus('unavailable');
       setPatternSourceError(e instanceof Error?e.message:'Turso/D1 분석 날짜를 조회하지 못했습니다.');
-      setRows([]);setDays([]);setTotal(null);
+      setRows([]);setDays([]);setTotal(null);setAiCount(null);setAllCount(null);
     }
   },[]);
   const onTursoUnavailable=useCallback((message:string)=>{void fallbackToD1(message);},[fallbackToD1]);
@@ -491,12 +493,13 @@ function App(){
     }catch(e){setError(String(e));}
     finally{setRequestBusy(false);}
   }
-  async function search(p=1,scroll=true,selectedGc:GcKey[]=gcFields,selectedGcLogic:'any'|'all'=gcLogic,requestedDay?:string,patternOverride?:{enabled?:boolean;threshold?:number|null;minSamples?:number;amountEok?:number},selectedTech:TechKey[]=techFields,selectedTechLogic:'any'|'all'=techLogic,queryOverride?:{q?:string;sort?:ResultSort}){
+  async function search(p=1,scroll=true,selectedGc:GcKey[]=gcFields,selectedGcLogic:'any'|'all'=gcLogic,requestedDay?:string,patternOverride?:{enabled?:boolean;threshold?:number|null;minSamples?:number;amountEok?:number},selectedTech:TechKey[]=techFields,selectedTechLogic:'any'|'all'=techLogic,queryOverride?:{q?:string;sort?:ResultSort;aiOnly?:boolean}){
     if(storageMode==='turso'&&patternStatus!=='ready'){
       setError('기술 패턴 검색에 사용할 감사 완료 분석 데이터 연결을 먼저 확인해 주세요.');
       return;
     }
     const serial=++searchVersion.current;
+    const effectiveAiOnly=patternBackend==='turso'&&(queryOverride?.aiOnly??aiOnly);
     const queryAmountEok=patternOverride?.amountEok??amountEok;
     const queryName=(queryOverride?.q??appliedNameQuery).trim();
     const desiredSort=queryOverride?.sort??appliedSort;
@@ -515,6 +518,7 @@ function App(){
       u.searchParams.set('signals',signals.join(','));u.searchParams.set('logic',logic);u.searchParams.set('page',String(p));
       if(queryName)u.searchParams.set('q',queryName);
       u.searchParams.set('sort',querySort);
+      if(patternBackend==='turso'){u.searchParams.set('ai_summary','1');if(effectiveAiOnly)u.searchParams.set('ai_only','1');}
       if(selectedGc.length){u.searchParams.set('gc',selectedGc.join(','));u.searchParams.set('gc_logic',selectedGcLogic);}
       if(selectedTech.length){u.searchParams.set('tech',selectedTech.join(','));u.searchParams.set('tech_logic',selectedTechLogic);}
       u.searchParams.set('min_amount_eok',String(queryAmountEok));
@@ -532,7 +536,7 @@ function App(){
       // cannot already have a Turso pattern result. Do not wait for a costly
       // missing-day SQL search before showing the real collection status.
       if(queryMode==='single'&&patternBackend==='turso'&&latest&&queryDate>latest){
-        setRows([]);setDays([]);setTotal(null);setPage(1);setSelected(null);
+        setRows([]);setDays([]);setTotal(null);setAiCount(null);setAllCount(null);setPage(1);setSelected(null);
         setDataStatus('NOT_IMPORTED');setAppliedNameQuery(queryName);
         setAppliedSort(querySort);setAppliedAmountEok(queryAmountEok);
         if(queryDate>todayKST())setStatus('아직 거래가 이루어지지 않은 날짜입니다.');
@@ -544,7 +548,7 @@ function App(){
       let r=await fetch(u.toString(),{credentials:'include',cache:'no-store'});
       // D1 is only a secondary path. An HTTP 400 means the query was invalid
       // and must not silently turn into a different source/result.
-      if(patternBackend==='turso'&&r.status>=500&&querySort!=='recommended'){
+      if(patternBackend==='turso'&&r.status>=500&&querySort!=='recommended'&&!effectiveAiOnly){
         u.pathname='/api/search';
         r=await fetch(u.toString(),{credentials:'include',cache:'no-store'});
         if(r.ok){setPatternBackend('d1');setPatternSourceError('Turso 패턴 검색 불가 · D1 보조 DB로 전환됨');}
@@ -557,6 +561,8 @@ function App(){
         throw new Error('전체페이지 종목명 검색·정렬용 API Worker가 아직 배포되지 않았습니다. API 배포 후 다시 검색해 주세요.');
       if(serial!==searchVersion.current)return;
       // No imported daily candles is NOT a genuine zero-signal scan.
+      if(effectiveAiOnly&&d.ai_only!==true)throw Error('AI 추천 필터 API 배포가 필요합니다.');
+      setAiCount(d.ai_asof===RECENT_ASOF&&typeof d.ai_count==='number'?d.ai_count:null);setAllCount(d.unfiltered_total??d.total);setAiOnly(d.ai_only===true);
       setRows(d.items||[]);setDays(d.daily_counts||[]);
       setTotal(d.data_status==='NOT_IMPORTED'?null:d.total);
       setPage(p);setSelected(null);setDataStatus(d.data_status||'');
@@ -585,7 +591,7 @@ function App(){
           }
         }else setStatus('기간 중 저장된 날짜만 조회했습니다. 미분석 날짜의 일괄 실행은 지원하지 않습니다.');
       }
-    }catch(e){if(serial===searchVersion.current){setError(String(e));setRows([]);setDays([]);setTotal(null);setDataStatus('');}}
+    }catch(e){if(serial===searchVersion.current){setError(String(e));setRows([]);setDays([]);setTotal(null);setAiCount(null);setAllCount(null);setDataStatus('');}}
     finally{if(serial===searchVersion.current)setBusy(false);}
   }
   // R1581_SCAN_RESUME: keep polling while navigating; persist and resume after reload.
@@ -1021,13 +1027,15 @@ function App(){
           </section>}
         </div>
         <div className={'r151-research-content '+(activeView==='research'?'':'r151-hidden')}>
-          {storageMode==="turso"&&<div className="blue-research blue-research-card"><strong>AI 패턴 브리핑</strong><small>{RECENT_ASOF} 기준 · 단기 추천 조건 {RECENT_RECOMMENDATIONS.filter(x=>x.tier==="SHORT_RECOMMENDATION").length}개 · 과거 관측 연구</small><button type="button" className="filter-toggle" onClick={()=>{setAiResearchTab("recommend");nav("ai");}}>상세 연구 보기</button></div>}
+
         {storageMode==='turso'&&searchSource==='daily'&&<TursoEodRecovery key={eodRefresh} api={API} dates={tursoDays} onUnavailable={onTursoUnavailable}/>}
-        <div className="stats" ref={summaryRef} id="summary-panel">
-          <div className="metric"><span>검색 결과</span><strong>{total==null?'—':total.toLocaleString()}</strong><small>종목</small></div>
+        <div className={"stats "+(storageMode==="turso"?"ai-summary-four":"")} ref={summaryRef} id="summary-panel">
+          <div className="metric"><span>검색 결과</span><strong>{total==null?'—':(allCount??total).toLocaleString()}</strong><small>종목</small></div>
+          {storageMode==='turso'&&<button type="button" className={'metric ai-summary-metric '+(aiOnly?'active':'')} disabled={busy||aiCount===null} aria-pressed={aiOnly} onClick={()=>void search(1,false,gcFields,gcLogic,undefined,undefined,techFields,techLogic,{aiOnly:!aiOnly})}><span>AI 추천</span><strong>{total===null||aiCount===null?'—':aiCount}</strong><small>일치 종목</small></button>}
           <div className="metric"><span>검색 거래일</span><strong>{total==null?'—':days.length}</strong><small>저장된 날짜</small></div>
           <div className="metric"><span>최신 저장일</span><strong className="smallnum">{latest?.slice(5)||'—'}</strong><small>종가 데이터</small></div>
         </div>
+        {storageMode==="turso"&&<div className="ai-brief-compact"><div><strong>AI 패턴 브리핑</strong><small>{RECENT_ASOF} 기준 · 단기 조건 {RECENT_RECOMMENDATIONS.filter(x=>x.tier==="SHORT_RECOMMENDATION").length}개 · 과거 조건 일치 포함</small></div><button type="button" className="filter-toggle" onClick={()=>{setAiResearchTab("recommend");nav("ai");}}>상세 연구</button></div>}
         {error&&<div className="notice error" role="alert"><AlertCircle size={17}/>{error}</div>}
         {status&&<div className="notice"><AlertCircle size={17}/><div>{status}
           {mode==='single'&&date===todayKST()&&latest&&latest<date&&<div>
@@ -1053,23 +1061,14 @@ function App(){
         <section className="panel result" ref={resultRef} id="results-panel">
           <div className="result-heading"><h2><BarChart3 size={18}/> 검색된 종목 <small>{dataStatus==='NOT_IMPORTED'?'일봉 미수집':total===null?'검색 전':total+'건'}</small></h2><span className="eod-pill"><Clock3 size={13}/> EOD</span></div>
           <p className="r1599-active-filters">검색 결과 기준 · 거래대금 {(appliedAmountEok??amountEok)>0?(appliedAmountEok??amountEok).toLocaleString('ko-KR')+'억원 이상':'전체'} · 토마토 강조 {highlightMin===null?'꺼짐':highlightMin+'% 이상 · 표본 '+patternSampleMin+'건 이상'}{onlyPattern&&highlightMin!==null?' · 해당 종목만 보기':''}{appliedAmountEok!==null&&appliedAmountEok!==amountEok?' · 거래대금 변경 미적용(검색 버튼을 누르세요)':''}</p>
-          <p className="result-hint">{patternBackend==='turso'
-            ?'검색일 Turso 검증 종가와 이후 저장된 확정 일봉 관측가를 구분합니다. 현재 후속 관측 기간은 불완전할 수 있습니다.'
-            :'검색일 확정 종가와 이후 D1 저장 시세·기간 고가를 구분해 표시합니다. 가격이 없으면 미수집으로 표시합니다.'}</p>
-          <div className="r-research-color-key" aria-label="검색 종목 카드 강조색 안내">
-            <span><i aria-hidden="true"/> 골드: 별도 검증 연구 추천</span>
-            <span><i className="tomato-key" aria-hidden="true"/> 토마토: 과거 10일 탐색 관측</span>
-            <span><i className="dual-key" aria-hidden="true"/> 대각선: 두 조건 동시 충족</span>
-            <em>골드는 검증된 추천 자료가 검색 결과에 있을 때만 표시</em>
-          </div>
+          <details className="ai-search-help"><summary>검색 기준 안내 ⓘ</summary><p>확정 일봉 기준이며 후속 관측 기간은 불완전할 수 있습니다. 골드: 연구 추천 · 토마토: 과거 10일 성과 · 대각선: 두 조건 충족. AI 추천 집계에는 최신 연구 조건의 과거 일치 사례가 포함되며 당시 추천을 뜻하지 않습니다. — 표시는 집계 불가입니다.</p></details>
+          {aiOnly&&<p className="r1599-active-filters">AI 조건 일치 종목만 표시 · 과거 사례 포함</p>}
           {basketNotice&&<p className="r1595-request-status" role="status">{basketNotice}</p>}
           {total===0&&(appliedAmountEok??amountEok)>0&&<p className="r15125-result-scope" role="status">현재 거래대금 최소 {(appliedAmountEok??amountEok).toLocaleString('ko-KR')}억원 조건으로는 검색 대상이 없습니다. 저거래대금 하단 터치 종목도 찾으려면 거래대금을 ‘전체(0억원)’로 바꾸고 검색해 보세요.</p>}
           {r1593Error&&<p className="r1593-comparison-status" role="status">가격 비교: {r1593Error}</p>}
-          {r1593AutoStatus&&patternBackend==='turso'&&<p className="r1593-comparison-status" role="status">{r1593AutoStatus}</p>}
+          {r1593AutoStatus&&patternBackend==='turso'&&<p className="r1593-comparison-status" role="status">{r1593AutoStatus.replace('KIS 최신가 자동 확인 ','최신가 ').replace('종목 · ',' · ')}</p>}
           {r1595RequestNote&&<p className="r1595-request-status" role="status">{r1595RequestNote}</p>}
-          {rows.length>0&&<p className="r1594-quote-note" role="status">{patternBackend==='turso'
-            ?'저장된 확정 일봉을 기본으로 표시합니다. 장중에는 종목별 ‘KIS 최신가 조회’를 누르면 Turso에 새 시세를 저장합니다. KIS 수신 시각은 체결 시각과 다를 수 있습니다.'
-            :r1594QueueStatus+' · 수집 가능한 시장 시간에만 KIS 가격이 갱신됩니다.'}</p>}
+          {rows.length>0&&<details className="ai-search-help"><summary>시세 안내 ⓘ</summary><p>확정 일봉을 기본으로 표시합니다. KIS 최신가 조회 시 시세를 갱신하며 수신 시각과 체결 시각은 다를 수 있습니다.</p></details>}
           <div className="gc-filter-panel r15102-unified-filter" aria-label="골든크로스 및 다중 조건 과거 패턴 필터">
               <div className="gc-filter-heading"><strong><ListFilter size={15}/> 골든크로스 필터</strong><span>검색 전체 결과에 적용 · 당일 발생만</span></div>
               <div className="gc-quick-actions">
