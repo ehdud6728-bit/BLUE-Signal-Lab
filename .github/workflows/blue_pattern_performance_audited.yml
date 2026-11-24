@@ -9,6 +9,7 @@ on:
   pull_request:
     paths:
       - 'research/pattern_performance*.py'
+      - 'research/pattern_entry_timing.py'
       - '.github/workflows/blue_pattern_performance_audited.yml'
 permissions:
   contents: read
@@ -36,9 +37,14 @@ jobs:
           cd ../..
           node tools/turso/pattern-exit-export.mjs --mode=study --sessions="$SESSIONS" --out=output/pattern/source.json
           python3 research/pattern_performance_audited.py --input output/pattern/source.json --output output/pattern/report.json
+      - name: Generate short-window web snapshot candidate
+        if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && inputs.sessions == '60'
+        run: python3 research/pattern_performance_web_snapshot.py --input output/pattern/report.json --output output/pattern/web-snapshot.json
       - uses: actions/upload-artifact@v4
         if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
         with:
           name: BLUE_PATTERN_PERFORMANCE
-          path: output/pattern/report.json
+          path: |
+            output/pattern/report.json
+            output/pattern/web-snapshot.json
           if-no-files-found: error
