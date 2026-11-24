@@ -160,7 +160,7 @@ export async function exportPatternExitSource(client,{sessions=60,mode='plan'}={
   }
   return {format:'BLUE_TURSO_EXIT_SOURCE_V1',storage:'TURSO',asof_day:end,
     eod_days:eod.map(d=>({day:d.day,expected:d.expected,actual:counts.get(d.day)})),
-    research_audited_days:researchDays.size,research_excluded_days:excludedResearchDays,
+    research_audited_days:researchDays.size,research_audited_dates:[...researchDays.keys()].sort(),research_excluded_days:excludedResearchDays,
     signals,bars,market_breadth_by_day:marketBreadth,
     market_breadth_method:'AUDITED_KRX_EQUAL_WEIGHT_ADVANCERS_VS_PRIOR_1_AND_5_AUDITED_EOD_DATES',
     audits_readback_verified:true,trading_calendar_verified:false,
