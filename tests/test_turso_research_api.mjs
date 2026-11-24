@@ -4,10 +4,12 @@ import {DatabaseSync} from 'node:sqlite';
 import {InvalidResearchQuery,tursoResearchDates,tursoResearchSearch,tursoResearchChart,
   tursoResearchCoverage,tursoPatternPulse,tursoExitStudyReport} from '../worker/src/turso-research.ts';
 
+import {RECENT_ASOF} from '../web/src/recent-pattern-data.ts';
+const nextDay=new Date(Date.parse(RECENT_ASOF+'T00:00:00Z')+86400000).toISOString().slice(0,10);
 const env={TURSO_DATABASE_URL:'libsql://unit.invalid',TURSO_AUTH_TOKEN:'dummy'};
 const day='2026-11-18';
 function setup({partial=false,backendError=false,wrongSource=false,additionalDays=false,
-  publishedReport=false,unsafeReport=false,pathReport=false,invalidPath=false,recentCandles=false}={}){
+  publishedReport=false,unsafeReport=false,pathReport=false,invalidPath=false,recentCandles=false,recentCandleDay=nextDay}={}){
   const db=new DatabaseSync(':memory:');
   db.exec(`CREATE TABLE blue_research_signal_audit_v1 (
     trade_day TEXT,row_count INT,observed_stocks INT,signal_events INT,source_payload_sha256 TEXT);
@@ -51,14 +53,14 @@ function setup({partial=false,backendError=false,wrongSource=false,additionalDay
   db.prepare('INSERT INTO blue_eod_ingest_audit_v1 VALUES (?,?)').run('2026-11-19',2660);
   db.prepare('INSERT INTO blue_eod_daily_v1 (trade_day,code,high,low) VALUES (?,?,?,?)').run('2026-11-19','005930',11100,9000);
   if(recentCandles){
-    const d='2026-11-24';
+    const d=recentCandleDay;
     const fixtures=[['000001',100,120,80,90,100],['000002',100,105,80,90,100],['000003',100,null,null,null,null],['000004',100,120,80,90,101]];
     db.prepare('INSERT INTO blue_research_signal_audit_v1 VALUES (?,?,?,?,?)').run(d,fixtures.length,2660,fixtures.length,'abc');
     db.prepare('INSERT INTO blue_eod_ingest_audit_v1 VALUES (?,?)').run(d,2660);
     for(const [code,price,h,l,o,c] of fixtures){
       const record=JSON.parse(make(code,price,'ENV20_LOWER_TOUCH',{recent_candle_match:'forged'},75));
-      record.trade_day=d;record.chart.asof=d;
-      db.prepare('INSERT INTO blue_research_signals_v1 VALUES (?,?,?,?,?,?,?,?)').run(d,code,'blue_market_20261124','ENV20_LOWER_TOUCH',price,'hash','abc',JSON.stringify(record));
+      record.trade_day=d;record.chart.asof=d;record.chart.bars=[{t:d,c:price}];
+      db.prepare('INSERT INTO blue_research_signals_v1 VALUES (?,?,?,?,?,?,?,?)').run(d,code,'blue_market_'+d.replaceAll('-',''),'ENV20_LOWER_TOUCH',price,'hash','abc',JSON.stringify(record));
       if(h!==null)db.prepare('INSERT INTO blue_eod_daily_v1 VALUES (?,?,?,?,?,?)').run(d,code,h,l,o,c);
     }
   }
@@ -285,9 +287,25 @@ test('missing secrets and Turso outage never trigger implicit D1 access',async()
 
 test('recent candle match requires exact audited OHLC, rejects missing and conflicting bars',async()=>{
  const db=setup({recentCandles:true});
- const out=await tursoResearchSearch(env,new URLSearchParams({date:'2026-11-24'}),db.factory);
+ const out=await tursoResearchSearch(env,new URLSearchParams({date:nextDay}),db.factory);
  assert.equal(out.total,4);
  assert.deepEqual(out.items.filter(r=>r.extras.recent_candle_match).map(r=>r.code),['000001']);
  assert.equal(out.items.find(r=>r.code==='000001').extras.recent_candle_match,'ENV20_BULL_CLOSE_MID_20261123');
+ assert.equal(db.closed,1);
+});
+
+test('research cutoff never marks historical candles as new observations by default',async()=>{
+ const db=setup({recentCandles:true,recentCandleDay:RECENT_ASOF});
+ const out=await tursoResearchSearch(env,new URLSearchParams({date:RECENT_ASOF}),db.factory);
+ assert.ok(out.items.some(r=>r.code==='000001'));
+ assert.ok(out.items.every(r=>!r.extras.recent_candle_match&&!r.extras.audited_candle_features));
+ assert.equal(db.calls.some(c=>c.sql.includes('SELECT e.trade_day,e.code,e.open')),false);
+ assert.equal(db.closed,1);
+});
+test('explicit retrospective summary retains exact candle checks at the research cutoff',async()=>{
+ const db=setup({recentCandles:true,recentCandleDay:RECENT_ASOF});
+ const out=await tursoResearchSearch(env,new URLSearchParams({date:RECENT_ASOF,ai_summary:'1'}),db.factory);
+ assert.deepEqual(out.items.filter(r=>r.extras.recent_candle_match).map(r=>r.code),['000001']);
+ assert.ok(out.items.find(r=>r.code==='000001').extras.audited_candle_features.includes('CLOSE_MID'));
  assert.equal(db.closed,1);
 });
