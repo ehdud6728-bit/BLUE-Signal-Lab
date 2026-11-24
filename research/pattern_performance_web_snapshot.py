@@ -19,6 +19,8 @@ def recommendations(report):
                 raise ValueError("invalid recommendation counts")
             if not all(type(x) in (int,float) and math.isfinite(x) for x in (rate,mean,median)) or not 0 <= rate <= 100:
                 raise ValueError("invalid recommendation returns")
+            if any(part == "UNKNOWN" or part.endswith("_UNKNOWN") for part in p.split("|")):
+                continue
             if rate >= 70 and mean > 0 and median > 0:
                 result.append({**r, "group":group, "tier":"SHORT_RECOMMENDATION" if n>=30 and d>=5 and stocks>=10 else "WATCH", "validation":"IN_SAMPLE_ONLY"})
     return sorted(result, key=lambda r:(r["tier"]!="SHORT_RECOMMENDATION",-r["positive_return_probability_pct"],-r["sample_count"],r["pattern"],r["horizon_trading_days"]))
@@ -30,7 +32,7 @@ def convert(report):
     if date.fromisoformat(day).isoformat() != day:
         raise ValueError("invalid date")
     sessions = report.get("research_window_sessions",report["audited_sessions"])
-    if type(sessions) is not int or not 1 <= sessions <= 60:
+    if type(sessions) is not int or not 1 <= sessions <= 28:
         raise ValueError("not a short-window report")
     rows = {}
     seen = set()

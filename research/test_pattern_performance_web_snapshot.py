@@ -8,5 +8,7 @@ class RecommendationTest(unittest.TestCase):
             self.assertEqual(recommendations({"candle_rankings":[{**base,**change}]})[0]["tier"],tier)
         for change in ({"positive_return_probability_pct":69.99},{"mean_return_pct":0},{"median_return_pct":-1}):
             self.assertEqual(recommendations({"candle_rankings":[{**base,**change}]}),[])
+        for pattern in ("ENV20|UNKNOWN", "ENV20|BULL|MARKET_UNKNOWN"):
+            self.assertEqual(recommendations({"detail_rankings":[{**base,"pattern":pattern}]}),[])
 if __name__=="__main__":
     unittest.main()
