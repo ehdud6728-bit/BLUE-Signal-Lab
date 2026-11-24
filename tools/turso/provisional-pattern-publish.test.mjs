@@ -5,7 +5,7 @@ import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {pathToFileURL} from 'node:url';
 import {createClient} from '@libsql/client';
-import {validateSnapshot,publishSnapshot} from './provisional-pattern-publish.mjs';
+import {validateSnapshot,publishSnapshot,writeChunks,storageFailure} from './provisional-pattern-publish.mjs';
 
 const day='2026-11-24',reference='2026-11-23',now=new Date('2026-11-24T12:10:00Z');
 function fixture(at='2026-11-24T11:55:00.000Z',scan='2026-11-24T12:00:00Z'){
@@ -67,4 +67,24 @@ test('actual local SQLite: publish, replay, reject stale, replace with zero matc
     assert.equal((await publish(fixture('2026-11-24T11:57:00.000Z','2026-11-24T12:03:00Z'))).status,'SKIPPED_VERIFIED_EOD');
     assert.equal((await db.execute('SELECT snapshot_id FROM blue_provisional_pattern_head_v1')).rows[0].snapshot_id,zero.snapshot_id);
   }finally{db.close();await rm(dir,{recursive:true,force:true});}
+});
+
+test('bound storage request sizes without dropping rows',()=>{
+  const rows=Array.from({length:13},(_,i)=>({code:String(i).padStart(6,'0'),raw:JSON.stringify({data:'x'.repeat(7500)}),hash:'a'.repeat(64)}));
+  const chunks=[...writeChunks(rows)];
+  assert.deepEqual(chunks.flat(),rows);
+  assert.ok(chunks.every(c=>c.length<=4));
+  assert.ok(chunks.every(c=>c.reduce((n,r)=>n+Buffer.byteLength(JSON.stringify([r.code,r.raw,r.hash])),0)<=24000));
+  const single={...rows[0],raw:'x'.repeat(30000)};
+  assert.deepEqual([...writeChunks([single])],[[single]]);
+});
+test('storage error identifies phase and safe code without exposing provider details',async()=>{
+  assert.equal(storageFailure('WRITE_ROWS',{code:'SQLITE_BUSY',message:'secret'}),'PROVISIONAL_STORAGE_WRITE_ROWS_SQLITE_BUSY');
+  assert.equal(storageFailure('READ_ROWS',{code:'sensitive-token',status:429}),'PROVISIONAL_STORAGE_READ_ROWS_UNKNOWN_HTTP_429');
+  const data=fixture();let closed=false;
+  await assert.rejects(publishSnapshot({...data,mode:'apply',now,env:{TURSO_DATABASE_URL:'libsql://test.invalid',TURSO_AUTH_TOKEN:'secret'},clientFactory:()=>({
+    async execute(){throw Object.assign(Error('secret URL and token'),{code:'HRANA_WEBSOCKET_ERROR'});},
+    close(){closed=true;}
+  })}),{message:'PROVISIONAL_STORAGE_CHECK_EOD_HRANA_WEBSOCKET_ERROR'});
+  assert.equal(closed,true);
 });
