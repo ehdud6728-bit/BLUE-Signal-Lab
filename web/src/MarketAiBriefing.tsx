@@ -3,7 +3,9 @@ type Ref={id:string;label:string;detail:string};
 type Part={text:string;refs:string[]};
 type Scenario={condition:string;response:string;invalidation:string;refs:string[]};
 type Report={summary:Part;risks:Part;rotation:Part;watch:Part;scenarios:{rise:Scenario;range:Scenario;fall:Scenario}};
-type Snapshot={status?:string;error?:string;model?:string;cached?:boolean;generated_at?:string;dates?:Record<string,string|null>;refs?:Ref[];limitations?:string[];report?:Report;daily_limit?:number;gemini_key_configured?:boolean};
+type MacroEvent={id:string;name:string;kind:string;reference_period:string;scheduled_et:string;scheduled_utc:string;source_url:string;meeting_et?:string;status:string};
+type Macro={status:string;reviewed_day:string;review_required_after:string;update_mode:string;events:MacroEvent[];vix_futures:{status:string;source_url:string;terms_url:string}};
+type Snapshot={macro?:Macro;status?:string;error?:string;model?:string;cached?:boolean;generated_at?:string;dates?:Record<string,string|null>;refs?:Ref[];limitations?:string[];report?:Report;daily_limit?:number;gemini_key_configured?:boolean};
 const messages:Record<string,string>={ACCESS_REQUIRED:'Cloudflare Access 로그인 필요',ORIGIN_DENIED:'허용된 웹앱 주소에서 실행해 주세요.',GEMINI_KEY_MISSING:'Gemini API 키가 Worker에 등록되지 않았습니다.',GEMINI_AUTH:'Gemini API 권한을 확인해 주세요.',MODEL_NOT_AVAILABLE:'등록된 Gemini 모델의 사용 가능 여부를 확인해 주세요.',GEMINI_BAD_REQUEST:'Gemini 요청 형식 또는 모델 설정을 확인해 주세요.',QUOTA:'Gemini 제공사 호출 한도에 도달했습니다.',DAILY_LIMIT:'오늘 종합 시황 AI 호출 한도에 도달했습니다.',AI_REPORT_INVALID:'AI 답변 형식이나 근거 ID 검증 실패. 미검증 답변은 표시하지 않습니다.',AI_STORAGE_UNAVAILABLE:'Turso AI 저장소 조회 또는 쓰기 실패.',MARKET_EVIDENCE_MISSING:'검증된 시장 자료가 없어 분석할 수 없습니다.',REQUEST_FAILED:'AI 요청 실패. 잠시 뒤 다시 시도해 주세요.',GEMINI_UNAVAILABLE:'Gemini 응답 실패'};
 const fmt=(s:string)=>{try{return new Intl.DateTimeFormat('ko-KR',{timeZone:'Asia/Seoul',dateStyle:'short',timeStyle:'short'}).format(new Date(s));}catch{return s;}};
 function Evidence({ids,refs}:{ids:string[];refs:Ref[]}){
@@ -24,13 +26,29 @@ export default function MarketAiBriefing({api,revision=0}:{api:string;revision?:
   finally{if(!ctrl.signal.aborted)setBusy(false);}
  }
  useEffect(()=>{void load('GET');return()=>current.current?.abort();},[api,revision]);
- const refs=data?.refs||[],report=data?.report,dates=data?.dates;
- const replaceIds=(v:string)=>v.replace(/\b(?:[MFTS]_(?:KOSPI|KOSDAQ)(?:_\d+)?|G_(?:DJI|NDX|SPX|SOX|VIX)|C_(?:KOSPI|KOSDAQ)(?:_\d+(?:_[LF]\d+)?)?)\b/g,id=>refs.find(r=>r.id===id)?.label??id);
+ const refs=data?.refs||[],report=data?.report,dates=data?.dates,macro=data?.macro;
+ const replaceIds=(v:string)=>v.replace(/\b(?:[MFTS]_(?:KOSPI|KOSDAQ)(?:_\d+)?|G_(?:DJI|NDX|SPX|SOX|VIX)|E_[A-Z_]+|C_(?:KOSPI|KOSDAQ)(?:_\d+(?:_[LF]\d+)?)?)\b/g,id=>refs.find(r=>r.id===id)?.label??id);
  const part=(label:string,p:Part)=><div className="blue-research-card"><strong>{label}</strong><p style={{whiteSpace:'pre-wrap'}}>{replaceIds(p.text)}</p><Evidence ids={p.refs} refs={refs}/></div>;
  return <section className="blue-research-card">
  <div className="blue-pattern-heading"><strong>BLUE AI 종합 시황 · 대응 전망</strong><button type="button" disabled={busy} onClick={()=>void load('GET')}>저장 분석 확인</button></div>
  <small>Gemini 생성형 분석 · Turso 자료 기반 · 하루 최대 {data?.daily_limit??5}회 신규 분석 · 같은 근거는 재사용</small>
  <p>시장 방향, 외국인·기관 수급, VIX 및 해외 일봉, 개선 업종과 대장주·후발주 후보를 연결해 설명합니다. 생성 버튼을 누르면 가공된 시장·기술신호 요약을 Gemini에 전송합니다. 종목명과 코드는 보내지 않고 화면에서만 연결합니다.</p>
+ {macro&&<div className="blue-research-card">
+ <strong>주요 경제 일정 · 한국시간</strong>
+ <p><small>공식 일정 확인일 {macro.reviewed_day} · 자동 갱신 아님 · 발표 예정이며 변경될 수 있습니다.</small></p>
+ {macro.status==='REVIEW_REQUIRED'&&<p className="blue-note">일정 재검토 필요 · 아래는 마지막 확인 일정이며 AI 분석에서는 제외합니다.</p>}
+ {macro.events.length===0?<p>확인된 향후 일정 없음 · 공식 달력 재확인 필요</p>:macro.events.map(e=><div key={e.id} className="blue-research-card">
+ <strong>{e.name}</strong><p>{fmt(e.scheduled_utc)} KST · 발표 예정</p>
+ <small>미국 동부 {e.scheduled_et.slice(0,16).replace('T',' ')}{e.meeting_et?' · 회의 '+e.meeting_et:''} · 대상 {e.reference_period}</small>
+ <p><a href={e.source_url} target="_blank" rel="noopener noreferrer">공식 일정 확인</a></p>
+ </div>)}
+ <small>다음 재검토 기준 {macro.review_required_after} · 실제 발표 내용과 시장 예상치는 미연동입니다.</small>
+ </div>}
+ {macro&&<div className="blue-research-card"><strong>VIX 선물 구조 · 사용권 확인 필요</strong>
+ <p>현물 VIX와 별개입니다. 월물 근월 F1·차월 F2의 동일일 정산가격이 확인된 경우 F2 − F1을 비교합니다. 양수는 콘탱고, 음수는 백워데이션이며 그 자체로 시장 반등을 보장하지 않습니다.</p>
+ <p>현재: F1/F2 미확인 · 방향 판정 보류</p>
+ <a href={macro.vix_futures.source_url} target="_blank" rel="noopener noreferrer">Cboe 공식 일별 정산가격</a> · <a href={macro.vix_futures.terms_url} target="_blank" rel="noopener noreferrer">이용 조건</a>
+ </div>}
  {dates&&<details><summary>자료별 기준일</summary><p>국내 시황 수집 {dates.market_observed_at?fmt(dates.market_observed_at):'미확인'} · 실제 시세일 미확인</p><p>국내 업종 지수 수집 {dates.trend_observed_at?fmt(dates.trend_observed_at):'미확인'} · 해외 지수 수집 {dates.global_observed_at?fmt(dates.global_observed_at):'미확인'}</p><p>후보 일봉 기준 {dates.candidate_day??'미확인'} · 마스터 수집 {dates.master_receipt_day??'미확인'}</p></details>}
  <button type="button" disabled={busy||data?.status==='READY'||data?.status==='PENDING'||data?.gemini_key_configured===false} onClick={()=>void load('POST')}>{busy?'처리 중…':data?.status==='READY'?'동일 근거 분석 저장됨':data?.status==='PENDING'?'분석 진행 중':'AI 종합 분석 생성'}</button>
  {data?.status==='PENDING'&&!busy&&<p>다른 요청이 분석 중입니다. 저장 분석 확인 버튼으로 결과를 조회해 주세요.</p>}
@@ -46,6 +64,6 @@ export default function MarketAiBriefing({api,revision=0}:{api:string;revision?:
  {part('다음 관찰 포인트',report.watch)}
  </>}
  {data?.limitations&&<details><summary>분석 한계 · 데이터 출처</summary>{data.limitations.map((v,i)=><p key={i}>{v}</p>)}</details>}
- <p className="blue-note">AI 설명은 검증된 원자료 그 자체가 아니며 해석 오류가 있을 수 있습니다. 미래 수익률·상승 확률 또는 자동 매매 신호가 아닙니다. VIX 선물 및 뉴스·경제 일정은 미연동입니다.</p>
+ <p className="blue-note">AI 설명은 검증된 원자료 그 자체가 아니며 해석 오류가 있을 수 있습니다. 미래 수익률·상승 확률 또는 자동 매매 신호가 아닙니다. VIX 선물·뉴스·경제 발표 결과는 미연동입니다.</p>
  </section>;
 }
