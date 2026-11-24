@@ -35,6 +35,59 @@ function masterRows(master,now){
   }
   return master.rows;
 }
+/** Never substitute a different stock price date for a sector trend day.
+ * Prefer latest source generation, otherwise an explicitly older aligned
+ * generation. Preserve the distinction between benchmark sessions and the
+ * legacy audited-date sequence when the original snapshot lacks dates.
+ */
+export async function selectAlignedTrend(read,receipt){
+  const keys=await read('SELECT receipt_day FROM blue_market_trends_v1 WHERE receipt_day<=? ORDER BY receipt_day DESC LIMIT 7',[receipt]);
+  if(!keys.length)throw Error('LEADERS_TREND_REQUIRED');
+  let latest_trend_day=null;
+  for(const key of keys){
+    const tr=(await read('SELECT receipt_day,observed_at_utc,payload_json,payload_sha256 FROM blue_market_trends_v1 WHERE receipt_day=?',[key.receipt_day]))[0];
+    if(!tr||hash(String(tr.payload_json))!==tr.payload_sha256)throw Error('LEADERS_TREND_REQUIRED');
+    const trend=JSON.parse(String(tr.payload_json));
+    if(trend.schema!=='BLUE_ROTATION_TRENDS_V1'||trend.receipt_day!==tr.receipt_day||trend.observed_at_utc!==tr.observed_at_utc||
+      !validDay(trend.receipt_day)||trend.receipt_day>receipt||!Array.isArray(trend.markets)||trend.markets.length!==2)throw Error('LEADERS_TREND_INVALID');
+    const day=trend.markets[0]?.benchmark?.day;
+    if(!validDay(day)||day>receipt||!trend.markets.every(m=>m.benchmark?.day===day))throw Error('LEADERS_COMMON_DAY_REQUIRED');
+    if(latest_trend_day===null)latest_trend_day=day;
+    if(day>latest_trend_day)throw Error('LEADERS_TREND_ORDER_INVALID');
+    const exact=trend.markets.map(m=>m.benchmark_days);
+    let dates=null,reference_basis='AUDITED_DATES_LEGACY';
+    if(exact.some(x=>x!==undefined)){
+      if(!exact.every(x=>Array.isArray(x)&&x.length>=11&&x.every(validDay)&&x.every((d,i)=>i===0||d>x[i-1])&&x.at(-1)===day)||
+         JSON.stringify(exact[0].slice(-11))!==JSON.stringify(exact[1].slice(-11)))throw Error('LEADERS_BENCHMARK_DATES_INVALID');
+      dates=exact[0].slice(-11).reverse();reference_basis='EXACT_BENCHMARK_DATES';
+    }
+    const audit=dates?
+      await read('SELECT trade_day,row_count,source,day_sha256 FROM blue_eod_ingest_audit_v1 WHERE trade_day IN ('+dates.map(()=>'?').join(',')+') ORDER BY trade_day DESC',dates):
+      await read('SELECT trade_day,row_count,source,day_sha256 FROM blue_eod_ingest_audit_v1 WHERE trade_day<=? ORDER BY trade_day DESC LIMIT 11',[day]);
+    const missing=dates?dates.filter(d=>!audit.some(a=>a.trade_day===d)):audit[0]?.trade_day!==day?[day]:[];
+    const bad=audit.filter((a,i)=>!validDay(a.trade_day)||i>0&&a.trade_day>=audit[i-1].trade_day||
+      !Number.isSafeInteger(num(a.row_count))||num(a.row_count)<1700||num(a.row_count)>10000||
+      !['KRX_PYKRX_EXACT_DAY_VERIFIED','KRX_OPENAPI_EXACT_DAY_VERIFIED'].includes(a.source)||!/^[a-f0-9]{64}$/.test(a.day_sha256));
+    const priorOk=trend.markets.every(m=>!m.benchmark.previous_day||m.benchmark.previous_day===audit[1]?.trade_day);
+    if(audit.length!==11||missing.length||bad.length||!priorOk){
+      console.log('BLUE_LEADERS_EOD_CHECK',JSON.stringify({trend_day:day,trend_receipt_day:trend.receipt_day,
+        audit_days:audit.length,latest_audited_day:audit[0]?.trade_day??null,missing_dates:missing,
+        invalid_audit_days:bad.map(a=>a.trade_day),prior_day_mismatch:!priorOk,reference_basis}));
+      continue;
+    }
+    dates=audit.map(a=>a.trade_day);
+    const actual=await read('SELECT trade_day,COUNT(*) AS n FROM blue_eod_daily_v1 WHERE trade_day IN ('+dates.map(()=>'?').join(',')+') GROUP BY trade_day',dates);
+    const counts=new Map(actual.map(a=>[a.trade_day,num(a.n)]));
+    const mismatch=audit.filter(a=>counts.get(a.trade_day)!==num(a.row_count)).map(a=>a.trade_day);
+    if(mismatch.length){
+      console.log('BLUE_LEADERS_EOD_CHECK',JSON.stringify({trend_day:day,count_mismatch_dates:mismatch,reference_basis}));continue;
+    }
+    console.log('BLUE_LEADERS_EOD_ALIGNED',JSON.stringify({day,latest_trend_day,trend_receipt_day:trend.receipt_day,
+      reference5:dates[5],reference10:dates[10],reference_basis,older_generation:tr.receipt_day!==keys[0].receipt_day}));
+    return {tr,trend,day,dates,counts,latest_trend_day,reference_basis};
+  }
+  throw Error('LEADERS_EOD_HISTORY_REQUIRED');
+}
 export async function captureLeaders(env=process.env,{mode='plan',master=null,now=new Date(),factory=createClient}={}){
   if(mode==='plan')return {status:'PLAN_ONLY',turso_reads:0,turso_writes:0};
   if(!['inspect','apply'].includes(mode))throw Error('LEADERS_MODE_INVALID');
@@ -45,19 +98,8 @@ export async function captureLeaders(env=process.env,{mode='plan',master=null,no
   try{
     let reads=0;
     const read=async(sql,args=[])=>{reads++;return (await db.execute({sql,args})).rows;};
-    const tr=(await read('SELECT receipt_day,observed_at_utc,payload_json,payload_sha256 FROM blue_market_trends_v1 WHERE receipt_day<=? ORDER BY receipt_day DESC LIMIT 1',[receipt]))[0];
-    if(!tr||hash(String(tr.payload_json))!==tr.payload_sha256)throw Error('LEADERS_TREND_REQUIRED');
-    const trend=JSON.parse(String(tr.payload_json));
-    if(trend.schema!=='BLUE_ROTATION_TRENDS_V1'||trend.receipt_day!==tr.receipt_day||trend.observed_at_utc!==tr.observed_at_utc||!validDay(trend.receipt_day)||trend.receipt_day>receipt||!Array.isArray(trend.markets)||trend.markets.length!==2)throw Error('LEADERS_TREND_INVALID');
-    const day=trend.markets[0]?.benchmark?.day;
-    if(!validDay(day)||day>receipt||!trend.markets.every(m=>m.benchmark?.day===day))throw Error('LEADERS_COMMON_DAY_REQUIRED');
-    // Use the exact audited date sequence rather than individual stock lag.
-    const audit=await read('SELECT trade_day,row_count,source,day_sha256 FROM blue_eod_ingest_audit_v1 WHERE trade_day<=? ORDER BY trade_day DESC LIMIT 11',[day]);
-    if(audit.length!==11||audit[0].trade_day!==day||audit.some((a,i)=>!validDay(a.trade_day)||i>0&&a.trade_day>=audit[i-1].trade_day||num(a.row_count)<1700||!String(a.source).startsWith('KRX_')||!/^[a-f0-9]{64}$/.test(a.day_sha256)))throw Error('LEADERS_EOD_HISTORY_REQUIRED');
-    const dates=audit.map(a=>a.trade_day);
-    const actual=await read('SELECT trade_day,COUNT(*) AS n FROM blue_eod_daily_v1 WHERE trade_day IN ('+dates.map(()=>'?').join(',')+') GROUP BY trade_day',dates);
-    const counts=new Map(actual.map(a=>[a.trade_day,num(a.n)]));
-    if(audit.some(a=>counts.get(a.trade_day)!==num(a.row_count)))throw Error('LEADERS_EOD_AUDIT_MISMATCH');
+    const selected=await selectAlignedTrend(read,receipt);
+    const {tr,trend,day,dates,counts,latest_trend_day,reference_basis}=selected;
     const signalMap=new Map();let signalStatus='MISSING';
     try{
       const a=(await read('SELECT row_count,observed_stocks,signal_events,source_payload_sha256 FROM blue_research_signal_audit_v1 WHERE trade_day=?',[day]))[0];
@@ -123,8 +165,8 @@ export async function captureLeaders(env=process.env,{mode='plan',master=null,no
       markets.push({market:m.market,improving:universe.length,analyzed:groups.length,master_members:members.filter(r=>r.market===m.market).length,matched_members:groupRows.length,groups});
     }
     const snapshot={schema:'BLUE_ROTATION_LEADERS_V1',receipt_day:receipt,observed_at_utc:now.toISOString(),master_receipt_day:master.receipt_day,master_observed_at_utc:master.observed_at_utc,master_hashes:master.hashes,
-      trend_receipt_day:trend.receipt_day,trend_sha256:tr.payload_sha256,day,reference5:dates[5],reference10:dates[10],signal_status:signalStatus,thresholds,sector_limit:sectorsLimit,markets};
-    const summary={status:mode==='inspect'?'INSPECT_ONLY':'OK',day,master_receipt_day:master.receipt_day,signal_status:signalStatus,turso_reads:reads,
+      trend_receipt_day:trend.receipt_day,trend_sha256:tr.payload_sha256,day,latest_trend_day,reference_basis,reference5:dates[5],reference10:dates[10],signal_status:signalStatus,thresholds,sector_limit:sectorsLimit,markets};
+    const summary={status:mode==='inspect'?'INSPECT_ONLY':'OK',day,latest_trend_day,reference_basis,master_receipt_day:master.receipt_day,signal_status:signalStatus,turso_reads:reads,
       markets:markets.map(m=>({market:m.market,improving:m.improving,analyzed:m.analyzed,master_members:m.master_members,matched_members:m.matched_members,
         mapped_groups:m.groups.filter(g=>g.members>0).length,leaders:m.groups.reduce((a,g)=>a+g.leaders.length,0),followers:m.groups.reduce((a,g)=>a+g.followers.length,0),new_entries:m.groups.filter(g=>g.entry==='NEW_ENTRY').length}))};
     if(mode==='apply'){
