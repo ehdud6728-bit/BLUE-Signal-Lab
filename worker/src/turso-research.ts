@@ -319,12 +319,33 @@ export async function tursoResearchSearch(env:ResearchEnv,p:URLSearchParams,fact
       close_price,supply_distance_pct,extras_json,stats_json,record_json,${metrics}
       row_sha256 FROM verified WHERE ${where} ORDER BY ${ordering} LIMIT ? OFFSET ?`,
       args:[...args,limit,(page-1)*limit]});
+    // Read only exact-day audited candles for candidates on this result page.
+    const candleMatches=new Set<string>();
+    const candidates=result.rows.filter(r=>String(r.day)>'2026-11-23'&&String(r.signal_names).split(',').includes('ENV20_LOWER_TOUCH'));
+    for(let i=0;i<candidates.length;i+=40){
+      const chunk=candidates.slice(i,i+40);
+      const candles=await client.execute({sql:`SELECT e.trade_day,e.code,e.open,e.high,e.low,e.close
+        FROM blue_eod_daily_v1 e JOIN blue_eod_ingest_audit_v1 a
+        ON a.trade_day=e.trade_day AND a.row_count>=1700
+        WHERE ${chunk.map(()=>'(e.trade_day=? AND e.code=?)').join(' OR ')}`,
+        args:chunk.flatMap(r=>[String(r.day),String(r.code)])});
+      for(const b of candles.rows){
+        const row=chunk.find(r=>r.day===b.trade_day&&r.code===b.code);
+        const [o,h,l,c]=[b.open,b.high,b.low,b.close].map(Number);
+        if(!row||![o,h,l,c].every(Number.isFinite)||!(0<l&&l<=o&&o<c&&c<=h)||c!==Number(row.close_price))continue;
+        const span=h-l,body=(c-o)/span,lower=(o-l)/span,upper=(h-c)/span,pos=(c-l)/span;
+        if(body>0.1&&body<0.7&&!(lower>=0.6&&upper<=0.15)&&!(upper>=0.6&&lower<=0.15)&&pos>=0.33&&pos<0.67)
+          candleMatches.add(String(b.trade_day)+':'+String(b.code));
+      }
+    }
     const items=result.rows.map(r=>{
       const record=JSON.parse(String(r.record_json)) as {trade_day:string;code:string;close_price:number;
         extras:Record<string,unknown>;stats:{setups?:Array<any>};chart:{asof:string}};
       if(record.trade_day!==r.day||record.code!==r.code||record.close_price!==Number(r.close_price)||
         record.chart?.asof!==r.day)throw Error('TURSO_RESEARCH_ROW_CONFLICT');
       const extras={...record.extras};
+      delete extras.recent_candle_match;
+      if(candleMatches.has(String(r.day)+':'+String(r.code)))extras.recent_candle_match='ENV20_BULL_CLOSE_MID_20261123';
       const setups=Array.isArray(record.stats?.setups)?record.stats.setups:[];
       const best=setups.filter(s=>{
         const h=s?.horizons?.['10'];return Number.isInteger(Number(h?.n))&&Number(h.n)>=floor&&
