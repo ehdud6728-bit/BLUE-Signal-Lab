@@ -25,6 +25,7 @@ jobs:
       - run: python -m unittest discover -s tests -p test_provisional_pattern_scan.py
 
       - run: python -m unittest discover -s tests -p test_provisional_history.py
+      - run: python -m unittest discover -s tests -p test_chart_research_r159.py
       - run: node --check tools/turso/provisional-input-export.mjs
 
       - run: python -m unittest discover -s tests -p test_provisional_pipeline.py
