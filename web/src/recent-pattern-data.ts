@@ -802,3 +802,6 @@ export const RECENT_ROWS:Record<string,number[][]>={
     ]
   ]
 };
+
+export const RECENT_SESSIONS=28;
+export const RECENT_RECOMMENDATIONS: unknown[]=[];
