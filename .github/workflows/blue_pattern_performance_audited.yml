@@ -92,7 +92,8 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           python3 research/pattern_performance_archive.py --input output/pattern/web-snapshot.json --archive research/adaptive-history
-          git add research/adaptive-history
+          python3 research/pattern_performance_radar_export.py --windows output/pattern/windows.json --archive research/adaptive-history --output web/src/adaptive-radar-data.ts
+          git add research/adaptive-history web/src/adaptive-radar-data.ts
           if git diff --cached --quiet; then
             echo "No newer audited snapshot"
             exit 0
