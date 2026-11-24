@@ -1,8 +1,8 @@
 import {useEffect,useState} from 'react';
 type Stock={code:string;name:string;close:number;r5:number;r10:number;amount:number;amount_ratio:number|null;signals:string[]|null};
-type Group={code:string;name:string;rs10:number;momentum:number;entry:string;members:number;matched:number;eligible:number;leaders:Stock[];followers:Stock[]};
+type Group={membership_source?:string;membership_reason?:string|null;code:string;name:string;rs10:number;momentum:number;entry:string;members:number;matched:number;eligible:number;leaders:Stock[];followers:Stock[]};
 type Market={market:string;improving:number;analyzed:number;master_members:number;matched_members:number;groups:Group[]};
-type Snapshot={latest_trend_day?:string;reference_basis?:string;status:string;receipt_day:string;master_receipt_day:string;trend_receipt_day:string;day:string;reference5:string;reference10:string;signal_status:string;sector_limit:number;stale_receipt:boolean;trend_superseded:boolean;markets:Market[]};
+type Snapshot={mapping_status?:string;latest_trend_day?:string;reference_basis?:string;status:string;receipt_day:string;master_receipt_day:string;trend_receipt_day:string;day:string;reference5:string;reference10:string;signal_status:string;sector_limit:number;stale_receipt:boolean;trend_superseded:boolean;markets:Market[]};
 const fmt=(v:number)=> (v>0?'+':'')+v.toFixed(2)+'%';
 const entry=(x:string)=>x==='NEW_ENTRY'?'신규 개선 진입':x==='CONTINUING'?'개선 유지':'개선 관측 · 직전 상태 미확인';
 function Stocks({title,rows}:{title:string;rows:Stock[]}){
@@ -31,11 +31,13 @@ export default function RotationLeaders({api}:{api:string}){
  <div className="blue-periods">{['KOSPI','KOSDAQ'].map(v=><button key={v} aria-pressed={scope===v} onClick={()=>setScope(v)}>{v}</button>)}</div>
  <label><input type="checkbox" checked={entryOnly} onChange={e=>setEntryOnly(e.target.checked)}/> 신규 개선 진입만 보기</label>
  <p>개선 업종 {m?.improving??0}개 · 세부 후보 분석 {m?.analyzed??0}개 (시장별 최대 {data.sector_limit}개) · 마스터와 일봉 일치 {m?.matched_members??0}/{m?.master_members??0}</p>
+ {data.mapping_status==='PARTIAL'&&<p className="blue-note">일부 업종만 구성 종목 확인 완료 · 매핑 미확인 업종은 후보를 생성하지 않습니다.</p>}
  <small>기술패턴 {data.signal_status==='AUDITED'?'동일 기준일 감사 통과':'미확인'} · 조건은 탐색용이며 미래 상승률은 검증하지 않았습니다.</small>
  {!groups.length&&<p>표시할 업종이 없습니다. 직전 사분면 자료가 없으면 신규 진입으로 분류하지 않습니다.</p>}
  {groups.map(g=><details key={g.code} className="blue-research-card"><summary><strong>{g.name}</strong> · {entry(g.entry)} · 대장 {g.leaders.length} / 후발 {g.followers.length}</summary>
  <p>시장 상대성과 {fmt(g.rs10)} · 변화 {g.momentum.toFixed(2)}%p · 일봉 일치 {g.matched}/{g.members}개 · 유동성/가격 조건 {g.eligible}개</p>
- {g.members===0?<p>마스터의 해당 업종 코드 매핑이 없어 종목을 추정하지 않습니다.</p>:<><Stocks title="대장주 관찰 후보" rows={g.leaders}/><Stocks title="초기 회복 후발주 관찰 후보" rows={g.followers}/></>}
+ {g.membership_source&&<small>구성 근거: {g.membership_source==='KIS_MASTER_CODE'?'KIS 업종 코드':g.membership_source==='KIS_MASTER_FLAG'?'KIS 지수 구성 플래그':g.membership_source==='KRX_INDEX_CONSTITUENTS'?'KRX 기준일 구성 조회 · 현재 정상 종목만':'미확인'}</small>}
+ {g.members===0?<p>해당 업종 구성 종목 미확인 ({g.membership_reason??'NO_MASTER_MEMBERS'}) · 종목을 추정하지 않습니다.</p>:<><Stocks title="대장주 관찰 후보" rows={g.leaders}/><Stocks title="초기 회복 후발주 관찰 후보" rows={g.followers}/></>}
  </details>)}
  <p className="blue-note">대장·후발 후보는 가격·거래대금 기준 관찰 분류이며 거래대금은 순매수와 다릅니다. 기업행동, 구성 변경 이력, 실제 매매 성과 및 테마 분류는 검증 전입니다.</p>
  </>}

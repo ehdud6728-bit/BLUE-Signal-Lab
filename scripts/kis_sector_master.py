@@ -17,6 +17,22 @@ SPECS = {
     "KOSDAQ": ("kosdaq", 221, [2,1,4,4,4,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,9,5,5,1,1,1,2,1,1,1,2,2,2,3,1,3,12,12,8,15,21,2,7,1,1,1,1,9,9,9,5,9,8,9,3,1,1,1], (29,30,31,32,49,14)),
 }
 
+# Only documented membership flags, not guessed numeric aliases.
+def index_tags(fields, market):
+    tags=[]
+    if market=="KOSPI":
+        size={"1":"KOSPI_LARGE","2":"KOSPI_MID","3":"KOSPI_SMALL"}.get(fields[1])
+        if size: tags.append(size)
+        sector={"1":"건설","2":"중공업","3":"철강소재","4":"에너지화학","5":"정보통신","6":"금융","7":"필수소비재","8":"자유소비재","9":"산업재","A":"건강관리","B":"커뮤니케이션서비스"}.get(fields[8])
+        if sector: tags.extend(["KOSPI200","KOSPI200_"+sector])
+        flags={5:"KOSPI_MANUFACTURING",9:"KOSPI100",10:"KOSPI50",14:"KRX100",15:"KRX자동차",16:"KRX반도체",17:"KRX바이오",18:"KRX은행",20:"KRX에너지화학",21:"KRX철강",23:"KRX미디어통신",24:"KRX건설",26:"KRX증권",27:"KRX선박",28:"KRX보험",29:"KRX운송"}
+    else:
+        size={"1":"KOSDAQ_LARGE","2":"KOSDAQ_MID","3":"KOSDAQ_SMALL"}.get(fields[1])
+        if size: tags.append(size)
+        flags={5:"KOSDAQ_VENTURE",9:"KRX100",10:"KRX자동차",11:"KRX반도체",12:"KRX바이오",13:"KRX은행",15:"KRX에너지화학",16:"KRX철강",18:"KRX미디어통신",19:"KRX건설",21:"KRX증권",22:"KRX선박",23:"KRX보험",24:"KRX운송",25:"KOSDAQ150"}
+    tags.extend(name for i,name in flags.items() if fields[i]=="Y")
+    return sorted(set(tags))
+
 def parse_master(text, market):
     _, tail, widths, flags = SPECS[market]
     if sum(widths) != tail:
@@ -46,8 +62,9 @@ def parse_master(text, market):
         if (halt,liquidation,managed,warning,preferred,spac) != ("N","N","N","00","0","N"):
             continue
         sectors = sorted(set(str(int(x)).zfill(4) for x in fields[2:5] if re.fullmatch(r"\d{4}",x) and int(x)>0))
-        if sectors:
-            rows.append(dict(market=market,code=code,name=name,sectors=sectors))
+        tags=index_tags(fields,market)
+        if sectors or tags:
+            rows.append(dict(market=market,code=code,name=name,sectors=sectors,index_tags=tags))
     return rows
 
 def download(market):
