@@ -21,3 +21,10 @@
 .blue-research .blue-periods{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:5px;margin:10px 0}
 .blue-research .blue-periods button{padding:7px 2px;min-width:0}
 .blue-research .blue-note{font-size:13px;line-height:1.55;padding:10px;border-radius:9px;background:#819bc015;margin:8px 0}
+
+.blue-research .blue-filter-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin:10px 0}
+.blue-research .blue-filter-grid label{display:flex;flex-direction:column;gap:5px;font-size:12px;min-width:0}
+.blue-research .blue-filter-grid select{width:100%;box-sizing:border-box;min-height:40px}
+.blue-research .blue-category-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px;margin:8px 0}
+.blue-research .blue-category-grid button{padding:8px 3px;min-width:0}
+.blue-research .blue-pattern-heading{display:flex;align-items:center;gap:9px}.blue-research .blue-pattern-heading svg{flex-shrink:0;color:#7088aa}
