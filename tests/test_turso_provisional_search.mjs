@@ -114,16 +114,23 @@ test('published provisional endpoint reads only promoted generation; EOD takes p
     const meta={day,status:'KIS_PROVISIONAL',pattern_confirmed:false,scan_asof_utc:at,observed:3,eligible:2,
       quote_coverage:{reference:ref,turnoverAvailable:1},history_metadata:{reference:ref},audit:{matched_stocks:2}};
     db.prepare('INSERT INTO blue_provisional_pattern_head_v1 VALUES(?,?,?,?,?,?,?)').run(day,ref,id,at,at,2,JSON.stringify(meta));
-    const row=(code,name,amount)=>JSON.stringify({code,name,date:day,close:100,signals:code==='000660'?'ENV20,BB20':'ENV40',rsi_gc:code==='000660',ma112_cross:code==='000660',ma20:10,ma40:20,ma60:30,amount_ratio20:amount===null?null:2,observed_at_utc:at,
+    const row=(code,name,amount)=>JSON.stringify({code,name,market:'KOSPI',date:day,close:100,rsi:55.2,r159_pattern_up_10d:99,signals:code==='000660'?'ENV20,BB20':'ENV40',rsi_gc:code==='000660',ma112_cross:code==='000660',ma20:10,ma40:20,ma60:30,amount_ratio20:amount===null?null:2,observed_at_utc:at,
       provisional:true,pattern_confirmed:false,source:'KIS_PROVISIONAL',turnover_available:amount!==null,traded_amount_krw:amount});
     const insert=db.prepare('INSERT INTO blue_provisional_pattern_rows_v1 VALUES(?,?,?,?)');
-    insert.run(id,'000660',row('000660','SK하이닉스',100000000),'hash');
+    db.exec("CREATE TABLE blue_symbol_directory_v1(code TEXT PRIMARY KEY,name TEXT,market TEXT,asof_day TEXT); INSERT INTO blue_symbol_directory_v1 VALUES('000660','SK하이닉스','KOSPI','2026-11-19');");
+    insert.run(id,'000660',row('000660','000660',100000000),'hash');
     insert.run(id,'005930',row('005930','삼성전자',null),'hash');
     insert.run('b'.repeat(64),'999999',row('999999','미공개',100),'hash');
     const result=await query({});
     assert.equal(result.data_status,'KIS_PROVISIONAL_PATTERNS');
     assert.equal(result.total,2);assert.equal(result.items[1].traded_amount_krw,null);
     assert.equal(result.items[0].traded_amount_krw,100000000);
+    assert.equal(result.items[0].name,'SK하이닉스');
+    assert.equal(result.items[0].extras.rsi,55.2);
+    assert.equal(result.items[0].extras.traded_amount_krw,100000000);
+    assert.equal(result.items[0].extras.r159_pattern_up_10d,undefined);
+    assert.equal(result.items[1].extras.amount_ratio20,null);
+    assert.equal((await query({q:'하이닉스'})).items[0].code,'000660');
     assert.deepEqual(result.items[0].signals,['ENV20','BB20']);
     assert.equal((await query({q:'삼성'})).items[0].code,'005930');
     assert.equal((await query({q:'%'})).total,0);
@@ -149,5 +156,11 @@ test('main search requests published KIS snapshot before missing EOD fast path',
   const web=readFileSync(new URL('../web/src/main.tsx',import.meta.url),'utf8');
   assert.ok(web.indexOf("API+'/api/research/provisional-patterns'")<web.indexOf('// Fast path: a day later'));
   assert.match(web,/setTotal\(live\.total\)/);
-  assert.match(web,/TursoProvisionalPatterns state=\{activeProvisional\}/);
+  assert.match(web,/setRows\(live\.items\.map/);
+  assert.doesNotMatch(web,/<TursoProvisionalPatterns\b/);
+  assert.match(web,/className="stock-card"/);
+  assert.match(web,/r\.provisional\?'KIS 관측가':'종가'/);
+  assert.match(web,/canBasket=\(r:Signal\)=>!r\.provisional/);
+  assert.match(web,/rows\.some\(r=>r\.provisional\)/);
+  assert.match(web,/activeProvisional\?\.limit\?\?100/);
 });
