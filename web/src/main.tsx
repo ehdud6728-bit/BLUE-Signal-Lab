@@ -699,7 +699,7 @@ function App(){
   // Never promote frequency growth or exploratory tomato observations to gold.
   // Only a future, independently verified Turso v2 recommendation can qualify.
   const goldSignal=(r:Signal)=>validatedResearchSignal(r,storageMode==='turso'&&searchSource==='patterns'&&patternBackend==='turso');
-  const recentMatch=(r:Signal)=>patternBackend==='turso'&&matchedRecent(r.day,r.signals,r.extras?.audited_candle_features).length>0;
+  const recentMatch=(r:Signal)=>patternBackend==='turso'&&matchedRecent(r.day,r.signals,r.extras?.audited_candle_features,true).length>0;
   const stockHighlight=(r:Signal)=>researchCardClasses(goldSignal(r)!==null||recentMatch(r),patternUp(r)!==null);
   const goldEvidenceBlock=(r:Signal)=>{const signal=goldSignal(r);
     return signal?<div className="r-research-gold-label" role="note">★ 검증 연구 추천 패턴 · {showSignal(signal)}</div>:null;};
