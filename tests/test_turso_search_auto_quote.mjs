@@ -29,3 +29,15 @@ test('search automatic requests are bounded, independent from D1 and user click'
  assert.match(instant,/INSTANT_PER_MINUTE=12/);
  assert.doesNotMatch(instant,/tokenP\(/);
 });
+
+test('timestamped same-day quote becomes stale after 15 minutes',()=>{
+ const now=new Date('2026-11-20T06:00:00.000Z');
+ const item={code:'005930',day:'2026-11-19'};
+ const check=(latest_at)=>missingKisSearchQuotes([item],{
+  '005930:2026-11-19':{latest_price:65000,latest_day:day,latest_at}
+ },day,100,now);
+ assert.deepEqual(check('2026-11-20T05:50:00.000Z'),[]);
+ assert.deepEqual(check('2026-11-20T05:40:00.000Z'),[item]);
+ assert.deepEqual(check('2026-11-20T06:05:00.000Z'),[item]);
+ assert.deepEqual(check(null),[]);
+});
