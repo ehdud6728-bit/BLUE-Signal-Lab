@@ -57,7 +57,7 @@ type ScanStatus = 'READY'|'NOT_IMPORTED'|'PENDING'|'FAILED'|'';
 type Line = {signal:string;price:number;gap_from_close_pct:number;slope_pct:number|null;status:string};
 type GcKey='rsi'|'slow14'|'slow12'|'slow20'|'macd';
 type TechKey='inverse'|'ma112'|'ma224';
-type ResultSort='recent'|'highest_gain'|'lowest_return'|'amount_surge'|'amount_decline';
+type ResultSort='recommended'|'recent'|'highest_gain'|'lowest_return'|'amount_surge'|'amount_decline';
 const TECH_OPTIONS:{key:TechKey;label:string}[]=[
   {key:'inverse',label:'역배열 (20<40<60)'},
   {key:'ma112',label:'112일선 상향 돌파'},
@@ -148,8 +148,8 @@ function App(){
   const [selected,setSelected]=useState<Signal|null>(null);
   const [localQuery,setLocalQuery]=useState('');
   const [appliedNameQuery,setAppliedNameQuery]=useState('');
-  const [resultSort,setResultSort]=useState<ResultSort>('recent');
-  const [appliedSort,setAppliedSort]=useState<ResultSort>('recent');
+  const [resultSort,setResultSort]=useState<ResultSort>('recommended');
+  const [appliedSort,setAppliedSort]=useState<ResultSort>('recommended');
   const [gcFields,setGcFields]=useState<GcKey[]>([]);
   const [gcLogic,setGcLogic]=useState<'any'|'all'>('any');
   const [techFields,setTechFields]=useState<TechKey[]>([]);
@@ -499,7 +499,8 @@ function App(){
     const serial=++searchVersion.current;
     const queryAmountEok=patternOverride?.amountEok??amountEok;
     const queryName=(queryOverride?.q??appliedNameQuery).trim();
-    const querySort=queryOverride?.sort??appliedSort;
+    const desiredSort=queryOverride?.sort??appliedSort;
+    let querySort=desiredSort==='recommended'&&patternBackend!=='turso'?'recent':desiredSort;
     if(!Number.isInteger(queryAmountEok)||queryAmountEok<0||queryAmountEok>50000){
       setError('거래대금은 0~50,000억원 사이 정수로 입력하세요.');return;
     }
@@ -523,6 +524,7 @@ function App(){
       // Results-panel controls apply immediately without waiting for React state updates.
       const effectiveOnlyPattern=patternOverride?.enabled??onlyPattern;
       const effectiveHighlightMin=patternOverride?.threshold!==undefined?patternOverride.threshold:highlightMin;
+      if(patternBackend==='turso')u.searchParams.set('highlight_up',effectiveHighlightMin===null?'off':String(effectiveHighlightMin));
       if(effectiveOnlyPattern&&effectiveHighlightMin!==null){
         u.searchParams.set('only_pattern','1');u.searchParams.set('min_pattern_up',String(effectiveHighlightMin));
       }
@@ -542,7 +544,7 @@ function App(){
       let r=await fetch(u.toString(),{credentials:'include',cache:'no-store'});
       // D1 is only a secondary path. An HTTP 400 means the query was invalid
       // and must not silently turn into a different source/result.
-      if(patternBackend==='turso'&&r.status>=500){
+      if(patternBackend==='turso'&&r.status>=500&&querySort!=='recommended'){
         u.pathname='/api/search';
         r=await fetch(u.toString(),{credentials:'include',cache:'no-store'});
         if(r.ok){setPatternBackend('d1');setPatternSourceError('Turso 패턴 검색 불가 · D1 보조 DB로 전환됨');}
@@ -558,7 +560,7 @@ function App(){
       setRows(d.items||[]);setDays(d.daily_counts||[]);
       setTotal(d.data_status==='NOT_IMPORTED'?null:d.total);
       setPage(p);setSelected(null);setDataStatus(d.data_status||'');
-      setAppliedNameQuery(queryName);setAppliedSort(querySort);
+      setAppliedNameQuery(queryName);setAppliedSort(querySort);setResultSort(querySort);
       setAppliedAmountEok(queryAmountEok);
       if(scroll&&d.data_status!=='NOT_IMPORTED'){
         setFilterOpen(false);
@@ -1163,6 +1165,7 @@ function App(){
                 <option value="highest_gain">발견가 대비 확인 최고 수익률순</option>
                 <option value="lowest_return">발견가 대비 확인 최저 수익률순</option>
                 <option value="amount_surge">20일 평균 거래대금 증가율 높은순</option>
+                <option value="recommended" disabled={patternBackend!=='turso'}>추천 패턴 우선 (최대 2,000건)</option>
                 <option value="amount_decline">20일 평균 거래대금 감소율 큰순</option>
               </select>
             </label>

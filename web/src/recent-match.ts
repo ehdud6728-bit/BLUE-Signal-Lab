@@ -1,4 +1,4 @@
-import {RECENT_ASOF,RECENT_RECOMMENDATIONS} from './recent-pattern-data';
+import {RECENT_ASOF,RECENT_RECOMMENDATIONS} from './recent-pattern-data.ts';
 export function matchedRecent(day:string,signals:string[],features:unknown){
  if(day<=RECENT_ASOF||!Array.isArray(features))return [];
  return RECENT_RECOMMENDATIONS.filter(r=>{
