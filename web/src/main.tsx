@@ -1,6 +1,7 @@
 import {RECENT_ASOF,RECENT_RECOMMENDATIONS} from './recent-pattern-data';
 import RecentPatternReference from './RecentPatternReference';
 import RecentPatternRanking from './RecentPatternRanking';
+import AdaptiveRadar from './AdaptiveRadar';
 import StockChart from './StockChart';
 import LiveMarket from './LiveMarket';
 import SmartBasket, {type BasketQuickAddRequest} from './SmartBasket';
@@ -219,6 +220,7 @@ function App(){
   const [tursoStartedAt,setTursoStartedAt]=useState(0);
   const [tursoFinishedAt,setTursoFinishedAt]=useState(0);
   const [filterOpen,setFilterOpen]=useState(false);
+  const [aiResearchTab,setAiResearchTab]=useState<'overview'|'ranking'|'recommend'|'radar'>('overview');
   const [installPrompt,setInstallPrompt]=useState<InstallPrompt|null>(null);
   const [installGuide,setInstallGuide]=useState(false);
   const [standalone,setStandalone]=useState(false);
@@ -1004,7 +1006,7 @@ function App(){
         <div className={'r152-ai-content '+(activeView==='ai'?'':'r151-hidden')}>
           {storageMode==='d1'&&mode==='single'&&latest&&date>latest&&<p className="r159-data-note">{date}에는 저장된 확정 일봉이 없어, AI 시황은 최근 저장일 {latest} 기준으로 조회합니다.</p>}
           {storageMode==='turso'&&activeView==='ai'&&<section ref={aiRef} id="ai-panel" className="r152-ai-section">
-            <TursoAiReadiness key={r1594AiRefresh} api={API} active={true}/>
+            <div className="blue-research"><div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:12}}>{(["overview","ranking","recommend","radar"] as const).map((t,i)=><button type="button" key={t} aria-pressed={aiResearchTab===t} onClick={()=>setAiResearchTab(t)}>{["종합","패턴 순위","단기 추천","시장 변화·이력"][i]}</button>)}</div>{aiResearchTab==="overview"?<TursoAiReadiness key={r1594AiRefresh} api={API} active={true}/>:aiResearchTab==="radar"?<AdaptiveRadar/>:<RecentPatternRanking section={aiResearchTab}/>}</div>
           </section>}
           {storageMode==='d1'&&<section ref={aiRef} id="ai-panel" className="r152-ai-section">
             <AiWidget key={'market-'+aiReportDay+'-'+r1594AiRefresh} kind="market"
@@ -1016,7 +1018,7 @@ function App(){
           </section>}
         </div>
         <div className={'r151-research-content '+(activeView==='research'?'':'r151-hidden')}>
-          <RecentPatternRanking/>
+          {storageMode==="turso"&&<div className="blue-research blue-research-card"><strong>AI 패턴 브리핑</strong><small>{RECENT_ASOF} 기준 · 단기 추천 조건 {RECENT_RECOMMENDATIONS.filter(x=>x.tier==="SHORT_RECOMMENDATION").length}개 · 과거 관측 연구</small><button type="button" className="filter-toggle" onClick={()=>{setAiResearchTab("recommend");nav("ai");}}>상세 연구 보기</button></div>}
         {storageMode==='turso'&&searchSource==='daily'&&<TursoEodRecovery key={eodRefresh} api={API} dates={tursoDays} onUnavailable={onTursoUnavailable}/>}
         <div className="stats" ref={summaryRef} id="summary-panel">
           <div className="metric"><span>검색 결과</span><strong>{total==null?'—':total.toLocaleString()}</strong><small>종목</small></div>
@@ -1177,7 +1179,7 @@ function App(){
                  <div><b>{displayName(r)}</b><div className="small">{r.code} · {amountLabel(r)}</div>
                  <div className="r15125-amount-change">{amountChange(r)}{sortedPercent(r)&&<span> · {sortedPercent(r)}</span>}</div>
                  {goldEvidenceBlock(r)}
-              <RecentPatternReference day={r.day} signals={r.signals} matched={recentMatch(r)}/>
+              <RecentPatternReference day={r.day} signals={r.signals} matched={recentMatch(r)} onDetails={storageMode==="turso"?()=>{setAiResearchTab(recentMatch(r)?"recommend":"ranking");nav("ai");}:undefined}/>
                  {patternEvidenceBlock(r)}
                  {patternDays(r).length>0&&<div className="r1599-pattern-dates" title={patternDays(r).join(' · ')}>과거 신호일 {patternDays(r).slice(-3).join(' · ')}{patternDays(r).length>3?' 외':''}</div>}</div>
                  <button type="button" className={'r151-quick-add '+(inBasket(r)?'saved':'')}
@@ -1206,7 +1208,7 @@ function App(){
                 aria-label={`${displayName(r)} 상세 분석 보기`}>
               <div className="stock-top"><div className="stock-identity"><strong>{displayName(r)}</strong><span>{r.code} <span className="stock-dot">·</span> {r.day}</span></div><div className="stock-price"><b>{money(r.close_price)}<small>원</small></b><span>종가</span></div><ChevronRight size={19} className="stock-chevron"/></div>
               {goldEvidenceBlock(r)}
-              <RecentPatternReference day={r.day} signals={r.signals} matched={recentMatch(r)}/>
+              <RecentPatternReference day={r.day} signals={r.signals} matched={recentMatch(r)} onDetails={storageMode==="turso"?()=>{setAiResearchTab(recentMatch(r)?"recommend":"ranking");nav("ai");}:undefined}/>
               {patternEvidenceBlock(r)}
               <PriceCompareMini compact data={r1593Prices[comparisonKey(r)]} baseline={r.close_price} loading={r1593Busy&&!r1593Prices[comparisonKey(r)]}
                 onRequest={()=>{void requestMissingQuote(r);}} requesting={r1595Requesting===comparisonKey(r)}
