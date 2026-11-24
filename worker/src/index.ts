@@ -10,6 +10,7 @@ import {lookupSymbolAnalysis,lookupSymbolDirectory,validAnalysisCode} from './sy
 import {lookupSymbolLive,requestSymbolLive,validLiveCode} from './symbol-live';
 import {runEodCloudflareCron} from './eod-cron';
 import {InvalidEodQuery,tursoEodDates,tursoEodSearch,tursoEodCompare} from './turso-eod';
+import {tursoMarketRotation} from './turso-market-rotation';
 import {InvalidResearchQuery,tursoResearchDates,tursoResearchSearch,tursoResearchChart,tursoResearchCoverage,tursoPatternPulse,tursoExitStudyReport} from './turso-research';
 import {InvalidTursoResearchRequest,requestTursoResearch,tursoResearchRequestStatus} from './turso-research-request';
 import {InvalidProvisionalQuery,tursoProvisionalSearch} from './turso-provisional-search';
@@ -143,6 +144,10 @@ export default {
         try{return respond(await tursoProvisionalSearch(env,u.searchParams));}
         catch(e){if(e instanceof InvalidProvisionalQuery)return respond({error:e.message},400);
           return respond({error:'TURSO_PROVISIONAL_UNAVAILABLE'},503);}
+      }
+      if(p==='/api/research/market-rotation'&&request.method==='GET'){
+        try{return respond(await tursoMarketRotation(env));}
+        catch{return respond({error:'TURSO_MARKET_ROTATION_UNAVAILABLE'},503);}
       }
       if(p==='/api/research/coverage'&&request.method==='GET'){
         try{return respond(await tursoResearchCoverage(env));}
