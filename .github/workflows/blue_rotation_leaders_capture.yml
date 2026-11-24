@@ -7,6 +7,11 @@ on:
         options: [plan, inspect, apply]
         default: plan
         required: true
+      refresh_trends:
+        description: 'apply only: refresh dated industry history before candidate ranking to establish previous quadrant'
+        type: boolean
+        default: false
+        required: true
   pull_request:
     paths:
       - 'collector/src/rotation-leaders*'
@@ -16,7 +21,7 @@ on:
 permissions:
   contents: read
 concurrency:
-  group: blue-rotation-leaders-capture
+  group: blue-market-trends-capture
   cancel-in-progress: false
 jobs:
   capture:
@@ -33,6 +38,14 @@ jobs:
       - run: npm install --prefix collector --no-package-lock --no-audit --no-fund
       - run: python -m unittest discover -s tests -p test_kis_sector_master.py
       - run: node --test collector/src/rotation-leaders.test.mjs
+      - name: Refresh dated industry history (explicit apply only)
+        if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && inputs.mode == 'apply' && inputs.refresh_trends
+        env:
+          TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
+          TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
+          KIS_APP_KEY: ${{ secrets.KIS_APP_KEY }}
+          KIS_APP_SECRET: ${{ secrets.KIS_APP_SECRET }}
+        run: node collector/src/market-trends.mjs apply
       - name: Download current official master (inspect/apply only)
         if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && inputs.mode != 'plan'
         run: python scripts/kis_sector_master.py --output output/rotation/master.json
