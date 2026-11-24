@@ -213,7 +213,7 @@ def backtest(history:pd.DataFrame,asof:str, *, outcome_cutoff=None):
     """
     s=history.loc[history.date.le(pd.Timestamp(asof))].sort_values('date').reset_index(drop=True)
     if len(s)<260:return {'version':'R10_MULTIFACTOR_V2','asof':asof,'status':'INSUFFICIENT_HISTORY',
-                          'history_start':str(s.date.iloc[0].date()) if len(s) else None,'history_end':asof,
+                          'history_start':str(s.date.iloc[0].date()) if len(s) else None,'history_end':asof if outcome_cutoff is None else str(pd.Timestamp(outcome_cutoff).date()),
                           'active_factors':[],'setups':[], 'baseline':{},'sector_lag':{'status':'NOT_AVAILABLE'}}
     d=enrich(s)
     f,anchor_names=_feature_matrix(d)
