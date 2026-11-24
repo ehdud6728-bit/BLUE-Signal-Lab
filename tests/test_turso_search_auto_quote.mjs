@@ -24,6 +24,8 @@ test('search automatic requests are bounded, independent from D1 and user click'
  const web=readFileSync(new URL('../web/src/main.tsx',import.meta.url),'utf8');
  const instant=readFileSync(new URL('../collector/src/turso-direct.mjs',import.meta.url),'utf8');
  assert.match(web,/missingKisSearchQuotes\(rows,result,today\)/);
+ assert.match(web,/quoteWindow=Math\.floor\(Date\.now\(\)\/(15\*60\*1000)\)/);
+ assert.match(web,/autoQuoteAttempted\.current\.add\(today\+':'\+quoteWindow\+':'\+item\.code\)/);
  assert.match(web,/refreshKisQuoteToTurso\(item\.code,ctrl\.signal\)/);
  assert.match(web,/fetchComparedTursoOnly\(\[item\],ctrl\.signal\)/);
  assert.match(instant,/INSTANT_PER_MINUTE=12/);
