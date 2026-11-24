@@ -257,15 +257,18 @@ function App(){
       const hhmm=Number(clock.hour)*60+Number(clock.minute);
       if(!['Mon','Tue','Wed','Thu','Fri'].includes(clock.weekday)||hhmm<540||hhmm>=1320)return;
       const today=todayKST();
+      // A fresh search can recheck a stale quote in a later 15-minute window.
+      // This remains bounded by the existing KIS server-side rate limits.
+      const quoteWindow=Math.floor(Date.now()/(15*60*1000));
       const missing=missingKisSearchQuotes(rows,result,today).filter(item=>
-        !autoQuoteAttempted.current.has(today+':'+item.code));
+        !autoQuoteAttempted.current.has(today+':'+quoteWindow+':'+item.code));
       if(!missing.length)return;
       void (async()=>{
         let refreshed=0;
         setR1593AutoStatus(`최신가 없는 ${missing.length}종목 KIS 자동 조회 시작 · 검색 결과는 바로 사용 가능`);
         for(let i=0;i<missing.length&&!ctrl.signal.aborted;i++){
           const item=missing[i];
-          autoQuoteAttempted.current.add(today+':'+item.code);
+          autoQuoteAttempted.current.add(today+':'+quoteWindow+':'+item.code);
           try{
             const fetched=await refreshKisQuoteToTurso(item.code,ctrl.signal);
             if(['SAVED','COOLDOWN'].includes(fetched.status)){
