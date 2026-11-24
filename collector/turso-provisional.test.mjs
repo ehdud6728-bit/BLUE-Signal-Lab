@@ -293,3 +293,16 @@ test('provisional writer rejects a final-day or non-KRX quote even with valid OH
   assert.throws(()=>provisionalStatements([{...afterClose,is_confirmed_daily:true}]),
     /INVALID_PROVISIONAL_QUOTE/);
 });
+
+ test('production configuration enables full mode and preserves emergency pause',async()=>{
+ const {readFileSync}=await import('node:fs');
+ const config=JSON.parse(readFileSync(new URL('./wrangler.jsonc',import.meta.url),'utf8'));
+ assert.equal(tursoProvisionalMode(config.vars,NOW),'FULL');
+ assert.equal(tursoProvisionalMode({...config.vars,TURSO_PROVISIONAL_PAUSED:'true'},NOW),'OFF');
+ assert.equal(config.vars.TURSO_MIRROR_ENABLED,'false');
+ });
+ test('counts actual turnover and missing turnover separately',async()=>{
+ const {db}=mockDb();let n=0;
+ const r=await collectTursoProvisional(env({TURSO_PROVISIONAL_QUOTES_ENABLED:'true'}),NOW,deps(db,{quote:async()=>quote(++n===1?{acml_tr_pbmn:'123456'}:{})}));
+ assert.equal(r.turnover_valid,1);assert.equal(r.turnover_missing,1);
+ });
