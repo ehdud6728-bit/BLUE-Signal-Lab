@@ -164,3 +164,39 @@ test('main search requests published KIS snapshot before missing EOD fast path',
   assert.match(web,/rows\.some\(r=>r\.provisional\)/);
   assert.match(web,/activeProvisional\?\.limit\?\?100/);
 });
+
+test('KIS AI matches require exact stored candle, count and sort before paging',async()=>{
+  const {tursoPublishedProvisional,provisionalCandleFeatures}=await import('../worker/src/turso-published-provisional.ts');
+  const {RECENT_ASOF}=await import('../web/src/recent-pattern-data.ts');
+  const day=new Date(Date.parse(RECENT_ASOF+'T00:00:00Z')+86400000).toISOString().slice(0,10);
+  const at=day+'T01:00:00Z',clock=new Date(day+'T02:00:00Z'),id='c'.repeat(64);
+  const db=new DatabaseSync(':memory:');
+  try{
+    db.exec('CREATE TABLE blue_eod_ingest_audit_v1(trade_day TEXT PRIMARY KEY,row_count INTEGER); CREATE TABLE blue_provisional_pattern_head_v1(trade_day TEXT,reference_day TEXT,snapshot_id TEXT,latest_observed_utc TEXT,scan_asof_utc TEXT,row_count INTEGER,metadata_json TEXT); CREATE TABLE blue_provisional_pattern_rows_v1(snapshot_id TEXT,code TEXT,record_json TEXT,row_sha256 TEXT);');
+    db.prepare('INSERT INTO blue_eod_ingest_audit_v1 VALUES(?,2660)').run(RECENT_ASOF);
+    const meta={day,status:'KIS_PROVISIONAL',pattern_confirmed:false,scan_asof_utc:at,observed:12,eligible:12,quote_coverage:{reference:RECENT_ASOF,turnoverAvailable:12},history_metadata:{reference:RECENT_ASOF},audit:{matched_stocks:12}};
+    db.prepare('INSERT INTO blue_provisional_pattern_head_v1 VALUES(?,?,?,?,?,?,?)').run(day,RECENT_ASOF,id,at,at,12,JSON.stringify(meta));
+    const insert=db.prepare('INSERT INTO blue_provisional_pattern_rows_v1 VALUES(?,?,?,?)');
+    for(let i=1;i<=12;i++){
+      const code=String(i).padStart(6,'0');
+      const candle=i===12?{open:80,high:125,low:75,close:100}:{open:100,high:125,low:75,close:100};
+      insert.run(id,code,JSON.stringify({code,name:code,market:'KOSPI',date:day,close:100,signals:'ENV20_LOWER_TOUCH',observed_at_utc:at,
+        provisional:true,pattern_confirmed:false,source:'KIS_PROVISIONAL',turnover_available:true,traded_amount_krw:100000000,kis_candle:candle}),'hash');
+    }
+    const factory=()=>({async execute(cmd){assert.match(cmd.sql,/^SELECT\b/);return {rows:db.prepare(cmd.sql).all(...cmd.args)};},close(){}});
+    const query=q=>tursoPublishedProvisional(env,new URLSearchParams({date:day,...q}),factory,clock);
+    assert.deepEqual(provisionalCandleFeatures({open:80,high:125,low:75,close:100},100),['BULL','BODY_30_50','CLOSE_MID']);
+    assert.equal(provisionalCandleFeatures({open:80,high:125,low:75,close:99},100),null);
+    const ordinary=await query({});
+    assert.equal(ordinary.total,12);assert.equal(ordinary.ai_count,1);assert.equal(ordinary.items.length,10);
+    assert.equal((await query({sort:'recommended'})).items[0].code,'000012');
+    const only=await query({ai_only:'1'});
+    assert.equal(only.total,1);assert.equal(only.unfiltered_total,12);assert.equal(only.ai_only,true);
+    assert.equal(only.items[0].code,'000012');
+    assert.deepEqual(only.items[0].extras.provisional_candle_features,['BULL','BODY_30_50','CLOSE_MID']);
+    assert.equal((await query({q:'000001',ai_only:'1'})).total,0);
+    db.prepare("UPDATE blue_provisional_pattern_rows_v1 SET record_json=json_remove(record_json,'$.kis_candle') WHERE code=?").run('000012');
+    const old=await query({ai_only:'1'});
+    assert.equal(old.ai_count,null);assert.equal(old.ai_only,false);assert.equal(old.ai_evidence_count,11);
+  }finally{db.close();}
+});
