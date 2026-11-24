@@ -16,14 +16,36 @@ const price=x=>typeof x==='string'&&/^\d+(\.\d+)?$/.test(x.trim())&&Number.isFin
 const obj=x=>Array.isArray(x)?x.length===1?x[0]:null:x&&typeof x==='object'?x:null;
 const code=x=>typeof x==='string'&&/^\d{1,5}$/.test(x.trim())?String(Number(x)).padStart(4,'0'):null;
 const normalizeGlobal=x=>typeof x==='string'?x.trim().toUpperCase().replace(/^\./,''):'';
+const normalizeName=x=>typeof x==='string'?x.normalize('NFKC').trim().toUpperCase().replace(/[\s·._-]/g,''):'';
+const GLOBAL_NAMES={
+  DJI:['다우산업','다우30','다우존스','다우존스산업평균','다우존스산업평균지수','DOW JONES INDUSTRIAL AVERAGE'],
+  NDX:['나스닥100','나스닥100지수','NASDAQ 100','NASDAQ 100 INDEX'],
+  SPX:['S&P500','S&P500지수','S&P 500 INDEX'],
+  SOX:['필라델피아반도체지수','PHILADELPHIA SEMICONDUCTOR INDEX'],
+  VIX:['VIX','VIX지수','CBOE VOLATILITY INDEX'],
+};
+// Never override an explicit conflicting symbol with the requested code or name.
+export function globalIdentity(s,expected){
+  if(!s)return 'NO_SUMMARY';
+  const want=normalizeGlobal(expected),actual=normalizeGlobal(s.stck_shrn_iscd);
+  if(!GLOBAL_NAMES[want])return 'UNKNOWN_REQUEST';
+  if(actual&&actual!==want)return 'CODE_MISMATCH';
+  const name=normalizeName(s.hts_kor_isnm);
+  const matching=GLOBAL_NAMES[want].some(x=>normalizeName(x)===name);
+  const conflict=Object.entries(GLOBAL_NAMES).some(([k,names])=>k!==want&&names.some(x=>normalizeName(x)===name));
+  if(conflict)return 'NAME_MISMATCH';
+  return actual===want?'EXACT_CODE':matching?'EXACT_NAME_NO_CODE':'CODE_MISSING';
+}
 const pause=ms=>new Promise(r=>setTimeout(r,ms));
 const rounded=x=>Math.round(x*10000)/10000;
 const hash=x=>createHash('sha256').update(x).digest('hex');
 export function parseHistory(body,expected,start,end,overseas=false){
   if(body?.rt_cd!=='0')throw Error('HISTORY_PROVIDER_REJECTED');
   const s=obj(body.output1);
-  if(!s||!(overseas?normalizeGlobal(s.stck_shrn_iscd)===normalizeGlobal(expected):code(s.bstp_cls_code)===expected))
-    throw Error('HISTORY_IDENTITY_UNVERIFIED');
+  if(overseas){
+    const identity=globalIdentity(s,expected);
+    if(!['EXACT_CODE','EXACT_NAME_NO_CODE'].includes(identity))throw Error('HISTORY_IDENTITY_'+identity);
+  }else if(!s||code(s.bstp_cls_code)!==expected)throw Error('HISTORY_IDENTITY_UNVERIFIED');
   const list=body.output2;
   if(!Array.isArray(list)||list.length>150)throw Error('HISTORY_RESPONSE_INVALID');
   const seen=new Set(),out=[];
@@ -59,7 +81,8 @@ export function globalSummary(series){
 }
 export async function captureTrends(env=process.env,{mode='plan',now=new Date(),factory=createClient,token=tursoDirectCachedToken,fetchFn=fetch,wait=pause}={}){
   if(mode==='plan')return {status:'PLAN_ONLY',kis_calls:0,turso_writes:0};
-  if(!['inspect','apply'].includes(mode))throw Error('INVALID_TREND_MODE');
+  if(!['inspect','apply','global_inspect','global_apply'].includes(mode))throw Error('INVALID_TREND_MODE');
+  const globalOnly=mode.startsWith('global_');
   const url=String(env.TURSO_DATABASE_URL||''),authToken=String(env.TURSO_AUTH_TOKEN||'');
   if(!/^(libsql|https):\/\//.test(url)||!authToken)throw Error('TREND_DB_NOT_CONFIGURED');
   const db=factory({url,authToken,intMode:'string'});
@@ -68,11 +91,6 @@ export async function captureTrends(env=process.env,{mode='plan',now=new Date(),
     if(!auth.token)throw Error('TREND_TOKEN_NOT_READY');
     const receipt=localDay(now,'Asia/Seoul'),end=prior(receipt,1),usEnd=prior(localDay(now,'America/New_York'),1);
     const start=prior(end,55),usStart=prior(usEnd,55);
-    const r=await db.execute({sql:'SELECT receipt_day,payload_json FROM blue_market_rotation_v1 WHERE receipt_day<=? ORDER BY receipt_day DESC LIMIT 1',args:[receipt]});
-    if(!r.rows.length)throw Error('TREND_CATEGORY_CAPTURE_REQUIRED');
-    const category=JSON.parse(String(r.rows[0].payload_json));
-    if(category.schema!=='BLUE_KIS_MARKET_V1'||category.receipt_day!==r.rows[0].receipt_day||
-      !validDay(category.receipt_day)||category.receipt_day>receipt||!Array.isArray(category.markets)||category.markets.length!==2)throw Error('TREND_BAD_CATEGORY');
     let calls=0;
     async function get(expected,overseas=false){
       if(calls>=160)throw Error('TREND_CALL_CAP');
@@ -88,18 +106,44 @@ export async function captureTrends(env=process.env,{mode='plan',now=new Date(),
       const body=await res.json();
       if(body?.msg_cd==='EGW00201')throw Error('TREND_PROVIDER_STOP');
       if(['M','F'].includes(res.headers.get('tr_cont')))throw Error('HISTORY_CONTINUATION_REQUIRED');
+      if(overseas){
+        const identity=body?.rt_cd==='0'?globalIdentity(obj(body.output1),expected):'PROVIDER_REJECTED';
+        console.log('BLUE_GLOBAL_INDEX_PROBE',JSON.stringify({request:expected,identity,
+          rows:Array.isArray(body?.output2)?body.output2.length:null}));
+      }
       return parseHistory(body,expected,lo,hi,overseas);
     }
     const safe=async(expected,overseas=false)=>{try{return {series:await get(expected,overseas),reason:null};}
       catch(e){if(['TREND_PROVIDER_STOP','TREND_CALL_CAP'].includes(e?.message))throw e;
         return {series:[],reason:/^HISTORY_[A-Z_]+$/.test(e?.message||'')?e.message:'HISTORY_UNAVAILABLE'};}};
     const global=[];
-    // Symbols other than the official DJI example are probes: require exact
-    // returned short code. Entitlements may prevent any of them from resolving.
     for(const [symbol,name] of GLOBAL){
-      const result=await safe(symbol,true),summary=globalSummary(result.series);
+      // Official examples include a leading dot, whereas HTS uses bare symbols.
+      // Probe both only when the first response cannot verify identity/history.
+      let result=await safe(symbol,true);
+      if(!globalSummary(result.series))result=await safe(symbol.slice(1),true);
+      const summary=globalSummary(result.series);
       global.push({symbol,name,status:summary?'AVAILABLE':'MISSING',reason:summary?null:result.reason||'INSUFFICIENT_HISTORY',summary});
     }
+    if(globalOnly){
+      const summary={status:mode==='global_inspect'?'INSPECT_ONLY':'OK',scope:'GLOBAL_ONLY',kis_calls:calls,
+        global:global.map(({symbol,status,reason})=>({symbol,status,reason}))};
+      if(mode==='global_apply'){
+        if(!global.some(x=>x.summary))return {...summary,status:'NO_USABLE_GLOBAL_HISTORY'};
+        const raw=JSON.stringify({schema:'BLUE_GLOBAL_TRENDS_V1',receipt_day:receipt,observed_at_utc:now.toISOString(),overseas_cutoff:usEnd,global});
+        const digest=hash(raw);
+        await db.execute('CREATE TABLE IF NOT EXISTS blue_global_trends_v1 (receipt_day TEXT PRIMARY KEY, observed_at_utc TEXT NOT NULL, payload_json TEXT NOT NULL, payload_sha256 TEXT NOT NULL)');
+        await db.execute({sql:'INSERT INTO blue_global_trends_v1 VALUES(?,?,?,?) ON CONFLICT(receipt_day) DO UPDATE SET observed_at_utc=excluded.observed_at_utc,payload_json=excluded.payload_json,payload_sha256=excluded.payload_sha256 WHERE excluded.observed_at_utc>blue_global_trends_v1.observed_at_utc',args:[receipt,now.toISOString(),raw,digest]});
+        const check=await db.execute({sql:'SELECT payload_json,payload_sha256 FROM blue_global_trends_v1 WHERE receipt_day=?',args:[receipt]});
+        if(check.rows[0]?.payload_json!==raw||check.rows[0]?.payload_sha256!==digest)throw Error('GLOBAL_READBACK_MISMATCH');
+      }
+      return summary;
+    }
+    const r=await db.execute({sql:'SELECT receipt_day,payload_json FROM blue_market_rotation_v1 WHERE receipt_day<=? ORDER BY receipt_day DESC LIMIT 1',args:[receipt]});
+    if(!r.rows.length)throw Error('TREND_CATEGORY_CAPTURE_REQUIRED');
+    const category=JSON.parse(String(r.rows[0].payload_json));
+    if(category.schema!=='BLUE_KIS_MARKET_V1'||category.receipt_day!==r.rows[0].receipt_day||
+      !validDay(category.receipt_day)||category.receipt_day>receipt||!Array.isArray(category.markets)||category.markets.length!==2)throw Error('TREND_BAD_CATEGORY');
     const data=[];
     for(const [market,benchmarkCode] of markets){
       const m=category.markets.find(x=>x.market===market);
