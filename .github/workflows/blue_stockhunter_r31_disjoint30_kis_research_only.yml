@@ -1,0 +1,100 @@
+name: BLUE R31 Frozen 30 Disjoint Tickers 2026 KIS OHLCV Source (RESEARCH ONLY)
+
+on:
+  pull_request:
+    paths:
+      - 'tools/turso/stockhunter-r31-new30-kis-capture.mjs'
+      - 'tools/turso/stockhunter-r31-new30-kis-capture.test.mjs'
+      - '.github/workflows/blue_stockhunter_r31_disjoint30_kis_research_only.yml'
+      - 'docs/R31_UNSEEN2026_KIS_SOURCE_KO.md'
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: 'dry_run offline; token_check existing cache only; capture fixed 30 in 2025-26'
+        type: choice
+        required: true
+        default: dry_run
+        options: [dry_run, token_check, capture]
+      confirm_r31_disjoint30_scope:
+        description: 'Required true to capture 30 NEW codes disjoint from R19 and R28, 2025-01-02 to 2026-11-20, max 240 KIS GETs'
+        type: boolean
+        required: true
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: blue-r31-stockhunter-disjoint30-2026-source
+  cancel-in-progress: false
+
+jobs:
+  offline_safety:
+    name: New-ticker overlap, offline zero-secret and KIS provenance tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Run strict no-backfill, source and secret-isolation tests
+        run: node --test tools/turso/stockhunter-r31-new30-kis-capture.test.mjs
+      - name: Dry run with zero credentials and zero remote connections
+        run: node tools/turso/stockhunter-r31-new30-kis-capture.mjs dry_run output/r31_source
+      - name: Upload offline safety status only
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: BLUE_R31_SOURCE_OFFLINE_${{ github.run_id }}
+          path: output/r31_source/R31_CAPTURE_STATUS.json
+          if-no-files-found: warn
+          retention-days: 14
+
+  manually_authorized_readonly_capture:
+    name: Authenticated read-only KIS source artifact, never evaluate strategy
+    if: github.event_name == 'workflow_dispatch' && inputs.mode != 'dry_run'
+    needs: offline_safety
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Exact repository, main, mode and user confirmation safety
+        shell: bash
+        env:
+          MODE: ${{ inputs.mode }}
+          CONFIRMED: ${{ inputs.confirm_r31_disjoint30_scope }}
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REPOSITORY" = "ehdud6728-bit/BLUE-Signal-Lab"
+          test "$GITHUB_REF" = "refs/heads/main"
+          test "$MODE" = "token_check" || test "$MODE" = "capture"
+          if [[ "$MODE" == "capture" ]]; then
+            test "$CONFIRMED" = "true"
+          fi
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install existing cached Turso token SELECT-only dependency
+        working-directory: tools/turso
+        run: npm install --no-audit --no-fund --ignore-scripts --no-package-lock
+      - name: Capture only predeclared KIS daily GETs using existing cached token
+        env:
+          MODE: ${{ inputs.mode }}
+          KIS_APP_KEY: ${{ secrets.KIS_APP_KEY }}
+          KIS_APP_SECRET: ${{ secrets.KIS_APP_SECRET }}
+          TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
+          TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
+        run: node tools/turso/stockhunter-r31-new30-kis-capture.mjs "$MODE" output/r31_source
+      - name: Upload hashed no-secret research source artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: BLUE_STOCKHUNTER_R31_DISJOINT30_${{ github.run_id }}
+          path: output/r31_source/
+          if-no-files-found: warn
+          retention-days: 30
