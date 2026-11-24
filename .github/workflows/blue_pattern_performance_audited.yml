@@ -57,7 +57,8 @@ jobs:
           python3 research/pattern_performance_audited.py --input output/pattern/source.json --output output/pattern/report.json
           python3 research/pattern_performance_windows.py --input output/pattern/source.json --output output/pattern/windows.json
           python3 research/pattern_performance_discovery.py --input output/pattern/source.json --output output/pattern/discovery.json
-          python3 research/pattern_performance_advantage.py --input output/pattern/source.json --output output/pattern/advantage.json
+          python3 research/pattern_performance_advantage.py --input output/pattern/source.json --output output/pattern/advantage.json --summary output/pattern/advantage.md
+          cat output/pattern/advantage.md >> "$GITHUB_STEP_SUMMARY"
       - name: Generate short-window web snapshot candidate
         if: github.ref == 'refs/heads/main' && (github.event_name == 'workflow_dispatch' || (github.event_name == 'schedule' && vars.BLUE_ADAPTIVE_AUTO_ENABLED == 'true')) && (inputs.sessions == '60' || github.event_name == 'schedule')
         run: |
@@ -74,6 +75,7 @@ jobs:
             output/pattern/windows.json
             output/pattern/discovery.json
             output/pattern/advantage.json
+            output/pattern/advantage.md
             output/pattern/web-snapshot.json
             output/pattern/recent-report.json
             output/pattern/recent-pattern-data.ts
