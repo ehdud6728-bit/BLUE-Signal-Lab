@@ -104,3 +104,29 @@
  .r15108-quickbar>.compact-run{grid-column:1/-1;min-height:44px;font-size:14px!important;justify-content:center}
  html{-webkit-text-size-adjust:100%;text-size-adjust:100%}
 }
+
+/* Desktop search results: use page scrolling instead of a second scroll box.
+   Keep all nine columns, wrap research evidence and long supply descriptions. */
+@media(min-width:791px){
+ .panel.result{min-width:0;max-width:100%}
+ .panel.result>.desktop-results.tablewrap{width:100%;max-width:100%;max-height:none;overflow:visible}
+ .panel.result>.desktop-results table{width:100%;table-layout:fixed;white-space:normal}
+ .panel.result>.desktop-results th,.panel.result>.desktop-results td{white-space:normal;overflow-wrap:anywhere;vertical-align:top;padding:9px 6px}
+ .panel.result>.desktop-results th:nth-child(1){width:9%}
+ .panel.result>.desktop-results th:nth-child(2){width:25%}
+ .panel.result>.desktop-results th:nth-child(3){width:13%}
+ .panel.result>.desktop-results th:nth-child(4){width:17%}
+ .panel.result>.desktop-results th:nth-child(5){width:6%}
+ .panel.result>.desktop-results th:nth-child(6){width:8%}
+ .panel.result>.desktop-results th:nth-child(7){width:7%}
+ .panel.result>.desktop-results th:nth-child(8){width:6%}
+ .panel.result>.desktop-results th:nth-child(9){width:9%}
+ .panel.result>.desktop-results th{position:static}
+ .panel.result>.desktop-results .r151-desktop-stock,.panel.result>.desktop-results .r1593-price-cell{min-width:0;max-width:100%}
+ .panel.result>.desktop-results .r151-desktop-stock{flex-wrap:wrap;align-items:flex-start}
+ .panel.result>.desktop-results .r151-desktop-stock>div{flex:1 1 100%;min-width:0;max-width:100%}
+ .panel.result>.desktop-results .tag,.panel.result>.desktop-results .r1591-search-tech,.panel.result>.desktop-results .r15108-supply-grade{max-width:100%;white-space:normal;overflow-wrap:anywhere}
+ .panel.result>.desktop-results .sr-reference,.panel.result>.desktop-results .sr-context{max-width:100%;white-space:normal;overflow-wrap:anywhere}
+ .panel.result>.desktop-results .r1593-compare-line{min-width:0;flex-wrap:wrap}
+ .panel.result>.desktop-results .r1593-compare-line>small .r1593-delta{white-space:normal}
+}
