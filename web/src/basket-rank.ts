@@ -2,6 +2,33 @@
 export type BasketRank='RECENT'|'GAIN_TOP'|'LOSS_TOP';
 export type GainBasis='CURRENT'|'HIGH'|'LOW';
 export type ObservedPrice={price:number;day:string;source:string};
+export type RecentCandidate={price:number|null|undefined;day:string|null|undefined;source:string;at?:string|null;priority:number;confirmed?:boolean};
+/** Compare trade dates first, then confirmed regular-session EOD, then actual
+ * receipt time (not exchange execution time). Unknown time never outranks
+ * known time on the same date. A discovery-day observation needs its own
+ * timestamp to prove it was not received before the provisional discovery.
+ */
+export function chooseBasketObservation(discoveryDay:string,discoveryAt:string|undefined,candidates:RecentCandidate[],now=new Date()){
+ const validDay=(v:string)=>/^20\d{2}-\d{2}-\d{2}$/.test(v)&&Number.isFinite(Date.parse(v+'T00:00:00Z'))&&new Date(v+'T00:00:00Z').toISOString().slice(0,10)===v;
+ const kstDay=(ms:number)=>new Date(ms+9*3600000).toISOString().slice(0,10);
+ const today=kstDay(now.getTime());
+ const discoveryMs=discoveryAt?Date.parse(discoveryAt):NaN;
+ const eligible=candidates.flatMap(c=>{
+  const {price,day,at}=c;
+  if(typeof price!=='number'||!Number.isFinite(price)||price<=0||!day||!validDay(day)||day<discoveryDay||day>today)return [];
+  const received=at?Date.parse(at):NaN;
+  // Later receipts of historical daily fallback may be legitimate; reject
+  // receipt before the trading day and timestamps in the future.
+  if(at&&(!Number.isFinite(received)||received>now.getTime()||kstDay(received)<day))return [];
+  if(day===discoveryDay&&(!Number.isFinite(discoveryMs)||!Number.isFinite(received)||received<discoveryMs))return [];
+  return [{price,day,source:c.source,at:at||null,priority:c.priority,confirmed:c.confirmed===true,received:Number.isFinite(received)?received:-Infinity}];
+ });
+ eligible.sort((a,b)=>b.day.localeCompare(a.day)||Number(b.confirmed)-Number(a.confirmed)||
+   (a.received===b.received?0:b.received>a.received?1:-1)||b.priority-a.priority);
+ const chosen=eligible[0];
+ return chosen?{price:chosen.price,day:chosen.day,source:chosen.source,at:chosen.at}:null;
+}
+
 type HighInputs={
  discoveryDay:string;
  performance?:{quote_day?:string|null;quote_high?:number|null;

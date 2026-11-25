@@ -1,7 +1,7 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {readFile} from 'node:fs/promises';
-import {basketReturn,highestObservedPrice,lowestObservedPrice,rankBasketRecords}
+import {basketReturn,highestObservedPrice,lowestObservedPrice,rankBasketRecords,chooseBasketObservation}
  from '../web/src/basket-rank.ts';
 
 const items=[
@@ -59,4 +59,23 @@ test('basket selector matches the shared ranking and uses clear mobile buttons',
  assert.match(basket,/aria-label="상승 TOP 10 가격 기준"/);
  assert.match(basket,/\['CURRENT','현재수익률'\],\['HIGH','관측 최고가'\],\['LOW','관측 최저가'\]/);
  assert.match(css,/r157-gain-basis/);
+});
+
+test('basket selects latest dated valid observation rather than source priority',()=>{
+ const now=new Date('2026-11-25T06:00:00Z');
+ const older={price:100,day:'2026-11-25',at:'2026-11-25T04:00:00Z',source:'Turso',priority:4};
+ const later={price:105,day:'2026-11-25',at:'2026-11-25T05:00:00Z',source:'KIS',priority:1};
+ const unknown={price:120,day:'2026-11-25',source:'legacy',priority:5};
+ const future={...older,price:999,at:'2026-11-25T06:01:00Z'};
+ const invalid={...older,day:'2026-11-26'};
+ const priorDay={...later,day:'2026-11-24'};
+ assert.equal(chooseBasketObservation('2026-11-23',undefined,[older,later,unknown,future,invalid,priorDay],now)?.price,105);
+ assert.equal(chooseBasketObservation('2026-11-23',undefined,[later,older],now)?.price,105);
+ const confirmed={...unknown,price:102,confirmed:true};
+ assert.equal(chooseBasketObservation('2026-11-23',undefined,[older,later,confirmed],now)?.price,102);
+ assert.equal(chooseBasketObservation('2026-11-23',undefined,[later,{...confirmed,day:'2026-11-24'}],now)?.price,105);
+ assert.equal(chooseBasketObservation('2026-11-25',undefined,[older,later],now),null);
+ assert.equal(chooseBasketObservation('2026-11-25','2026-11-25T04:30:00Z',[older,unknown],now),null);
+ assert.equal(chooseBasketObservation('2026-11-25','2026-11-25T04:30:00Z',[older,later,unknown],now)?.price,105);
+ assert.equal(chooseBasketObservation('2026-11-23',undefined,[{...later,at:'2026-11-24T05:00:00Z'}],now),null);
 });
