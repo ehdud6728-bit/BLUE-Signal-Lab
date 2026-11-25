@@ -7,6 +7,9 @@ const code=(await readFile(new URL('../worker/src/index.ts',import.meta.url),'ut
   .replace(/^import .*?;\s*$/gm,'');
 const script=ts.transpileModule(`
 class InvalidTursoResearchRequest extends Error {}
+class InvalidPrivateCaseQuery extends Error {}
+class PrivateCaseSnapshotChanged extends Error {}
+const tursoPrivateCombinedCases=async (_env,params)=>({status:'READY',asof:params.get('asof')});
 const requestTursoResearch=async (_env,day)=>({status:'PENDING',day});
 const tursoResearchRequestStatus=async (_env,day)=>({status:'READY',day});
 const tursoMarketRotation=async()=>({status:'READY',source:'ROTATION'});
@@ -92,4 +95,12 @@ test('market AI requires Access and same-origin POST before collecting Turso evi
  const response=await api.fetch(request(path,'POST'),env,{access:true});
  assert.equal(response.status,200);
  assert.deepEqual((await response.json()).facts,{rotation:{status:'READY',source:'ROTATION'},trends:{status:'READY',source:'TRENDS'},leaders:{status:'READY',source:'LEADERS'}});
+});
+
+test('private research cases require Access and forbid caching',async()=>{
+ const path='/api/research/private-combined-cases?asof=2026-11-24';
+ assert.equal((await api.fetch(request(path,'GET'),env,{})).status,401);
+ const r=await api.fetch(request(path,'GET'),env,{access:true});
+ assert.equal(r.status,200);assert.equal(r.headers.get('cache-control'),'no-store');
+ assert.deepEqual(await r.json(),{status:'READY',asof:'2026-11-24'});
 });
