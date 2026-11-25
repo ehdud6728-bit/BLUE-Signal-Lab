@@ -45,6 +45,7 @@ on:
       - 'web/src/research-gold-highlight.ts'
       - 'web/src/r-research-gold-outline.css'
       - 'tests/test_research_gold_highlight.mjs'
+      - 'tests/test_stock_research_reference.mjs'
       - 'web/src/TursoAiReadiness.tsx'
       - 'web/src/TursoPatternPulse.tsx'
       - 'web/src/turso-pattern-pulse.css'
@@ -74,7 +75,7 @@ jobs:
         working-directory: worker
         run: npm install --no-package-lock --no-audit --no-fund
       - name: Verify Turso-first browser API read contracts (no credentials)
-        run: node --experimental-strip-types --test tests/test_research_gold_highlight.mjs tests/test_turso_research_reader.mjs tests/test_turso_research_api.mjs tests/test_turso_research_request.mjs tests/test_turso_research_request_route.mjs tests/test_turso_research_progress.mjs tests/test_turso_basket_browser.mjs tests/test_turso_basket_prices.mjs tests/test_turso_provisional_search.mjs tests/test_turso_market_rotation.mjs tests/test_basket_top_basis.mjs tests/test_basket_observed_low.mjs tests/test_turso_market_ai.mjs
+        run: node --experimental-strip-types --test tests/test_research_gold_highlight.mjs tests/test_stock_research_reference.mjs tests/test_turso_research_reader.mjs tests/test_turso_research_api.mjs tests/test_turso_research_request.mjs tests/test_turso_research_request_route.mjs tests/test_turso_research_progress.mjs tests/test_turso_basket_browser.mjs tests/test_turso_basket_prices.mjs tests/test_turso_provisional_search.mjs tests/test_turso_market_rotation.mjs tests/test_basket_top_basis.mjs tests/test_basket_observed_low.mjs tests/test_turso_market_ai.mjs
       - name: Install browser build dependencies
         working-directory: web
         run: npm install --no-package-lock --no-audit --no-fund
