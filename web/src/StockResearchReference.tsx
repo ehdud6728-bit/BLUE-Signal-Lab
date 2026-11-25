@@ -4,6 +4,7 @@ import {PROFITABILITY_DATA} from './research-profitability-data';
 import {HIGH_RETURN_PROFILES} from './high-return-profiles-data';
 import {selectStockResearch} from './stock-research-reference';
 import {synthesizeStockResearch} from './stock-research-synthesis';
+import {CombinedStockEvidence,selectCombinedRows} from './CombinedPatternResearch';
 import {patternLabel} from './research-pattern-label';
 import './stock-research-reference.css';
 type Profit={calculation_audit?:string;pattern:string;group:string;horizon:number;n:number;dates:number;stocks:number;up_pct:number;mean_pct:number;median_pct:number;min_pct:number;mean_gain_pct:number|null;mean_loss_pct:number|null;payoff_ratio:number|null;profit_factor:number|null;worst_5pct_mean_pct:number;tail_count:number;target_10_pct:number;target_20_pct:number};
@@ -15,11 +16,22 @@ const fmt=(v:number|null)=>v==null||!Number.isFinite(v)?'—':(v>0?'+':'')+v.toF
 const pct=(v:number|null)=>v==null||!Number.isFinite(v)?'—':v.toFixed(1)+'%';
 const ratio=(v:number|null)=>v==null||!Number.isFinite(v)?'—':v.toFixed(2);
 const status:Record<string,string>={HOLDOUT_AGREES_EXPLORATORY:'후속 방향 일치 · 탐색',INSUFFICIENT_HOLDOUT:'후속 표본 부족',HOLDOUT_DISAGREES:'후속 불일치'};
-export default function StockResearchReference({day,signals,features,provisional,tomato,recent,validated,onProfit,onHigh}:{day:string;signals:string[];features:unknown;provisional?:boolean;tomato:{label:string;up:number;n:number}|null;recent:{pattern:string;horizon_trading_days:number;positive_return_probability_pct:number;median_return_pct:number;sample_count:number}|null;validated:string|null;onProfit:()=>void;onHigh:()=>void}){
+export default function StockResearchReference({day,signals,features,provisional,tomato,recent,validated,extras,onCombined,onProfit,onHigh}:{day:string;signals:string[];features:unknown;provisional?:boolean;tomato:{label:string;up:number;n:number}|null;recent:{pattern:string;horizon_trading_days:number;positive_return_probability_pct:number;median_return_pct:number;sample_count:number}|null;validated:string|null;extras?:Record<string,unknown>;onCombined:()=>void;onProfit:()=>void;onHigh:()=>void}){
  const [open,setOpen]=useState(false);
  const {profits,high,retrospective}=selectStockResearch({day,asof:RECENT_ASOF,signals,features,profit,profiles,allowRetrospective:!provisional});
+ const combined=selectCombinedRows(signals,features,extras,provisional);
  const synthesis=synthesizeStockResearch(profits,high,tomato,recent,validated);
- if(!profits.length&&!high.length&&!tomato&&!recent&&!validated)return null;
+ for(const x of combined){
+  const r=x.joint;
+  if(!r)continue;
+  const name=patternLabel(x.base);
+  if(r.research_status!=='DESCRIPTIVE_ONLY'){synthesis.limits.push(name+' 복합 조건: 완료 표본 '+r.all.n+'건, 판단 보류.');continue;}
+  if(r.all.mean_pct!==null&&r.all.mean_pct<0){
+   synthesis.risk.push(name+' 복합 조건 3일 다음 시가 기준 평균 '+fmt(r.all.mean_pct)+' ('+r.all.n+'건).');
+   synthesis.label=synthesis.positive.length?'긍정·부정 근거 혼재':'수익성 주의';
+  }else synthesis.limits.push(name+' 복합 조건: 과거 성과 관측, 저장 지표 및 독립 기간 검증 전.');
+ }
+ if(!profits.length&&!high.length&&!tomato&&!recent&&!validated&&!combined.length)return null;
  return <details className="sr-reference" open={open} onToggle={e=>setOpen(e.currentTarget.open)} onClick={e=>e.stopPropagation()}>
  <summary><span>연구 종합 해석</span><small>{synthesis.label} · 상세 보기</small></summary>
  {open&&<>
@@ -27,7 +39,8 @@ export default function StockResearchReference({day,signals,features,provisional
  {synthesis.positive.length>0&&<div><strong className="sr-positive">긍정적 관측 근거</strong>{synthesis.positive.map(t=><p key={t}>{t}</p>)}</div>}
  {synthesis.risk.length>0&&<div><strong className="sr-risk">손실 위험</strong>{synthesis.risk.map(t=><p key={t}>{t}</p>)}</div>}
  {synthesis.limits.length>0&&<div><strong>판단 제한</strong>{synthesis.limits.map(t=><p key={t}>{t}</p>)}</div>}
- <small>복합 조건의 실제 결합 성과: 아직 연결되지 않음. 서로 다른 연구의 표본·기간·진입 기준을 합산하지 않습니다.</small></div>
+ <small>복합 조건: {combined.length?'아래 동일 조건 연구 참조 (탐색)':'확인 가능한 일치 집계 없음 또는 미게시'} 서로 다른 연구의 표본·기간·진입 기준을 합산하지 않습니다.</small></div>
+ {combined.length>0&&<small>{RECENT_ASOF} 복합 연구 · {day<=RECENT_ASOF?'최신 연구로 이전 신호 비교 (당시 알 수 있었던 정보 아님)':'과거 시장 집계 참고'}</small>}<CombinedStockEvidence matches={combined} onDetails={onCombined}/>
  {tomato&&<section><strong>종목별 토마토 연구 · 다음 시가 → 10번째 종가</strong><small>{tomato.label||'조건명 미확보'} · 상승 관측 {pct(tomato.up)} · {tomato.n}건 · 탐색적 결과</small></section>}
  {recent&&<section><strong>시장 단기 연구 · 신호일 종가 기준</strong><small>{patternLabel(recent.pattern)} · {recent.horizon_trading_days}일 상승 관측 {pct(recent.positive_return_probability_pct)} · 중앙 {fmt(recent.median_return_pct)} · {recent.sample_count}건</small></section>}
  <p className="sr-note">{RECENT_ASOF} 연구 · 3일 종가 관측 · {retrospective?'최신 연구를 이전 신호와 비교한 결과이며 당시 알 수 있었던 정보가 아닙니다. ':''}{provisional?'장중 캔들은 확정 시 변할 수 있습니다. ':''}후속 검증 전 · 매수 추천 아님</p>
