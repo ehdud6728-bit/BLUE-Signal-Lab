@@ -90,19 +90,33 @@
 .r15108-supply-weak{color:#64758c;background:#f3f6fb;border-color:#d8e0eb}
 @media(max-width:520px){.stock-tags .r15108-supply-grade{margin:2px 0;font-size:10px}.stock-quick>div:last-child strong{font-size:11px}}
 
-/* iPhone native date control has an intrinsic width/height in WebKit.
-   Give dates a full row and leave amount/search controls below it. */
-@media(max-width:520px){
- .filter-closed .search-compact.r15108-quickbar{grid-template-columns:minmax(0,1fr) auto;align-items:end}
- .r15108-quickbar>.r15108-quick-controls{grid-column:1/-1;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
- .r15108-quickbar .r15108-date-field,.r15108-quickbar .r15108-range-fields{grid-column:1/-1}
- .r15108-quickbar .r15108-range-fields{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
- .r15108-quick-controls:has(.r15108-custom-field),.r15108-quick-controls:has(.r15108-range-fields){grid-template-columns:repeat(2,minmax(0,1fr))}
- .r15108-quick-field input,.r15108-quick-field select{width:100%;min-width:0;max-width:100%;height:44px;min-height:44px;max-height:44px;box-sizing:border-box;font-size:16px;padding:6px 8px}
- .r15108-quick-field input[type=date]{-webkit-appearance:none;appearance:none;display:block;text-align:left}
- .r15108-quick-field input[type=date]::-webkit-date-and-time-value{min-width:0;min-height:0;margin:0;text-align:left}
- .r15108-quickbar>.compact-run{grid-column:1/-1;min-height:44px;font-size:14px!important;justify-content:center}
- html{-webkit-text-size-adjust:100%;text-size-adjust:100%}
+/* Keep the original Android quick-search grid. Only iOS WebKit needs the
+   native date control workaround. Narrow or multi-date iOS layouts wrap
+   deliberately; never force every mobile device into the iPhone layout. */
+@supports (-webkit-touch-callout: none){
+ @media(max-width:790px){
+  .r15108-quick-field input[type=date]{-webkit-appearance:none;appearance:none;display:block;width:100%;min-width:0;max-width:100%;min-inline-size:0;max-inline-size:100%;box-sizing:border-box;text-align:left}
+  .r15108-quick-field input[type=date]::-webkit-date-and-time-value{min-width:0;min-height:0;margin:0;text-align:left}
+  .r15108-quick-field input[type=date]::-webkit-datetime-edit{min-width:0;padding:0}
+  .r15108-quick-field input,.r15108-quick-field select{font-size:16px;height:44px;min-height:44px;max-height:44px;padding:6px}
+  .r15108-quickbar>.compact-run{min-height:44px}
+ }
+ @media(max-width:520px){
+  /* Use the original one-row grid where the native date value has room. */
+  .r15108-quickbar>.r15108-quick-controls{grid-template-columns:minmax(0,1.35fr) minmax(0,.65fr);gap:6px}
+  /* Range/custom modes have additional fields: allocate a separate row. */
+  .filter-closed .search-compact.r15108-quickbar:has(.r15108-range-fields,.r15108-custom-field){grid-template-columns:minmax(0,1fr)}
+  .r15108-quick-controls:has(.r15108-range-fields,.r15108-custom-field){grid-template-columns:repeat(2,minmax(0,1fr))}
+  .r15108-quick-controls:has(.r15108-range-fields,.r15108-custom-field) .r15108-date-field,.r15108-quick-controls .r15108-range-fields{grid-column:1/-1}
+  .r15108-quickbar .r15108-range-fields{display:grid;grid-template-columns:repeat(2,minmax(0,1fr))}
+ }
+ @media(max-width:399px){
+  /* Single date on narrow iOS: date first, amount and search on the same
+     second row. The labels remain associated with the original controls. */
+  .filter-closed .search-compact.r15108-quickbar:not(:has(.r15108-range-fields,.r15108-custom-field)){grid-template-columns:minmax(0,1fr) auto}
+  .r15108-quickbar>.r15108-quick-controls:not(:has(.r15108-range-fields,.r15108-custom-field)){display:contents}
+  .r15108-quick-controls:not(:has(.r15108-range-fields,.r15108-custom-field))>.r15108-date-field{grid-column:1/-1}
+ }
 }
 
 /* Desktop search: a readable horizontal overview, full-width optional research. */
