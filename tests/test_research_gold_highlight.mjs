@@ -57,3 +57,20 @@ test('search cards and mobile/desktop gradients preserve diagonal gold + tomato'
   assert.match(css,/\.desktop-results tr\.r-research-gold\.r159-tomato-stock>td/);
   assert.match(css,/linear-gradient\(135deg,#c49b32/);
 });
+
+test('desktop search renders readable cards with independent highlights and expandable research',()=>{
+ const main=readFileSync(new URL('../web/src/main.tsx',import.meta.url),'utf8');
+ const css=readFileSync(new URL('../web/src/r1599-pattern-filters.css',import.meta.url),'utf8');
+ const gold=readFileSync(new URL('../web/src/r-research-gold-outline.css',import.meta.url),'utf8');
+ const desk=main.slice(main.indexOf('className="desktop-results blue-desktop-results"'),main.indexOf('className="mobile-results"'));
+ assert.match(desk,/<article/);
+ assert.match(desk,/<details className="blue-pc-stock-research"/);
+ assert.match(desk,/<StockResearchReference/);
+ assert.match(desk,/<PriceCompareMini/);
+ assert.match(desk,/<RecentPatternReference/);
+ assert.match(desk,/quickBasket\(r\)/);
+ assert.match(css,/\.blue-pc-stock-main\{display:grid/);
+ assert.match(css,/\.blue-pc-stock-name\{[^}]*font-size:18px/);
+ assert.match(css,/\.panel\.result>\.blue-desktop-results\{display:none\}/);
+ assert.match(gold,/\.blue-desktop-results>article\.r-research-gold\.r159-tomato-stock/);
+});

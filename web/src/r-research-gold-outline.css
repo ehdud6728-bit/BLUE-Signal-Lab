@@ -19,3 +19,10 @@
 .r151-mobile-row.r-research-gold{border:0!important;background:transparent!important}
 .r151-mobile-row.r-research-gold>.stock-card{border:2px solid #c49b32!important;background:linear-gradient(180deg,#fffaf0,#fff 92px)!important;box-shadow:0 0 0 1px rgba(196,155,50,.12)}
 .r151-mobile-row.r-research-gold.r159-tomato-stock>.stock-card{border:2px solid transparent!important;background:linear-gradient(135deg,#fffaf0,#fff7f4 92px,#fff) padding-box,linear-gradient(135deg,#c49b32 0%,#ebc76c 37%,#ef9784 63%,#e87968 100%) border-box!important;box-shadow:0 0 0 1px rgba(196,155,50,.08)}
+
+/* Desktop card outline carries the same independent research and tomato flags. */
+@media(min-width:791px){
+ .blue-desktop-results>article.r-research-gold{border:2px solid #c49b32;background:#fffaf0}
+ .blue-desktop-results>article.r159-tomato-stock{border:2px solid #e87968;background:#fff7f4}
+ .blue-desktop-results>article.r-research-gold.r159-tomato-stock{border:2px solid transparent;background:linear-gradient(135deg,#fffaf0,#fff7f4) padding-box,linear-gradient(135deg,#c49b32 0%,#ebc76c 37%,#ef9784 63%,#e87968 100%) border-box}
+}

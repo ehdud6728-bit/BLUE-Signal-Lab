@@ -1279,17 +1279,14 @@ function App(){
             </p>}
           {(appliedSort==='highest_gain'||appliedSort==='lowest_return')&&
             <p className="r15125-result-scope">최고·최저 수익률은 발견일 이후 저장된 검증 일봉 중 확인된 구간만 사용합니다. 후속 일봉이 없는 종목은 정렬 뒤쪽에 표시되며, 전체 보유기간 최저·최고를 보장하지 않습니다.</p>}
-          <div className="desktop-results tablewrap"><table><thead><tr><th>날짜</th><th>종목명 / 코드</th><th>신호</th><th>{activeProvisional?'KIS 관측가':'검색일 종가 / 최근 확인가 / 기간 최고가'}</th><th>RSI / GC</th><th>Slow(14,3,3) / GC</th><th>MACD / GC</th><th>돌파선 후보</th><th>상단 매물대</th></tr></thead><tbody>
-            {visibleRows.length?visibleRows.map((r,i)=><tr key={`${r.code}-${r.day}-${i}`} className={'clickable'+stockHighlight(r)} tabIndex={0} onClick={()=>openDetail(r)} onKeyDown={e=>{if(e.key==='Enter')openDetail(r);}}>
-              <td>{r.day}</td><td><div className="r151-desktop-stock">
-                 <div><b>{displayName(r)}</b><div className="small">{r.code} · {amountLabel(r)}</div>
-                 <div className="r15125-amount-change">{amountChange(r)}{sortedPercent(r)&&<span> · {sortedPercent(r)}</span>}</div>
-                 {goldEvidenceBlock(r)}
-              {(!r.provisional||recentMatch(r))&&<RecentPatternReference provisional={r.provisional} day={r.day} signals={r.signals} matched={recentMatch(r)} features={researchFeatures(r)} onDetails={storageMode==="turso"?()=>{setAiResearchTab(recentMatch(r)?"recommend":"ranking");nav("ai");}:undefined}/>}
-              {storageMode==="turso"&&searchSource==="patterns"&&(r.provisional?activeProvisional?.ai_asof===RECENT_ASOF:patternBackend==="turso")&&<StockResearchReference key={r.code+":"+r.day} day={r.day} signals={r.signals} features={researchFeatures(r)} provisional={r.provisional} tomato={tomatoResearch(r)} recent={recentMatch(r)?matchedRecent(r.day,r.signals,researchFeatures(r),!r.provisional)[0]??null:null} validated={goldSignal(r)} extras={r.extras} referencePrice={r.close_price} onCombined={()=>{setAiResearchTab("combined");nav("ai");}} onProfit={()=>{setAiResearchTab("profit");nav("ai");}} onHigh={()=>{setAiResearchTab("highreturn");nav("ai");}}/>}
-                 {patternEvidenceBlock(r)}
-                 {patternDays(r).length>0&&<div className="r1599-pattern-dates" title={patternDays(r).join(' · ')}>과거 신호일 {patternDays(r).slice(-3).join(' · ')}{patternDays(r).length>3?' 외':''}</div>}</div>
-                 <button type="button" className={'r151-quick-add '+(inBasket(r)?'saved':'')}
+          <div className="desktop-results blue-desktop-results" aria-label="PC 종목 검색 결과">
+            {visibleRows.length?visibleRows.map((r,i)=><article key={`${r.code}-${r.day}-${i}`} className={'clickable'+stockHighlight(r)}>
+              <div className="blue-pc-stock-main">
+                <section className="blue-pc-stock-id">
+                  <div className="blue-pc-stock-heading">
+                    <div><button type="button" className="blue-pc-stock-name" onClick={()=>openDetail(r)}>{displayName(r)} <ChevronRight size={16}/></button>
+                      <div className="blue-pc-stock-date">{r.code} · {r.day}</div></div>
+                    <button type="button" className={'r151-quick-add '+(inBasket(r)?'saved':'')}
                    title={inBasket(r)?'이미 담긴 종목':basketBlocked(r)}
                    aria-label={`${displayName(r)} ${inBasket(r)?'장바구니에 담김':basketBlocked(r)}`}
                    disabled={inBasket(r)||!canBasket(r)||basketRegularCount>=100}
@@ -1297,17 +1294,42 @@ function App(){
                    onKeyDown={e=>e.stopPropagation()}>
                    {inBasket(r)?<CheckCircle2 size={16}/>:<ShoppingBasket size={16}/>}
                  </button>
-               </div></td>
-              <td>{r.signals.map(s=><span className="tag" key={s}>{showSignal(s)}</span>)}{techBadges(r).map(t=><span className="r1591-search-tech" key={t}>{t}</span>)}{supplyTag(r)}</td><td className="r1593-price-cell"><strong>{money(r.close_price)}원</strong><small> · {r.provisional?'KIS 관측가':'검색일 종가'}</small>
+                  </div>
+                  <div className="blue-pc-stock-amount">{amountLabel(r)}</div>
+                  <div className="r15125-amount-change">{amountChange(r)}{sortedPercent(r)&&<span> · {sortedPercent(r)}</span>}</div>
+                  <div className="blue-pc-stock-signals">{r.signals.map(s=><span className="tag" key={s}>{showSignal(s)}</span>)}{techBadges(r).map(t=><span className="r1591-search-tech" key={t}>{t}</span>)}{supplyTag(r)}</div>
+                  {goldEvidenceBlock(r)}
+                </section>
+                <section className="blue-pc-stock-price r1593-price-cell" aria-label="가격 정보">
+                  <strong>{money(r.close_price)}원</strong><small> · {r.provisional?'KIS 관측가':'검색일 종가'}</small>
                 {r.provisional?<div className="r1599-mobile-meta">{observedKst(r.observed_at_utc)} 수신 · 미확정</div>:<PriceCompareMini data={r1593Prices[comparisonKey(r)]} baseline={r.close_price} loading={r1593Busy&&!r1593Prices[comparisonKey(r)]}
                   onRequest={()=>{void requestMissingQuote(r);}} requesting={r1595Requesting===comparisonKey(r)}
                   requestLabel={patternBackend==='turso'?'↻ KIS 최신가 조회':'↻ 시세 갱신'}
                   requestDisabled={!!r1595Requesting||r1595Timers.current.size>=3}/>}
-              </td>
-              <td>{fmt(r,'rsi')} <small>{crossed(r,'rsi_gc')}</small></td><td>{fmt(r,'slow_14_3_3_k')} / {fmt(r,'slow_14_3_3_d')} <small>{crossed(r,'slow_14_3_3_gc')}</small></td>
-              <td>{fmt(r,'macd_12_26_9')} <small>{crossed(r,'macd_gc')}</small></td><td>{present(r,'valid_line_candidates_json')?`${validLines(r).length}개`:'미계산'}</td>
-              <td>{supplyGrade(r)==='미확인'?'매물대 추정 재분석 필요':`상단물량 ${supplyGrade(r)} · ${money(num(r,'supply_reference_price'))}원 · 약 ${money(num(r,'supply_volume_est_shares'))}주 · 비중 ${fmt(r,'supply_bin_share_pct',2)}%`}</td>
-            </tr>):<tr><td className="empty" colSpan={9}>{total!==null?'조건에 맞는 종목이 없습니다.':'날짜와 조건을 선택해 검색하세요.'}</td></tr>}</tbody></table></div>
+                </section>
+                <section className="blue-pc-stock-evidence" aria-label="과거 연구 성과">
+                  <h3>과거 연구 성과</h3>
+                  {(!r.provisional||recentMatch(r))&&<RecentPatternReference provisional={r.provisional} day={r.day} signals={r.signals} matched={recentMatch(r)} features={researchFeatures(r)} onDetails={storageMode==="turso"?()=>{setAiResearchTab(recentMatch(r)?"recommend":"ranking");nav("ai");}:undefined}/>}
+                  {patternEvidenceBlock(r)}
+                  {patternDays(r).length>0&&<div className="r1599-pattern-dates" title={patternDays(r).join(' · ')}>과거 신호일 {patternDays(r).slice(-3).join(' · ')}{patternDays(r).length>3?' 외':''}</div>}
+                </section>
+              </div>
+              <div className="blue-pc-stock-indicators" aria-label="기술 지표">
+                <div><span>RSI / GC</span><b>{fmt(r,'rsi')}</b><small>{crossed(r,'rsi_gc')}</small></div>
+                <div><span>Slow (14·3·3) / GC</span><b>{fmt(r,'slow_14_3_3_k')} / {fmt(r,'slow_14_3_3_d')}</b><small>{crossed(r,'slow_14_3_3_gc')}</small></div>
+                <div><span>MACD / GC</span><b>{fmt(r,'macd_12_26_9')}</b><small>{crossed(r,'macd_gc')}</small></div>
+                <div><span>돌파선 후보</span><b>{present(r,'valid_line_candidates_json')?`${validLines(r).length}개`:'미계산'}</b></div>
+                <div className="blue-pc-stock-supply"><span>상단 매물대 추정</span><b>{supplyGrade(r)==='미확인'?'미확인':`상단물량 ${supplyGrade(r)} · ${money(num(r,'supply_reference_price'))}원`}</b><small>{supplyGrade(r)==='미확인'?'매물대 추정 재분석 필요':`약 ${money(num(r,'supply_volume_est_shares'))}주 · 비중 ${fmt(r,'supply_bin_share_pct',2)}%`}</small></div>
+              </div>
+              <div className="blue-pc-stock-actions">
+                <button type="button" onClick={()=>openDetail(r)}>종목 상세 분석 <ChevronRight size={15}/></button>
+                <details className="blue-pc-stock-research"><summary>신호일 관찰 및 연구 종합 해석</summary>
+                  {storageMode==="turso"&&searchSource==="patterns"&&(r.provisional?activeProvisional?.ai_asof===RECENT_ASOF:patternBackend==="turso")&&<StockResearchReference key={r.code+":"+r.day} day={r.day} signals={r.signals} features={researchFeatures(r)} provisional={r.provisional} tomato={tomatoResearch(r)} recent={recentMatch(r)?matchedRecent(r.day,r.signals,researchFeatures(r),!r.provisional)[0]??null:null} validated={goldSignal(r)} extras={r.extras} referencePrice={r.close_price} onCombined={()=>{setAiResearchTab("combined");nav("ai");}} onProfit={()=>{setAiResearchTab("profit");nav("ai");}} onHigh={()=>{setAiResearchTab("highreturn");nav("ai");}}/>}
+                  <small className="blue-pc-research-note">표시되는 연구는 일치 조건과 검증 범위가 확보된 경우에 한합니다.</small>
+                </details>
+              </div>
+            </article>):<p className="empty">{total!==null?'조건에 맞는 종목이 없습니다.':'날짜와 조건을 선택해 검색하세요.'}</p>}
+          </div>
           <div className="mobile-results">
             {visibleRows.length?visibleRows.map((r,i)=><div className={'r151-mobile-row'+stockHighlight(r)} key={`${r.code}-${r.day}-${i}`}>
               <div className="stock-card" role="button" tabIndex={0} onClick={()=>openDetail(r)}
