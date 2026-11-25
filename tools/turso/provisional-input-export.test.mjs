@@ -5,9 +5,9 @@ const day='2026-11-24',reference='2026-11-23',now=new Date('2026-11-24T10:20:00Z
 const source='KIS_REST_INQUIRE_DAILY_PRICE_PROVISIONAL';
 const make=(code,amount,absent=false)=>{
  const observed_at_utc='2026-11-24T10:19:00Z';
- const p={code,trade_date_kst:day,received_at_utc:observed_at_utc,price:100,accumulated_volume:20};
+ const p={code,trade_date_kst:day,received_at_utc:observed_at_utc,price:100,open:100,high:100,low:100,accumulated_volume:20,reported_trade_date:'20261124',source:'KIS_REST_INQUIRE_DAILY_PRICE',is_confirmed_daily:false};
  if(!absent)p.accumulated_amount_krw=amount;
- return {code,source,observed_at_utc,close:100,open:100,high:100,low:100,volume:20,listing_market:'KOSPI',payload_json:JSON.stringify(p)};
+ return {code,source,date_basis:'KIS_REPORTED_TRADE_DATE',observed_at_utc,close:100,open:100,high:100,low:100,volume:20,listing_market:'KOSPI',payload_json:JSON.stringify(p)};
 };
 const client=(n=1700,quotes=[make('000001',null,true),make('000002',null),make('000003',2000)])=>({execute:async({sql})=>({rows:sql.includes('GROUP BY source')?[{source,n:'3',oldest:'2026-11-24T10:19:00Z',newest:'2026-11-24T10:19:00Z'}]:sql.includes('COUNT(*)')?[{n}]:sql.includes('JOIN')?quotes:[{trade_day:reference,row_count:1700}]})});
 test('distinguishes old payload from new null amount',async()=>{
@@ -35,7 +35,7 @@ test('intraday rejects only stale, mismatched, malformed or invalid evidence',as
   quoteAt('000002','2026-11-24T03:49:00Z'),
   quoteAt('000003',fresh,source,{price:101}),
   {...quoteAt('000004',fresh),payload_json:'{broken'},
-  {...quoteAt('000005',fresh),low:0},
+  {...quoteAt('000005',fresh,source,{low:0}),low:0},
   quoteAt('000006','2026-11-24T05:21:00Z'),
   quoteAt('000007','2026-11-24T03:50:00Z','KIS_REST_INQUIRE_PRICE_PROVISIONAL')];
  const r=await exportInputs(client(1700,rows),day,new Date(at),260,{quotesOnly:true});
@@ -58,4 +58,14 @@ test('after regular close only post-close exact-day daily-price observations qua
 test('duplicate join evidence fails closed rather than selecting an arbitrary quote',async()=>{
  const q=make('000001',2000);
  await assert.rejects(exportInputs(client(1700,[q,q]),day,now,260,{quotesOnly:true}),/DUPLICATE_QUOTE_EVIDENCE/);
+});
+
+test('daily date and full OHLC payload must agree even when closing price matches',async()=>{
+ const at='2026-11-24T10:19:00Z';
+ const rows=[quoteAt('000001',at),quoteAt('000002',at,source,{high:110}),
+  quoteAt('000003',at,source,{reported_trade_date:'20261123'}),
+  {...quoteAt('000004',at),date_basis:'COLLECTOR_KST_REGULAR_SESSION'}];
+ const r=await exportInputs(client(1700,rows),day,now,260,{quotesOnly:true});
+ assert.deepEqual(r.quotes.map(q=>q.code),['000001']);
+ assert.deepEqual(r.coverage.rejected,{QUOTE_MISMATCH:1,DAILY_DATE_EVIDENCE_MISMATCH:2});
 });
