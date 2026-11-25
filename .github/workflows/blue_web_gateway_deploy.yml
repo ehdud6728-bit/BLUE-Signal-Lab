@@ -63,7 +63,9 @@ jobs:
             fi
           fi
       - name: Offline gateway authentication tests
-        run: node --test tests/test_web_gateway.mjs
+        run: |
+          node --test tests/test_web_gateway.mjs tests/test_gateway_deploy_defaults.mjs
+          python3 -m unittest discover -s tests -p 'test_gateway_binding_preflight.py'
       - working-directory: worker
         run: npm install --no-package-lock --no-audit --no-fund
       - name: Dry-run API Worker
@@ -86,6 +88,7 @@ jobs:
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           TEAM: ${{ inputs.access_team }}
           AUD: ${{ inputs.access_aud }}
+          MODE: ${{ inputs.mode }}
         shell: bash
         run: |
           set -euo pipefail
@@ -100,8 +103,9 @@ jobs:
             done
           done
           python - <<'PY'
-          import json,os,re
+          import json,os,re,urllib.request
           from pathlib import Path
+          from tools.gateway_binding_preflight import frontend_state,routine_decision
           root=Path(os.environ['RUNNER_TEMP'])
           def read(worker,endpoint):
               body=json.loads((root/f'{worker}-{endpoint}.json').read_text())
@@ -114,12 +118,10 @@ jobs:
               if not isinstance(bindings,list) or any(not isinstance(b,dict) for b in bindings):
                   raise SystemExit('BLOCKED: invalid Worker bindings')
               if worker=='blue-signal-lab':
-                  if os.environ['TEAM']=='KEEP_EXISTING' and not any(b.get('type')=='service' and b.get('name')=='BLUE_API' and b.get('service')=='blue-signal-lab-api-v2' and b.get('entrypoint')=='BlueWebGateway' for b in bindings):
-                      raise SystemExit('BLOCKED: routine deployment requires existing same-origin service binding')
-                  for b in bindings:
-                      if b.get('type') in ('assets','version_metadata'): continue
-                      if b.get('type')=='service' and b.get('name')=='BLUE_API' and b.get('service')=='blue-signal-lab-api-v2' and b.get('entrypoint')=='BlueWebGateway': continue
-                      raise SystemExit('BLOCKED: unexpected frontend binding')
+                  try:
+                      front_state=frontend_state(bindings)
+                  except ValueError as e:
+                      raise SystemExit(str(e)) from None
               else:
                   names={b.get('name'):b.get('type') for b in bindings}
                   if names.get('DB')!='d1' or names.get('KIS_COLLECTOR')!='service':
@@ -142,6 +144,37 @@ jobs:
               if not re.fullmatch(r'[a-f0-9-]{36}',version):
                   raise SystemExit('BLOCKED: invalid rollback version')
               print(f'BLUE_ROLLBACK_VERSION {worker} {version}')
+              if worker=='blue-signal-lab' and os.environ['TEAM']=='KEEP_EXISTING':
+                  # /settings can omit the named binding. Check the exact active deployment version.
+                  # BLOCKED: routine deployment requires existing same-origin service binding
+                  active_bindings=None
+                  if front_state!='EXACT':
+                      url=f"https://api.cloudflare.com/client/v4/accounts/{os.environ['CLOUDFLARE_ACCOUNT_ID']}/workers/scripts/{worker}/versions/{version}"
+                      try:
+                          req=urllib.request.Request(url,headers={'Authorization':'Bearer '+os.environ['CLOUDFLARE_API_TOKEN']})
+                          with urllib.request.urlopen(req,timeout=30) as response:
+                              doc=json.load(response)
+                          result=doc.get('result')
+                          if doc.get('success') is not True or not isinstance(result,dict) or result.get('id')!=version:
+                              raise ValueError()
+                          resources=result.get('resources')
+                          if not isinstance(resources,dict) or not isinstance(resources.get('bindings'),list):
+                              raise ValueError()
+                          active_bindings=resources['bindings']
+                      except Exception:
+                          raise SystemExit('BLOCKED: cannot verify exact deployed version binding metadata') from None
+                  try:
+                      decision=routine_decision(bindings,active_bindings,os.environ['MODE'])
+                  except ValueError as e:
+                      raise SystemExit(str(e)) from None
+                  print(f'BLUE_FRONTEND_BINDING_PREFLIGHT {front_state} {decision}')
+                  if decision=='REBUILD_FULL_DEPLOY':
+                      # Explicit full deployment restores the exact named service, never a default/public API route.
+                      cfg=json.loads(Path('web/wrangler.gateway.jsonc').read_text())
+                      expected=[{'binding':'BLUE_API','service':'blue-signal-lab-api-v2','entrypoint':'BlueWebGateway'}]
+                      if cfg.get('name')!='blue-signal-lab' or cfg.get('main')!='gateway.mjs' or cfg.get('services')!=expected or cfg.get('assets',{}).get('run_worker_first')!=['/api/*']:
+                          raise SystemExit('BLOCKED: repository gateway config does not match expected repair')
+                      print('BLUE_RESTORE_NAMED_BINDING_BY_FULL_DEPLOY (not proof of existing binding)')
           PY
       - name: Deploy existing API with verified gateway configuration
         if: inputs.mode == 'deploy_api' || inputs.mode == 'deploy_api_and_web'
