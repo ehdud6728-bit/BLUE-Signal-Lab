@@ -106,7 +106,7 @@ function scanDateOK(day: string): boolean {
 }
 
 export default {
-  async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
+  async fetch(request: Request, env: Env, ctx: ExecutionContext, verifiedWebGateway=false): Promise<Response> {
     const origin = env.CORS_ORIGIN || 'http://localhost:5173';
     const cors: HeadersInit = {
       'Access-Control-Allow-Origin': origin,
@@ -124,7 +124,7 @@ export default {
     const u = new URL(request.url), p = u.pathname;
     // ctx.access is provided only when Cloudflare Access has authenticated this Worker request.
     // An Origin header alone never grants permission to dispatch a GitHub workflow.
-    const access = (ctx as ExecutionContext & { access?: unknown } | undefined)?.access;
+    const access = verifiedWebGateway === true || (ctx as ExecutionContext & { access?: unknown } | undefined)?.access;
     try {
       // Independently audited research snapshots: no D1 queries, KIS requests,
       // or API-side writes. The existing /api/search remains the D1 fallback.

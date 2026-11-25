@@ -1,0 +1,7 @@
+{
+ "name":"blue-signal-lab",
+ "main":"gateway.mjs",
+ "compatibility_date":"2026-11-13",
+ "assets":{"directory":"./dist","binding":"ASSETS","run_worker_first":["/api/*"]},
+ "services":[{"binding":"BLUE_API","service":"blue-signal-lab-api-v2","entrypoint":"BlueWebGateway"}]
+}
