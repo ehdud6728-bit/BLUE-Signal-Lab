@@ -74,6 +74,7 @@ export async function resolveMembership(members,targets,day,lookup){
  if(!missing.length)return resolved;
  let result;
  try{result=await lookup({day,groups:missing});}catch{result=null;}
+ if(result?.catalog_counts)console.log('BLUE_LEADERS_KRX_CATALOG',JSON.stringify(result.catalog_counts));
  const known=new Map(missing.map(g=>[key(g),g]));
  if(!result||result.day!==day||!Array.isArray(result.groups)||result.groups.length!==missing.length||new Set(result.groups.map(key)).size!==missing.length||result.groups.some(g=>!known.has(key(g)))){
    for(const g of missing)resolved.set(key(g),{source:'UNMAPPED',reason:'KRX_LOOKUP_UNAVAILABLE',codes:new Set()});
@@ -81,12 +82,12 @@ export async function resolveMembership(members,targets,day,lookup){
  }
  for(const g of result.groups){
    let codes=new Set(),reason='KRX_LOOKUP_UNAVAILABLE',source='UNMAPPED';
-   if(g.status==='AVAILABLE'&&g.reason===null&&/^\d{4,6}$/.test(g.krx_code)&&Array.isArray(g.members)&&g.members.length>0&&g.members.length<=3000&&g.members.every(c=>typeof c==='string'&&/^[0-9A-Z]{6}$/.test(c))&&new Set(g.members).size===g.members.length){
+   if(g.status==='AVAILABLE'&&g.reason===null&&((g.krx_scope===g.market&&g.identity_basis==='LOCAL_EXACT_NAME')||(['KRX','테마'].includes(g.krx_scope)&&g.identity_basis==='CROSS_EXACT_NAME_AND_RELATIVE_HISTORY'))&&/^\d{4,6}$/.test(g.krx_code)&&Array.isArray(g.members)&&g.members.length>0&&g.members.length<=3000&&g.members.every(c=>typeof c==='string'&&/^[0-9A-Z]{6}$/.test(c))&&new Set(g.members).size===g.members.length){
      const eligible=new Set(members.filter(r=>r.market===g.market).map(r=>r.code));
      codes=new Set(g.members.filter(c=>eligible.has(c)));
      if(codes.size){source='KRX_INDEX_CONSTITUENTS';reason=null;}else reason='KRX_NO_ELIGIBLE_MEMBERS';
-   }else if(['NO_EXACT_INDEX_NAME','KRX_CATALOG_UNAVAILABLE','KRX_CONSTITUENTS_UNAVAILABLE','AMBIGUOUS_INDEX_NAME'].includes(g.reason))reason=g.reason;
-   resolved.set(key(g),{source,reason,codes});
+   }else if(['NO_EXACT_INDEX_NAME','KRX_CATALOG_UNAVAILABLE','KRX_CONSTITUENTS_UNAVAILABLE','AMBIGUOUS_INDEX_NAME','KRX_CROSS_CATALOG_INCOMPLETE','INDEX_HISTORY_PROOF_REQUIRED','INDEX_BENCHMARK_IDENTITY_MISMATCH','INDEX_HISTORY_MISMATCH','INDEX_HISTORY_UNAVAILABLE'].includes(g.reason))reason=g.reason;
+   resolved.set(key(g),{source,reason,codes,...(source==='KRX_INDEX_CONSTITUENTS'?{krx_scope:g.krx_scope,krx_code:g.krx_code,identity_basis:g.identity_basis}:{})});
  }
  return resolved;
 }
@@ -269,9 +270,9 @@ export async function captureLeaders(env=process.env,{mode='plan',master=null,no
       const universe=m.rows.filter(s=>s.trend?.day===day&&s.trend.quadrant==='IMPROVING'&&Number.isFinite(s.trend.momentum)&&s.trend.momentum>0);
       const isNew=s=>s.trend.previous_day===dates[1]&&['LEADING','WEAKENING','LAGGING','NEUTRAL'].includes(s.trend.previous_quadrant);
       const sorted=universe.sort((a,b)=>Number(isNew(b))-Number(isNew(a))||b.trend.momentum-a.trend.momentum||a.code.localeCompare(b.code));
-      prepared.push({market:m.market,improving:universe.length,selected:sorted.slice(0,sectorsLimit)});
+      prepared.push({market:m.market,benchmark:m.benchmark,benchmark_days:m.benchmark_days,improving:universe.length,selected:sorted.slice(0,sectorsLimit)});
     }
-    const targets=prepared.flatMap(m=>m.selected.map(s=>({market:m.market,code:s.code,name:s.name})));
+    const targets=prepared.flatMap(m=>m.selected.map(s=>({market:m.market,code:s.code,name:s.name,benchmark:m.benchmark,benchmark_days:m.benchmark_days?.slice(-26),trend:s.trend})));
     const membership=await resolveMembership(members,targets,day,lookup);
     console.log('BLUE_LEADERS_PHASE',JSON.stringify({stage:'CLASSIFY',targets:targets.length}));
     const markets=prepared.map(m=>{
@@ -282,10 +283,10 @@ export async function captureLeaders(env=process.env,{mode='plan',master=null,no
         const memberCount=proof.codes.size;
         const matched=groupRows.filter(belongs).length;
         const previous=s.trend.previous_day===dates[1]&&['LEADING','WEAKENING','IMPROVING','LAGGING','NEUTRAL'].includes(s.trend.previous_quadrant)?s.trend.previous_quadrant:null;
-        console.log('BLUE_LEADERS_MEMBERSHIP',JSON.stringify({market:m.market,sector_code:s.code,source:proof.source,reason:proof.reason,members:memberCount,matched}));
+        console.log('BLUE_LEADERS_MEMBERSHIP',JSON.stringify({market:m.market,sector_code:s.code,sector_name:s.name,source:proof.source,reason:proof.reason,krx_scope:proof.krx_scope??null,krx_code:proof.krx_code??null,identity_basis:proof.identity_basis??null,members:memberCount,matched}));
         return {code:s.code,name:s.name,rs10:s.trend.rs10,momentum:s.trend.momentum,previous_quadrant:previous,
           entry:previous===null?'UNKNOWN':previous==='IMPROVING'?'CONTINUING':'NEW_ENTRY',members:memberCount,matched,
-          membership_source:proof.source,membership_reason:proof.reason,...classifyStocks(groupRows,s,belongs)};
+          membership_source:proof.source,membership_reason:proof.reason,...(proof.krx_scope?{krx_scope:proof.krx_scope,krx_code:proof.krx_code,identity_basis:proof.identity_basis}:{}),...classifyStocks(groupRows,s,belongs)};
       });
       return {market:m.market,improving:m.improving,analyzed:groups.length,master_members:members.filter(r=>r.market===m.market).length,matched_members:groupRows.length,groups};
     });

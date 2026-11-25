@@ -108,3 +108,11 @@
 - 출처: https://www.federalreserve.gov/newsevents/2026-december.htm , https://www.bls.gov/schedule/2026/12_sched_list.htm , https://www.bea.gov/news/schedule/ , https://www.bea.gov/news/2026/personal-income-and-outlays-september-2026 .
 - Cboe 공식 일별 선물 정산가 https://www.cboe.com/markets/us/futures/market-statistics/settlement/futures/daily 에 VX 월물 및 주물이 별도로 표시됨. https://www.cboe.com/terms/ 검토 결과 프로그램 비표시·외부 AI 전송 사용권은 확보되지 않음. 접근 권한 미확인 상태에서 자동 다운로드·값 저장·AI 전송하지 않음. UI 공식 출처 링크 및 월물 F2−F1 해석 방법 표시, 수치와 구조 null. VIX 현물로 선물 구조 추정 금지.
 - AI V2에 공식 일정 참조 ID, 시각 및 근거 추가; 일정 최신성 검토 필요 시 모델에서 제외. 기존 국내·해외·종목 후보 검증, D1 독립 캐시/하루 5회 제한 유지. V2로 캐시 새로 생성 가능(신규 생성은 사용자 클릭 필요). 테스트 및 배포 아직 검증 전.
+
+
+## 2026-11-25 — KRX 통합·테마 지수 구성 조회 확대
+- PR #181 병합 확인, API 배포 기본값 사전 입력 및 main 배포 보호 적용. 별도 배포 불필요.
+- 기존 실제 성공 #45433678587: 11/24 기준 개선 11개 중 구성 연결 2개(120 종목), 대장 후보 6/후발 후보 3 저장·해시 검증. 미연결 9개의 실제 지수명과 KRX 일치 여부는 아직 운영 확인 필요.
+- PyKRX 지수 목록은 KOSPI/KOSDAQ 외 KRX 및 테마 계열도 지원(https://github.com/sharebook-kr/pykrx/blob/master/pykrx/stock/stock_api.py). 기존 동일 시장 정확명 연결은 유지, 미연결 그룹만 KRX/테마 정확한 전체명 탐색. 다른 계열은 두 목록 확인·단일 후보·시장 벤치마크 동일 명칭/종가/5일 변동률 및 동일 26개 관측일의 5/10/20일 상대성과·모멘텀 일치(허용 0.05%p, 벤치마크 종가 0.05포인트) 후 동일일 구성 조회. 현재 정상 종목 및 대상 시장 교집합만 사용. 유사 명칭·숫자 코드 추측·휴일 대체 금지.
+- 로그: 지수명, 계열별 목록 건수, 후보 지수 코드/계열/검증 근거 및 실패 원인. API/UI에 신규 검증 근거 표시, 기존 저장 자료 호환 유지. 후보 선별 조건은 변경하지 않음. 실제 지수명 및 확장 매핑 수는 실행 전 미확인. 테스트는 오프라인 모의 자료이며 실제 조회·권한·데이터 제공 여부 확인 필요.
+- 병합 후 blue_rotation_leaders_capture.yml main mode=inspect (업종 재수집 없음), 검증 후 apply. API/웹 배포는 새 근거 표시 검증 이후. 전체 업종 136개 구성 확보나 성과 추적 완료를 주장하지 않음.

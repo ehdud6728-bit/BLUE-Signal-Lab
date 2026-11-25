@@ -43,7 +43,7 @@ test('direct industry codes and documented index flags are separate exact member
 test('KRX fallback requires exact requested day and group identities and intersects eligible market membership',async()=>{
  const members=[{market:'KOSPI',code:'000001',sectors:['0010']},{market:'KOSPI',code:'000002',sectors:['0010']},{market:'KOSDAQ',code:'000003',sectors:['0010']}];
  const targets=[{market:'KOSPI',code:'2010',name:'복합지수'}];
- const res=await resolveMembership(members,targets,'2026-11-23',async req=>({day:req.day,groups:[{...targets[0],status:'AVAILABLE',reason:null,krx_code:'1234',members:['000001','000003','999999']}]}));
+ const res=await resolveMembership(members,targets,'2026-11-23',async req=>({day:req.day,groups:[{...targets[0],status:'AVAILABLE',reason:null,krx_code:'1234',krx_scope:'KOSPI',identity_basis:'LOCAL_EXACT_NAME',members:['000001','000003','999999']}]}));
  const r=res.get('KOSPI/2010');assert.equal(r.source,'KRX_INDEX_CONSTITUENTS');assert.deepEqual([...r.codes],['000001']);
  const bad=await resolveMembership(members,targets,'2026-11-23',async req=>({day:'2026-11-22',groups:[]}));
  assert.equal(bad.get('KOSPI/2010').source,'UNMAPPED');
@@ -97,4 +97,13 @@ test('auth and proof errors do not retry',async()=>{
  await assert.rejects(()=>publishLeaders(snapshot,()=>{opened++;return {async execute(){throw Object.assign(Error('secret'),{code:'AUTH_TOKEN_INVALID'});},close(){}};},{},{wait:async()=>{throw Error('unexpected retry');}}),/LEADERS_STORAGE_CREATE_AUTH_TOKEN_INVALID/);
  assert.equal(opened,1);
  await assert.rejects(()=>publishLeaders(snapshot,()=>({async execute(){return {rows:[]};},close(){}}),{},{wait:async()=>{throw Error('unexpected retry');}}),/LEADERS_READBACK_MISMATCH/);
+});
+
+test('cross-family membership requires relative-history identity metadata and keeps market scope',async()=>{
+ const members=[{market:'KOSDAQ',code:'000001',sectors:[]},{market:'KOSPI',code:'000002',sectors:[]}];
+ const g={market:'KOSDAQ',code:'6296',name:'통합지수'};
+ const response={...g,status:'AVAILABLE',reason:null,krx_code:'1234',krx_scope:'KRX',identity_basis:'CROSS_EXACT_NAME_AND_RELATIVE_HISTORY',members:['000001','000002']};
+ const run=async result=>(await resolveMembership(members,[g],'2026-11-24',async()=>({day:'2026-11-24',groups:[result]}))).get('KOSDAQ/6296');
+ const ok=await run(response);assert.equal(ok.source,'KRX_INDEX_CONSTITUENTS');assert.deepEqual([...ok.codes],['000001']);assert.equal(ok.krx_scope,'KRX');
+ const bad=await run({...response,identity_basis:'LOCAL_EXACT_NAME'});assert.equal(bad.source,'UNMAPPED');
 });
