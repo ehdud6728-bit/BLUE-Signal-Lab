@@ -72,7 +72,7 @@ export async function track(env=process.env,{mode='inspect',now=new Date(),facto
   const load=async()=>names.has(archiveTable)?await read('SELECT receipt_day,source_observed_at,payload_json,payload_sha256,recorded_at FROM '+archiveTable+' ORDER BY receipt_day DESC LIMIT 60'):[];
   let saved=await load();
   const already=saved.some(x=>x.receipt_day===today);
-  if(mode==='apply'&&latest&&!already){
+  if(mode==='apply'&&latest&&candidate.candidates.length>0&&!already){
    await write('CREATE TABLE IF NOT EXISTS '+archiveTable+' (receipt_day TEXT PRIMARY KEY,source_observed_at TEXT NOT NULL,payload_json TEXT NOT NULL,payload_sha256 TEXT NOT NULL,recorded_at TEXT NOT NULL)');
    await write('INSERT INTO '+archiveTable+'(receipt_day,source_observed_at,payload_json,payload_sha256,recorded_at) VALUES(?,?,?,?,?) ON CONFLICT(receipt_day) DO NOTHING',[today,latest.observed_at_utc,latest.payload_json,latest.payload_sha256,at]);
    names.add(archiveTable);saved=await load();
@@ -112,11 +112,11 @@ export async function track(env=process.env,{mode='inspect',now=new Date(),facto
    }
   }
   const rows=calculateOutcomes(archives,dates,bars);
-  const summary={status:mode==='apply'?'OK':'INSPECT_ONLY',asof:dates.at(-1)??null,receipt_day:today,archived_receipts:archives.length,today_snapshot_available:!!candidate,today_already_archived:already,today_candidate_count:candidate?.candidates.length??0,observations:rows.length,unique_codes:new Set(rows.map(x=>x.market+'/'+x.code)).size,results:aggregate(rows),calendar_verified:false,corporate_actions_verified:false,entry_basis:'FIRST_AUDITED_CLOSE_STRICTLY_AFTER_RECORDING_DAY',scope:'RECENT_60_ARCHIVED_RECEIPTS'};
+  const summary={status:mode==='apply'?(archives.length?'OK':'NO_PROSPECTIVE_COHORT'):'INSPECT_ONLY',asof:dates.at(-1)??null,receipt_day:today,archived_receipts:archives.length,today_snapshot_available:!!candidate,today_already_archived:already,today_candidate_count:candidate?.candidates.length??0,observations:rows.length,unique_codes:new Set(rows.map(x=>x.market+'/'+x.code)).size,results:aggregate(rows),calendar_verified:false,corporate_actions_verified:false,entry_basis:'FIRST_AUDITED_CLOSE_STRICTLY_AFTER_RECORDING_DAY',scope:'RECENT_60_ARCHIVED_RECEIPTS'};
   if(mode==='apply'){
    // Private database only, not an Actions artifact or public raw prices.
    const report=JSON.stringify({schema:'BLUE_ROTATION_OUTCOMES_V1',...summary,generated_at:at,rows});
-   check(Buffer.byteLength(report)<=8000000,'ROTATION_REPORT_LIMIT');
+   check(Buffer.byteLength(report)<=512*1024,'ROTATION_REPORT_LIMIT');
    const digest=sha(report);
    await write('CREATE TABLE IF NOT EXISTS '+reportTable+' (receipt_day TEXT PRIMARY KEY,generated_at TEXT NOT NULL,payload_json TEXT NOT NULL,payload_sha256 TEXT NOT NULL)');
    await write('INSERT INTO '+reportTable+'(receipt_day,generated_at,payload_json,payload_sha256) VALUES(?,?,?,?) ON CONFLICT(receipt_day) DO UPDATE SET generated_at=excluded.generated_at,payload_json=excluded.payload_json,payload_sha256=excluded.payload_sha256 WHERE excluded.generated_at>'+reportTable+'.generated_at',[today,at,report,digest]);
