@@ -35,3 +35,11 @@ test('stale study and retrospective separation',()=>{
  assert.equal(selectStockResearch({...args,day:'2026-11-31'}).profits.length,0);
  assert.equal(selectStockResearch({...args,profit:{...args.profit,asof:'2026-11-23'}}).profits.length,0);
 });
+
+test('representative feature choice does not favor positive holdout direction',()=>{
+ const precise={...profile(base+'|BULL|BODY_30_50','CLOSE_POSITION','CLOSE_MID','HOLDOUT_DISAGREES'),train:{n:80},holdout:{n:40}};
+ const broad=profile(base,'CLOSE_POSITION','CLOSE_MID','HOLDOUT_AGREES_EXPLORATORY');
+ const r=selectStockResearch({...args,profiles:{asof,rows:[broad,precise]}});
+ assert.equal(r.high.length,1);
+ assert.equal(r.high[0].status,'HOLDOUT_DISAGREES');
+});
