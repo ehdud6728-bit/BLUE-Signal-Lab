@@ -7,6 +7,7 @@ from collections import defaultdict
 from datetime import date
 from pathlib import Path
 from statistics import mean, median
+from math import ceil
 
 HORIZONS = (3, 5, 10, 20)
 REQUIRED = {"code", "signal_date", "pattern", "close", "forward_3d", "forward_5d", "forward_10d", "forward_20d"}
@@ -41,6 +42,23 @@ def load(path):
                 raise ValueError("CSV line %d: %s" % (line, e)) from e
     return rows
 
+def return_profile(returns):
+    """Gross close-to-close observations, not executable strategy P/L."""
+    wins=[r for r in returns if r>0]
+    losses=[r for r in returns if r<0]
+    gain=mean(wins) if wins else None
+    loss=mean(losses) if losses else None
+    tail=sorted(returns)[:max(1,ceil(len(returns)*.05))]
+    def rnd(v):return round(v,3) if v is not None else None
+    return dict(win_count=len(wins),loss_count=len(losses),flat_count=len(returns)-len(wins)-len(losses),
+        mean_gain_pct=rnd(gain),mean_loss_pct=rnd(loss),
+        payoff_ratio=rnd(gain/abs(loss) if gain is not None and loss is not None else None),
+        profit_factor=rnd(sum(wins)/abs(sum(losses)) if losses else None),
+        worst_5pct_mean_pct=rnd(mean(tail)),tail_count=len(tail),
+        target_5_pct=round(100*sum(r>=5 for r in returns)/len(returns),2),
+        target_10_pct=round(100*sum(r>=10 for r in returns)/len(returns),2),
+        target_20_pct=round(100*sum(r>=20 for r in returns)/len(returns),2))
+
 def summarize(rows):
     groups = defaultdict(list)
     for code, day, pattern, close, future in rows:
@@ -60,6 +78,7 @@ def summarize(rows):
             "median_return_pct": round(median(returns), 3),
             "min_return_pct": round(min(returns), 3),
             "max_return_pct": round(max(returns), 3),
+            "return_profile": return_profile(returns),
             "warning": "DESCRIPTIVE_ONLY_NOT_VALIDATED_WIN_RATE"
         })
     return sorted(result, key=lambda x: (x["horizon_trading_days"], -x["positive_return_probability_pct"], -x["sample_count"], x["pattern"]))
