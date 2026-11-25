@@ -6,6 +6,7 @@ on:
       - 'tools/turso/provisional-input-export*'
       - 'tools/turso/provisional-pattern-publish*'
       - 'tools/turso/provisional-publication-gate*'
+      - 'tools/turso/provisional-publication-audit*'
       - 'tools/turso/session-evidence-audit*'
       - '.github/workflows/blue_turso_provisional_audit.yml'
       - '.github/workflows/blue_provisional_pattern_publish.yml'
@@ -37,4 +38,4 @@ jobs:
         with:
           node-version: '22'
       - run: npm --prefix tools/turso install --no-audit --no-fund --ignore-scripts --no-package-lock
-      - run: node --test tools/turso/provisional-input-export.test.mjs tools/turso/provisional-pattern-publish.test.mjs tools/turso/provisional-publication-gate.test.mjs tools/turso/session-evidence-audit.test.mjs
+      - run: node --test tools/turso/provisional-input-export.test.mjs tools/turso/provisional-pattern-publish.test.mjs tools/turso/provisional-publication-gate.test.mjs tools/turso/session-evidence-audit.test.mjs tools/turso/provisional-publication-audit.test.mjs
