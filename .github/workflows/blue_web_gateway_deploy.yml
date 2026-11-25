@@ -1,0 +1,153 @@
+name: BLUE iOS Same Origin Gateway Deploy (EXPLICIT)
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        type: choice
+        options: [verify_only, deploy_api_and_web]
+        default: verify_only
+        required: true
+      access_team:
+        description: 'Exact frontend Access team domain (team.cloudflareaccess.com, no https://)'
+        type: string
+        required: false
+      access_aud:
+        description: 'Exact frontend Access Application Audience (64 hex characters)'
+        type: string
+        required: false
+      confirm_policy:
+        description: 'For deployment only: compare web and API Access policies, then type WEB_API_ACCESS_POLICY_VERIFIED'
+        type: string
+        required: false
+permissions:
+  contents: read
+concurrency:
+  group: blue-web-manual-production-deploy
+  cancel-in-progress: false
+jobs:
+  verify_and_deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Validate scope and explicit authorization
+        env:
+          MODE: ${{ inputs.mode }}
+          TEAM: ${{ inputs.access_team }}
+          AUD: ${{ inputs.access_aud }}
+          CONFIRM: ${{ inputs.confirm_policy }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REPOSITORY" = ehdud6728-bit/BLUE-Signal-Lab
+          test "$MODE" = verify_only || test "$MODE" = deploy_api_and_web
+          if [[ "$MODE" = deploy_api_and_web ]]; then
+            test "$GITHUB_REF" = refs/heads/main
+            test "$CONFIRM" = WEB_API_ACCESS_POLICY_VERIFIED
+            [[ "$TEAM" =~ ^[a-z0-9-]+\.cloudflareaccess\.com$ ]]
+            [[ "$AUD" =~ ^[a-f0-9]{64}$ ]]
+            echo 'Operator confirmed existing Access policy review; this is not an independent policy audit.'
+          fi
+      - name: Offline gateway authentication tests
+        run: node --test tests/test_web_gateway.mjs
+      - working-directory: worker
+        run: npm install --no-package-lock --no-audit --no-fund
+      - name: Dry-run API Worker
+        working-directory: worker
+        run: npx wrangler deploy --dry-run
+      - working-directory: web
+        run: npm install --no-package-lock --no-audit --no-fund
+      - name: Build same-origin web bundle
+        working-directory: web
+        env:
+          VITE_API_BASE: https://blue-signal-lab.ehdud6728.workers.dev
+        run: npm run build
+      - name: Dry-run gateway Worker
+        working-directory: web
+        run: npx --yes wrangler@4 deploy --config wrangler.gateway.jsonc --dry-run
+      - name: Read existing Worker settings and rollback versions
+        if: inputs.mode == 'deploy_api_and_web'
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_WORKER_DEPLOY_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$CLOUDFLARE_API_TOKEN"
+          test -n "$CLOUDFLARE_ACCOUNT_ID"
+          for worker in blue-signal-lab-api-v2 blue-signal-lab; do
+            for endpoint in settings deployments; do
+              curl --fail --silent --show-error --max-time 30 \
+                -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+                "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/$worker/$endpoint" \
+                -o "$RUNNER_TEMP/$worker-$endpoint.json"
+            done
+          done
+          python - <<'PY'
+          import json,os,re
+          from pathlib import Path
+          root=Path(os.environ['RUNNER_TEMP'])
+          def read(worker,endpoint):
+              body=json.loads((root/f'{worker}-{endpoint}.json').read_text())
+              if body.get('success') is not True or not isinstance(body.get('result'),dict):
+                  raise SystemExit('BLOCKED: invalid Worker metadata')
+              return body['result']
+          for worker in ('blue-signal-lab-api-v2','blue-signal-lab'):
+              settings=read(worker,'settings')
+              bindings=settings.get('bindings')
+              if not isinstance(bindings,list) or any(not isinstance(b,dict) for b in bindings):
+                  raise SystemExit('BLOCKED: invalid Worker bindings')
+              if worker=='blue-signal-lab':
+                  for b in bindings:
+                      if b.get('type') in ('assets','version_metadata'): continue
+                      if b.get('type')=='service' and b.get('name')=='BLUE_API' and b.get('service')=='blue-signal-lab-api-v2' and b.get('entrypoint')=='BlueWebGateway': continue
+                      raise SystemExit('BLOCKED: unexpected frontend binding')
+              else:
+                  names={b.get('name'):b.get('type') for b in bindings}
+                  if names.get('DB')!='d1' or names.get('KIS_COLLECTOR')!='service':
+                      raise SystemExit('BLOCKED: expected API bindings missing')
+              deployments=read(worker,'deployments').get('deployments')
+              if not isinstance(deployments,list) or not deployments:
+                  raise SystemExit('BLOCKED: no rollback deployment')
+              latest=max(deployments,key=lambda d:d.get('created_on',''))
+              versions=latest.get('versions',[])
+              if len(versions)!=1 or versions[0].get('percentage')!=100:
+                  raise SystemExit('BLOCKED: existing gradual deployment')
+              version=versions[0].get('version_id','')
+              if not re.fullmatch(r'[a-f0-9-]{36}',version):
+                  raise SystemExit('BLOCKED: invalid rollback version')
+              print(f'BLUE_ROLLBACK_VERSION {worker} {version}')
+          PY
+      - name: Deploy existing API with verified gateway configuration
+        if: inputs.mode == 'deploy_api_and_web'
+        working-directory: worker
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_WORKER_DEPLOY_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          TEAM: ${{ inputs.access_team }}
+          AUD: ${{ inputs.access_aud }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          npx wrangler deploy --keep-vars --var "BLUE_WEB_ACCESS_TEAM:$TEAM" "BLUE_WEB_ACCESS_AUD:$AUD"
+          echo BLUE_GATEWAY_API_DEPLOYED
+      - name: Deploy same-origin frontend to existing URL
+        if: inputs.mode == 'deploy_api_and_web'
+        working-directory: web
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_WORKER_DEPLOY_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          npx --yes wrangler@4 deploy --config wrangler.gateway.jsonc
+          echo BLUE_SAME_ORIGIN_WEB_DEPLOYED
+          echo 'Authenticated Safari/PWA and unauthorized-account checks still required.'
+      - name: Verify-only summary
+        if: inputs.mode == 'verify_only'
+        run: echo 'BLUE_GATEWAY_VERIFY_ONLY - no production changes'
