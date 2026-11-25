@@ -63,7 +63,7 @@ export default function StopLossRow({active,code,day,baseline,signals,highestObs
     <span className="r15107-stop-option-value"><b>{waiting?'계산 중':row.price===null?'산출 불가':money(row.price)}</b>
      {row.baselinePct!==null&&<small>{percent(row.baselinePct)}</small>}</span>
    </button>)}
-   <small className="r15107-stop-note">대표 기준을 누르면 이 기기의 장바구니에 저장됩니다. 트레일링은 이후 관측 최고가에 발견일 ATR을 적용한 추정치입니다. 실제 주문 호가단위·장중 체결·수정주가는 반영하지 않습니다. 자동 매도나 손절 경고가 아닙니다.</small>
+   <small className="r15107-stop-note">대표 기준을 누르면 이 기기의 장바구니에 저장됩니다. 발견일 일봉 종가와 발견가가 일치하지 않거나 일봉이 중복·불량이면 산출하지 않습니다. 트레일링은 KRX 확정 일봉으로 확인된 관측 최고가에 발견일 ATR을 적용한 추정치이며, 잠정 고가는 사용하지 않습니다. 기간 전체 고가 확보는 보장되지 않습니다. 실제 주문 호가단위·장중 체결·수정주가는 반영하지 않습니다. 자동 매도나 손절 경고가 아닙니다.</small>
   </div>
  </details>;
 }

@@ -33,20 +33,35 @@ type HighInputs={
  discoveryDay:string;
  performance?:{quote_day?:string|null;quote_high?:number|null;
   highest_day?:string|null;highest_price?:number|null}|null;
- compared?:{period_high?:number|null;period_high_day?:string|null;high_complete?:boolean}|null;
+ compared?:{period_high?:number|null;period_high_day?:string|null;period_high_source?:string|null;high_complete?:boolean}|null;
  recent?:{price:number;day:string}|null;
 };
+
+function validLaterExtreme(price:number|null|undefined,day:string|null|undefined,discoveryDay:string){
+ const today=new Date(Date.now()+9*3600000).toISOString().slice(0,10);
+ return typeof price==='number'&&Number.isFinite(price)&&price>0&&typeof day==='string'&&
+  /^20\d{2}-\d{2}-\d{2}$/.test(day)&&Number.isFinite(Date.parse(day+'T00:00:00Z'))&&
+  new Date(day+'T00:00:00Z').toISOString().slice(0,10)===day&&day>discoveryDay&&day<=today;
+}
+export function confirmedTrailingHigh(high:ObservedPrice|null):ObservedPrice|null{
+ return high?.source==='KRX_VERIFIED_EOD_HIGH'?high:null;
+}
 
 /** A saved price without a later observation date is not a post-discovery high. */
 export function highestObservedPrice({discoveryDay,performance,compared,recent}:HighInputs):ObservedPrice|null{
  const candidates:ObservedPrice[]=[];
  const add=(price:number|null|undefined,day:string|null|undefined,source:string)=>{
-  if(typeof price==='number'&&Number.isFinite(price)&&price>0&&day&&day>discoveryDay)
-   candidates.push({price,day,source});
+  if(validLaterExtreme(price,day,discoveryDay))
+   candidates.push({price:price!,day:day!,source});
  };
+ // The Turso comparison already resolves KRX-versus-KIS conflicts per day.
+ // Do not reintroduce an incompatible legacy maximum from another source.
+ if(['KRX_VERIFIED_EOD_HIGH','KIS_TURSO_DAY_HIGH'].includes(compared?.period_high_source||'')&&
+    validLaterExtreme(compared?.period_high,compared?.period_high_day,discoveryDay))
+  return {price:compared!.period_high!,day:compared!.period_high_day!,source:compared!.period_high_source!};
  add(performance?.quote_high,performance?.quote_day,'장중 관측');
  add(performance?.highest_price,performance?.highest_day,'KIS 일봉');
- add(compared?.period_high,compared?.period_high_day,compared?.high_complete?'수집 기간':'부분 관측');
+ add(compared?.period_high,compared?.period_high_day,compared?.period_high_source||(compared?.high_complete?'수집 기간':'부분 관측'));
  add(recent?.price,recent?.day,'최근 관측 가격');
  return candidates.sort((a,b)=>b.price-a.price||a.day.localeCompare(b.day))[0]||null;
 }
@@ -55,8 +70,8 @@ export function lowestObservedPrice(discoveryDay:string,compared?:{
  period_low?:number|null;period_low_day?:string|null;period_low_source?:string|null
 }|null):ObservedPrice|null{
  const price=compared?.period_low,day=compared?.period_low_day;
- return typeof price==='number'&&Number.isFinite(price)&&price>0&&day&&day>discoveryDay?
-  {price,day,source:compared?.period_low_source||'저가 출처 미상'}:null;
+ return validLaterExtreme(price,day,discoveryDay)?
+  {price:price!,day:day!,source:compared?.period_low_source||'저가 출처 미상'}:null;
 }
 
 export function basketReturn(price:number|null|undefined,baseline:number):number|null{
