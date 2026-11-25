@@ -6,12 +6,15 @@ export type StopBar={t:string;o:number;h:number;l:number;c:number};
 export type StopCandidate={method:StopMethod;label:string;basis:string;price:number|null;baselinePct:number|null};
 
 function finitePositive(v:unknown):v is number{return typeof v==='number'&&Number.isFinite(v)&&v>0;}
+function validDay(v:unknown):v is string{
+ return typeof v==='string'&&/^20\d{2}-\d{2}-\d{2}$/.test(v)&&Number.isFinite(Date.parse(v+'T00:00:00Z'))&&new Date(v+'T00:00:00Z').toISOString().slice(0,10)===v;
+}
 function validBar(v:unknown):v is StopBar{
  if(!v||typeof v!=='object')return false;
  const b=v as Partial<StopBar>;
- return typeof b.t==='string'&&/^20\d{2}-\d{2}-\d{2}$/.test(b.t)&&
+ return validDay(b.t)&&
   finitePositive(b.o)&&finitePositive(b.h)&&finitePositive(b.l)&&finitePositive(b.c)&&
-  b.h>=b.l&&b.h>=b.c&&b.l<=b.c;
+  b.h>=Math.max(b.o,b.c,b.l)&&b.l<=Math.min(b.o,b.c);
 }
 const safeStop=(raw:number|null,baseline:number,canExceed=false):number|null=>{
  if(raw===null||!Number.isFinite(raw)||raw<=0)return null;
@@ -22,9 +25,13 @@ const safeStop=(raw:number|null,baseline:number,canExceed=false):number|null=>{
 /** Original unadjusted daily OHLC until the discovery date. No future candles. */
 export function calculateStopCandidates(rawBars:unknown,discoveryDay:string,baseline:number,
  observedHigh:number|null=null,observedHighDay:string|null=null):StopCandidate[]{
- const bars=Array.isArray(rawBars)?rawBars.filter(validBar).filter(b=>b.t<=discoveryDay)
-  .sort((a,b)=>a.t.localeCompare(b.t)).slice(-180):[];
- const validBase=finitePositive(baseline);
+ // Invalid or duplicate as-of bars must not silently shorten or inflate
+ // lookback windows. Legitimate future bars are excluded before validation.
+ const asof=Array.isArray(rawBars)?rawBars.filter(b=>!validDay(b?.t)||b.t<=discoveryDay):[];
+ const clean=asof.every(validBar)&&new Set(asof.map(b=>b.t)).size===asof.length;
+ const bars:StopBar[]=clean?asof.sort((a,b)=>a.t.localeCompare(b.t)).slice(-180):[];
+ const validBase=finitePositive(baseline)&&validDay(discoveryDay)&&
+  bars.at(-1)?.t===discoveryDay&&bars.at(-1)?.c===baseline;
  const candidate=(method:StopMethod,label:string,basis:string,raw:number|null,allowAbove=false):StopCandidate=>{
   const price=validBase?safeStop(raw,baseline,allowAbove):null;
   return {method,label,basis,price,baselinePct:price!==null?100*(price/baseline-1):null};
@@ -44,7 +51,7 @@ export function calculateStopCandidates(rawBars:unknown,discoveryDay:string,base
   atr=sum/14;
  }
  const ma20=bars.length>=20?bars.slice(-20).reduce((sum,b)=>sum+b.c,0)/20:null;
- const trailValid=finitePositive(observedHigh)&&typeof observedHighDay==='string'&&
+ const trailValid=finitePositive(observedHigh)&&validDay(observedHighDay)&&observedHighDay<=new Date(Date.now()+9*3600000).toISOString().slice(0,10)&&
   observedHighDay>discoveryDay&&observedHigh>baseline;
  return [
   candidate('SUPPORT','최근 저점','발견일 이전 10거래일 저점 −0.5%',support),
