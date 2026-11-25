@@ -69,6 +69,14 @@ export function validateSnapshot(result,quotes){
     a.observed_stocks===a.eligible_stocks+a.insufficient_history+a.suspicious_gap_excluded&&
     Array.isArray(r.items)&&r.items.length===a.matched_stocks&&a.matched_stocks<=r.eligible&&
     Array.isArray(quotes)&&quotes.length===r.observed,'INVALID_PROVISIONAL_COVERAGE');
+  // New exporter separates raw joined evidence from usable quotes. Legacy
+  // snapshots without the new diagnostics remain valid.
+  if(q.joinedRaw!==undefined){
+    check(count(q.joinedRaw)&&count(q.rejectedCount)&&q.joinedRaw===q.joined+q.rejectedCount&&
+      q.rejected&&typeof q.rejected==='object'&&!Array.isArray(q.rejected)&&
+      Object.values(q.rejected).every(count)&&Object.values(q.rejected).reduce((a,b)=>a+b,0)===q.rejectedCount&&
+      ['INTRADAY_MAX_90_MIN','POST_CLOSE_DAILY_ONLY'].includes(q.quoteAgePolicy),'INVALID_PROVISIONAL_REJECTION_COVERAGE');
+  }
   const byCode=new Map();let newest='',available=0;
   for(const v of quotes){
     const at=timestamp(v.observed_at_utc);

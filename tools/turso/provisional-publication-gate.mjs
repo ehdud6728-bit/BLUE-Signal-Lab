@@ -6,9 +6,16 @@ export async function publicationGate(db,now=new Date(),{scheduled=false}={}){
  const kst=new Date(now.getTime()+32400000),day=kst.toISOString().slice(0,10),clock=kst.toISOString().slice(11,16);
  if(kst.getUTCDay()===0||kst.getUTCDay()===6||clock<'09:00'||clock>='22:00')return {ready:false,day,reason:'OUTSIDE_PUBLICATION_WINDOW'};
  const q=async(sql,args=[])=>(await db.execute({sql,args})).rows;
- if((await q('SELECT trade_day FROM blue_eod_ingest_audit_v1 WHERE trade_day=? AND row_count>=1700',[day])).length)return {ready:false,day,reason:'EOD_ALREADY_AVAILABLE'};
- const ref=(await q('SELECT trade_day FROM blue_eod_ingest_audit_v1 WHERE trade_day<? AND row_count>=1700 ORDER BY trade_day DESC LIMIT 1',[day]))[0];
+ const audited=async(row)=>{
+  const expected=Number(row.row_count);
+  const actual=Number((await q('SELECT COUNT(*) AS n FROM blue_eod_daily_v1 WHERE trade_day=?',[String(row.trade_day)]))[0]?.n);
+  if(!Number.isSafeInteger(expected)||expected<1700||expected>10000||actual!==expected)throw Error('EOD_AUDIT_COUNT_MISMATCH');
+ };
+ const current=(await q('SELECT trade_day,row_count FROM blue_eod_ingest_audit_v1 WHERE trade_day=? AND row_count>=1700',[day]))[0];
+ if(current){await audited(current);return {ready:false,day,reason:'EOD_ALREADY_AVAILABLE'};}
+ const ref=(await q('SELECT trade_day,row_count FROM blue_eod_ingest_audit_v1 WHERE trade_day<? AND row_count>=1700 ORDER BY trade_day DESC LIMIT 1',[day]))[0];
  if(!ref)return {ready:false,day,reason:'NO_AUDITED_REFERENCE'};
+ await audited(ref);
  if(!(await q("SELECT name FROM sqlite_master WHERE type='table' AND name='blue_kis_provisional_daily_v1'")).length)return {ready:false,day,reason:'NO_QUOTE_TABLE'};
  const r=(await q("SELECT COUNT(*) AS n,MAX(observed_at_utc) AS latest FROM blue_kis_provisional_daily_v1 WHERE trade_day=? AND reference_day=? AND market='J' AND date_basis IN ('KIS_REPORTED_TRADE_DATE','COLLECTOR_KST_REGULAR_SESSION') AND source IN ('KIS_REST_INQUIRE_PRICE_PROVISIONAL','KIS_REST_INQUIRE_DAILY_PRICE_PROVISIONAL')",[day,String(ref.trade_day)]))[0];
  const n=Number(r.n);

@@ -134,3 +134,14 @@ test('reject provisional research that includes the unconfirmed day as a histori
   example.exit_day=day;
   assert.throws(()=>validateSnapshot(data.result,data.quotes),/INVALID_PROVISIONAL_RESEARCH_CASE/);
 });
+
+test('rejects inconsistent quote rejection totals while retaining legacy compatibility',()=>{
+ const d=fixture();
+ Object.assign(d.result.quote_coverage,{joinedRaw:4,rejectedCount:2,rejected:{PRE_CLOSE_OBSERVATION:2},quoteAgePolicy:'POST_CLOSE_DAILY_ONLY'});
+ assert.equal(validateSnapshot(d.result,d.quotes).rows.length,2);
+ d.result.quote_coverage.rejected.PRE_CLOSE_OBSERVATION=1;
+ assert.throws(()=>validateSnapshot(d.result,d.quotes),/INVALID_PROVISIONAL_REJECTION_COVERAGE/);
+ d.result.quote_coverage.rejected.PRE_CLOSE_OBSERVATION=2;
+ d.result.quote_coverage.joinedRaw=5;
+ assert.throws(()=>validateSnapshot(d.result,d.quotes),/INVALID_PROVISIONAL_REJECTION_COVERAGE/);
+});

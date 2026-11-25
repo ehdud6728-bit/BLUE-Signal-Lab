@@ -9,7 +9,7 @@ const make=(code,amount,absent=false)=>{
  if(!absent)p.accumulated_amount_krw=amount;
  return {code,source,observed_at_utc,close:100,open:100,high:100,low:100,volume:20,listing_market:'KOSPI',payload_json:JSON.stringify(p)};
 };
-const client=(n=1700)=>({execute:async({sql})=>({rows:sql.includes('GROUP BY source')?[{source,n:'3',oldest:'2026-11-24T10:19:00Z',newest:'2026-11-24T10:19:00Z'}]:sql.includes('COUNT(*)')?[{n}]:sql.includes('JOIN')?[make('000001',null,true),make('000002',null),make('000003',2000)]:[{trade_day:reference,row_count:1700}]})});
+const client=(n=1700,quotes=[make('000001',null,true),make('000002',null),make('000003',2000)])=>({execute:async({sql})=>({rows:sql.includes('GROUP BY source')?[{source,n:'3',oldest:'2026-11-24T10:19:00Z',newest:'2026-11-24T10:19:00Z'}]:sql.includes('COUNT(*)')?[{n}]:sql.includes('JOIN')?quotes:[{trade_day:reference,row_count:1700}]})});
 test('distinguishes old payload from new null amount',async()=>{
  const r=await exportInputs(client(),day,now,260,{quotesOnly:true});
  assert.equal(r.coverage.missingAmount,2);
@@ -22,4 +22,40 @@ test('distinguishes old payload from new null amount',async()=>{
 });
 test('rejects incomplete reference even in quotes-only mode',async()=>{
  await assert.rejects(exportInputs(client(1699),day,now,260,{quotesOnly:true}),/EOD_COUNT_MISMATCH/);
+});
+
+function quoteAt(code,at,sourceOverride=source,overrides={}){
+ const q=make(code,2000);
+ const p=JSON.parse(q.payload_json);
+ return {...q,source:sourceOverride,observed_at_utc:at,payload_json:JSON.stringify({...p,received_at_utc:at,...overrides})};
+}
+test('intraday rejects only stale, mismatched, malformed or invalid evidence',async()=>{
+ const at='2026-11-24T05:20:00Z', fresh='2026-11-24T05:19:00Z';
+ const rows=[quoteAt('000001',fresh),
+  quoteAt('000002','2026-11-24T03:49:00Z'),
+  quoteAt('000003',fresh,source,{price:101}),
+  {...quoteAt('000004',fresh),payload_json:'{broken'},
+  {...quoteAt('000005',fresh),low:0},
+  quoteAt('000006','2026-11-24T05:21:00Z'),
+  quoteAt('000007','2026-11-24T03:50:00Z','KIS_REST_INQUIRE_PRICE_PROVISIONAL')];
+ const r=await exportInputs(client(1700,rows),day,new Date(at),260,{quotesOnly:true});
+ assert.deepEqual(r.quotes.map(q=>q.code),['000001','000007']);
+ assert.equal(r.coverage.joinedRaw,7);
+ assert.equal(r.coverage.joined,2);
+ assert.equal(r.coverage.rejectedCount,5);
+ assert.deepEqual(r.coverage.rejected,{STALE_INTRADAY:1,QUOTE_MISMATCH:1,MALFORMED_PAYLOAD:1,INVALID_OHLCV:1,INVALID_TIMESTAMP:1});
+ assert.equal(r.coverage.quoteAgePolicy,'INTRADAY_MAX_90_MIN');
+});
+test('after regular close only post-close exact-day daily-price observations qualify',async()=>{
+ const rows=[quoteAt('000001','2026-11-24T06:29:59Z'),
+  quoteAt('000002','2026-11-24T06:30:00Z'),
+  quoteAt('000003','2026-11-24T06:31:00Z','KIS_REST_INQUIRE_PRICE_PROVISIONAL')];
+ const r=await exportInputs(client(1700,rows),day,new Date('2026-11-24T10:20:00Z'),260,{quotesOnly:true});
+ assert.deepEqual(r.quotes.map(q=>q.code),['000002']);
+ assert.equal(r.coverage.rejected.PRE_CLOSE_OBSERVATION,2);
+ assert.equal(r.coverage.quoteAgePolicy,'POST_CLOSE_DAILY_ONLY');
+});
+test('duplicate join evidence fails closed rather than selecting an arbitrary quote',async()=>{
+ const q=make('000001',2000);
+ await assert.rejects(exportInputs(client(1700,[q,q]),day,now,260,{quotesOnly:true}),/DUPLICATE_QUOTE_EVIDENCE/);
 });
