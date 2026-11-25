@@ -175,7 +175,18 @@ export async function collectTursoProvisional(env,now=new Date(),deps={}){
     const found=deps.token?{status:'READY',token:await deps.token(client,env,now)}:
       await tursoDirectCachedToken(client,env,now);
     if(!found.token)return {status:found.status==='READY'?'TURSO_TOKEN_MISSING':found.status,asof:day};
-    const quotes=[];let rejected=0,previous=0,rateLimited=false;let turnoverValid=0,turnoverMissing=0;
+    const quotes=[];let rejected=0,previous=0,rateLimited=false,cutoffReached=false;let turnoverValid=0,turnoverMissing=0;
+    // Keep the original phase and trade day. A cron batch can cross a boundary
+    // while pacing or awaiting an HTTP response; never label the next phase
+    // as the earlier one. Explicit overnight KRX-failure recovery is separate.
+    const clock=()=>deps.clock?deps.clock():(deps.receivedAt||new Date());
+    const withinWindow=stamp=>{
+      if(!(stamp instanceof Date)||!Number.isFinite(stamp.getTime()))return false;
+      const local=kstParts(stamp);
+      return local.date===kst.date&&(afterClose?
+        local.seconds>=REGULAR_END&&local.seconds<POST_CLOSE_END:
+        local.seconds>=9*3600&&local.seconds<REGULAR_END);
+    };
     const reasons={};
     for(const r of selected.rows){
       const code=String(r.code||''),close=Number(r.close);
@@ -183,12 +194,17 @@ export async function collectTursoProvisional(env,now=new Date(),deps={}){
         rejected++;reasons.INVALID_REFERENCE_SYMBOL=(reasons.INVALID_REFERENCE_SYMBOL||0)+1;continue;
       }
       if(previous&&!deps.noPacing)await (deps.sleep||sleep)(450);
+      if(!withinWindow(clock())){cutoffReached=true;break;}
       previous++;
       try{
         const json=afterClose
           ?await (deps.quoteDaily||getKisChartDailyQuote)(env,found.token,'J',code,kst.date)
           :await (deps.quote||getKisQuote)(env,found.token,'J',code);
-        const received=deps.receivedAt||new Date();
+        const received=clock();
+        if(!withinWindow(received)){
+          rejected++;reasons.RESPONSE_OUTSIDE_COLLECTION_WINDOW=(reasons.RESPONSE_OUTSIDE_COLLECTION_WINDOW||0)+1;
+          cutoffReached=true;break;
+        }
         const q=parseQuote({code,name:String(r.name||'').slice(0,70),
           eod_close:close,eod_asof:day,eod_signals:'',
           origin:'TURSO_VERIFIED_EOD_PROVISIONAL'},
@@ -214,7 +230,7 @@ export async function collectTursoProvisional(env,now=new Date(),deps={}){
     }
     if(mode==='FULL'){
       const nextCap=rateLimited?Math.max(FULL_MIN,Math.floor(batchCap/2)):
-        rejected>selected.rows.length/2?batchCap:Math.min(FULL_PAGE,batchCap+5);
+        cutoffReached||rejected>selected.rows.length/2?batchCap:Math.min(FULL_PAGE,batchCap+5);
       const cooldown=new Date(now.getTime()+(rateLimited?COOLDOWN_MS:0)).toISOString();
       await client.execute({sql:`INSERT INTO blue_kis_provisional_pacing_v1
         (trade_day,batch_cap,cooldown_until_utc) VALUES(?,?,?)
@@ -222,8 +238,8 @@ export async function collectTursoProvisional(env,now=new Date(),deps={}){
         cooldown_until_utc=excluded.cooldown_until_utc`,
         args:[kst.date,nextCap,cooldown]});
     }
-    if(!quotes.length)return {status:rateLimited?'KIS_RATE_LIMIT_BACKOFF':'NO_VALID_QUOTES',asof:day,page,
-      attempted:previous,rejected,rate_limited:rateLimited,reasons};
+    if(!quotes.length)return {status:rateLimited?'KIS_RATE_LIMIT_BACKOFF':cutoffReached?'COLLECTION_WINDOW_ENDED':'NO_VALID_QUOTES',asof:day,page,
+      attempted:previous,rejected,rate_limited:rateLimited,window_ended:cutoffReached,reasons};
     // No confirmed EOD/research/audit table is modified by these statements.
     await client.execute(`CREATE TABLE IF NOT EXISTS blue_kis_provisional_daily_v1 (
       trade_day TEXT NOT NULL,code TEXT NOT NULL,market TEXT NOT NULL,
@@ -236,6 +252,6 @@ export async function collectTursoProvisional(env,now=new Date(),deps={}){
     return {status:rateLimited?'SAVED_WITH_KIS_COOLDOWN':'SAVED',mode,asof:day,trade_day:kst.date,
       phase:afterClose?'KRX_POST_CLOSE':'KRX_REGULAR',
       page,pages,attempted:previous,saved:quotes.length,rejected,
-      rate_limited:rateLimited,batch_cap:batchCap,turnover_valid:turnoverValid,turnover_missing:turnoverMissing,reasons};
+      rate_limited:rateLimited,window_ended:cutoffReached,batch_cap:batchCap,turnover_valid:turnoverValid,turnover_missing:turnoverMissing,reasons};
   }finally{client.close();}
 }
