@@ -1,4 +1,5 @@
 import {useMemo,useState} from 'react';
+import PrivateResearchCases from './PrivateResearchCases';
 import {RECENT_ASOF,RECENT_ROWS,RECENT_SESSIONS,RECENT_RECOMMENDATIONS} from './recent-pattern-data';
 import {PROFITABILITY_DATA} from './research-profitability-data';
 import {patternLabel} from './research-pattern-label';
@@ -57,6 +58,7 @@ export default function ResearchCenter({onNavigate}:{onNavigate:(tab:ResearchTab
  return <section className="rc-center">
  <header className="rc-title"><div><h2>BLUE 통합 연구센터</h2><small>{RECENT_ASOF} 기준 · 최근 {RECENT_SESSIONS}개 감사 관측일 범위</small></div><span>연구용</span></header>
  <div className="rc-note">기술패턴 성과는 신호일 종가 기준 과거 관측이며 미래 상승 확률이 아닙니다. 기간별 표본이 다르고 독립 검증 전입니다.</div>
+ <PrivateResearchCases/>
  <Periods value={h} onChange={setH}/>
  <section className="rc-section"><div className="rc-heading"><h3>핵심 상승 관찰 조건</h3><button type="button" className="rc-link" onClick={()=>onNavigate('recommend')}>전체 보기 ›</button></div>
  {best?<><strong className="rc-best">{patternLabel(best.pattern)}</strong><div className="rc-metrics"><div><span>상승 관측률</span><b className="rc-up">{pct(best.positive_return_probability_pct)}</b></div><div><span>중앙 수익률</span><b className={tone(best.median_return_pct)}>{signed(best.median_return_pct)}</b></div><div><span>표본</span><b>{best.sample_count}건</b></div></div><small>{best.distinct_signal_dates}개 신호일 · {best.distinct_stocks}종목 · 최악 종가 수익률 {signed(best.min_return_pct)}</small></>:<p>이 기간에 게시된 단기 추천 조건이 없습니다.</p>}
