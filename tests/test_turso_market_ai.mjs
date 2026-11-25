@@ -83,3 +83,35 @@ test('official calendar preserves ET/UTC dates, filters passed events and expire
  assert.equal(stale.facts.macro_calendar.events.length,0);
  assert.ok(!stale.refs.some(x=>x.id.startsWith('E_')));
 });
+
+test('market evidence quality distinguishes receipt from trade day, partial flows and mixed global dates',()=>{
+ const input=fixture();
+ let q=buildMarketEvidence(input,now).facts.quality;
+ assert.equal(q.domestic_quote_day,'UNVERIFIED');
+ assert.equal(q.domestic_receipt,'OLD_OR_UNKNOWN_RECEIPT');
+ assert.equal(q.breadth,'BOTH_MARKETS');
+ assert.equal(q.flow_3_observations,'PARTIAL_OR_MISSING');
+ assert.equal(q.us_core,'MIXED_OR_MISSING');
+ assert.equal(q.domestic_trends,'SAME_DATED_OBSERVATIONS');
+ assert.equal(q.candidates,'ALIGNED');
+ assert.equal(q.decision_basis,'CONDITIONAL_ONLY');
+ input.trends.global.push(...['.SPX','.NDX'].map(symbol=>({name:symbol,symbol,summary:{day,close:100,change_pct:1}})));
+ q=buildMarketEvidence(input,now).facts.quality;
+ assert.equal(q.us_core,'SAME_DATED_OBSERVATIONS');
+ assert.equal(q.us_core_day,day);
+ input.trends.global.at(-1).summary.day='2026-11-23';
+ assert.equal(buildMarketEvidence(input,now).facts.quality.us_core,'MIXED_OR_MISSING');
+ input.trends.global.at(-1).summary.day='2026-11-26';
+ assert.equal(buildMarketEvidence(input,now).facts.quality.us_core,'MIXED_OR_MISSING');
+ input.rotation.receipt_day='2026-11-25';
+ assert.equal(buildMarketEvidence(input,now).facts.quality.domestic_receipt,'TODAY_RECEIPT_ONLY');
+ assert.equal(buildMarketEvidence(input,now).facts.quality.domestic_quote_day,'UNVERIFIED');
+});
+
+test('duplicate flow dates do not satisfy three-observation evidence quality',()=>{
+ const input=fixture();
+ for(const m of input.rotation.markets)m.flows=[{day,foreign:'BUY',institution:'BUY'},{day,foreign:'BUY',institution:'BUY'},{day:'2026-11-23',foreign:'BUY',institution:'BUY'}];
+ assert.equal(buildMarketEvidence(input,now).facts.quality.flow_3_observations,'PARTIAL_OR_MISSING');
+ for(const m of input.rotation.markets)m.flows[1]={day:'2026-11-20',foreign:'BUY',institution:'BUY'};
+ assert.equal(buildMarketEvidence(input,now).facts.quality.flow_3_observations,'BOTH_MARKETS');
+});

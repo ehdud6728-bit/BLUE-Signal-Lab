@@ -5,7 +5,7 @@ type Scenario={condition:string;response:string;invalidation:string;refs:string[
 type Report={summary:Part;risks:Part;rotation:Part;watch:Part;scenarios:{rise:Scenario;range:Scenario;fall:Scenario}};
 type MacroEvent={id:string;name:string;kind:string;reference_period:string;scheduled_et:string;scheduled_utc:string;source_url:string;meeting_et?:string;status:string};
 type Macro={status:string;reviewed_day:string;review_required_after:string;update_mode:string;events:MacroEvent[];vix_futures:{status:string;source_url:string;terms_url:string}};
-type Snapshot={macro?:Macro;status?:string;error?:string;model?:string;cached?:boolean;generated_at?:string;dates?:Record<string,string|null>;refs?:Ref[];limitations?:string[];report?:Report;daily_limit?:number;gemini_key_configured?:boolean};
+type Snapshot={quality?:{domestic_quote_day:string;domestic_receipt:string;breadth:string;flow_3_observations:string;us_core:string;us_core_day:string|null;domestic_trends:string;trend_day:string|null;candidates:string;decision_basis:string};macro?:Macro;status?:string;error?:string;model?:string;cached?:boolean;generated_at?:string;dates?:Record<string,string|null>;refs?:Ref[];limitations?:string[];report?:Report;daily_limit?:number;gemini_key_configured?:boolean};
 const messages:Record<string,string>={ACCESS_REQUIRED:'Cloudflare Access 로그인 필요',ORIGIN_DENIED:'허용된 웹앱 주소에서 실행해 주세요.',GEMINI_KEY_MISSING:'Gemini API 키가 Worker에 등록되지 않았습니다.',GEMINI_AUTH:'Gemini API 권한을 확인해 주세요.',MODEL_NOT_AVAILABLE:'등록된 Gemini 모델의 사용 가능 여부를 확인해 주세요.',GEMINI_BAD_REQUEST:'Gemini 요청 형식 또는 모델 설정을 확인해 주세요.',QUOTA:'Gemini 제공사 호출 한도에 도달했습니다.',DAILY_LIMIT:'오늘 종합 시황 AI 호출 한도에 도달했습니다.',AI_REPORT_INVALID:'AI 답변 형식이나 근거 ID 검증 실패. 미검증 답변은 표시하지 않습니다.',AI_STORAGE_UNAVAILABLE:'Turso AI 저장소 조회 또는 쓰기 실패.',MARKET_EVIDENCE_MISSING:'검증된 시장 자료가 없어 분석할 수 없습니다.',REQUEST_FAILED:'AI 요청 실패. 잠시 뒤 다시 시도해 주세요.',GEMINI_UNAVAILABLE:'Gemini 응답 실패'};
 const fmt=(s:string)=>{try{return new Intl.DateTimeFormat('ko-KR',{timeZone:'Asia/Seoul',dateStyle:'short',timeStyle:'short'}).format(new Date(s));}catch{return s;}};
 function Evidence({ids,refs}:{ids:string[];refs:Ref[]}){
@@ -33,6 +33,16 @@ export default function MarketAiBriefing({api,revision=0}:{api:string;revision?:
  <div className="blue-pattern-heading"><strong>BLUE AI 종합 시황 · 대응 전망</strong><button type="button" disabled={busy} onClick={()=>void load('GET')}>저장 분석 확인</button></div>
  <small>Gemini 생성형 분석 · Turso 자료 기반 · 하루 최대 {data?.daily_limit??5}회 신규 분석 · 같은 근거는 재사용</small>
  <p>시장 방향, 외국인·기관 수급, VIX 및 해외 일봉, 개선 업종과 대장주·후발주 후보를 연결해 설명합니다. 생성 버튼을 누르면 가공된 시장·기술신호 요약을 Gemini에 전송합니다. 종목명과 코드는 보내지 않고 화면에서만 연결합니다.</p>
+ {data?.quality&&<div className="blue-research-card">
+ <strong>판단 근거 상태 · 조건부 전망</strong>
+ <p className="blue-note">국내 실제 거래일 미확인 · 오늘 실시간 시황으로 단정하지 않습니다.</p>
+ <p>시장 폭: {data.quality.breadth==='BOTH_MARKETS'?'양 시장 수치 확보':'일부 누락 또는 미확인'}<br/>
+ 수급: {data.quality.flow_3_observations==='BOTH_MARKETS'?'양 시장 외국인·기관 최근 3관측일 방향 확보':'최근 3관측일 방향 일부 누락'}<br/>
+ 해외 핵심 지수: {data.quality.us_core==='SAME_DATED_OBSERVATIONS'?'동일 기준일 '+data.quality.us_core_day:'기준일 불일치 또는 누락'}<br/>
+ 업종 추세: {data.quality.domestic_trends==='SAME_DATED_OBSERVATIONS'?'동일 기준일 '+data.quality.trend_day:'기준일 불일치 또는 누락'}<br/>
+ 후보 자료: {data.quality.candidates==='ALIGNED'?'현재 추세 세대와 일치':'누락 또는 이전 세대'}</p>
+ <small>자료 확보 여부는 상승 확률 또는 투자 신뢰도 점수가 아닙니다.</small>
+ </div>}
  {macro&&<div className="blue-research-card">
  <strong>주요 경제 일정 · 한국시간</strong>
  <p><small>공식 일정 확인일 {macro.reviewed_day} · 자동 갱신 아님 · 발표 예정이며 변경될 수 있습니다.</small></p>
