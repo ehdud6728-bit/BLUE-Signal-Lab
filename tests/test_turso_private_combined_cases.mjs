@@ -7,7 +7,7 @@ const hash=s=>createHash('sha256').update(s).digest('hex'),day='2026-11-24';
 test('only exact-date verified pages, no writes, reject changed snapshot and corruption',async()=>{
  const db=new DatabaseSync(':memory:');
  db.exec('CREATE TABLE blue_private_case_heads_v1(asof TEXT,snapshot_id TEXT,manifest_json TEXT,manifest_sha256 TEXT); CREATE TABLE blue_private_case_pages_v1(snapshot_id TEXT,base TEXT,cohort TEXT,page INT,payload_json TEXT,payload_sha256 TEXT)');
- const payload=JSON.stringify([{day,code:'000001',indicators:{record_sha256:'a'.repeat(64)}}]),ph=hash(payload);
+ const payload=JSON.stringify([{day,code:'000001',market:'KOSPI',name:null,indicators:{record_sha256:'a'.repeat(64)}}]),ph=hash(payload);
  const groups=['ENV20','ENV20_LOWER_TOUCH'].flatMap(base=>['JOINT','LONG_BULL_NOT_JOINT','LONG_BULL_RSI_GC'].map(group=>{
   const total=base==='ENV20'&&group==='JOINT'?1:0;return {base,group,total,page_hashes:total?[ph]:[],horizons:{}};
  }));
@@ -17,7 +17,11 @@ test('only exact-date verified pages, no writes, reject changed snapshot and cor
  const factory=()=>({execute:async({sql,args})=>{assert.match(sql,/^SELECT/);return {rows:db.prepare(sql).all(...args)};},close(){}});
  const env={TURSO_DATABASE_URL:'https://test.invalid',TURSO_AUTH_TOKEN:'fixture'};
  const run=(extra={})=>tursoPrivateCombinedCases(env,new URLSearchParams({asof:day,base:'ENV20',group:'JOINT',page:'0',...extra}),factory);
- assert.equal((await run()).rows.length,1);
+ const unnamed=await run();assert.equal(unnamed.rows.length,1);assert.equal(unnamed.rows[0].name_source,'UNKNOWN');
+ db.exec("CREATE TABLE blue_symbol_directory_v1(code TEXT,market TEXT,name TEXT,asof_day TEXT); INSERT INTO blue_symbol_directory_v1 VALUES('000001','KOSPI','synthetic name','2026-11-25'),('000001','KOSDAQ','wrong market','2026-11-25')");
+ const named=await run();assert.equal(named.rows[0].display_name,'synthetic name');assert.equal(named.rows[0].name,null);assert.equal(named.rows[0].name_source,'SYMBOL_DIRECTORY');assert.equal(named.rows[0].name_asof_day,'2026-11-25');assert.equal(named.snapshot,unnamed.snapshot);
+ db.exec("INSERT INTO blue_symbol_directory_v1 VALUES('000001','KOSPI','ambiguous','2026-11-25')");
+ assert.equal((await run()).rows[0].display_name,null);
  assert.equal((await run({asof:'2026-11-23'})).status,'NOT_CAPTURED');
  await assert.rejects(run({snapshot:'0'.repeat(64)}),PrivateCaseSnapshotChanged);
  await assert.rejects(run({page:'1'}),InvalidPrivateCaseQuery);
