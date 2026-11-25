@@ -3,6 +3,7 @@
  * Stored in this browser only until user exports/imports a backup.
  */
 import {useEffect,useRef,useState} from 'react';
+import {basketReadDue} from './basket-polling';
 import {Bot,Download,Upload,Trash2,RefreshCw,AlertCircle,ShoppingBasket,Bookmark,BookmarkCheck,ChevronDown} from 'lucide-react';
 import {groupBasketRecords} from './basket-grouping';
 import './r1595-group-price.css';
@@ -180,10 +181,11 @@ export default function SmartBasket({quickAddRequests,onItemsChange,onAddFeedbac
  // Turso audited EOD first; the existing D1 comparison remains a failure fallback.
  const [r1593Prices,setR1593Prices]=useState<Record<string,PriceCompare>>({});
  const [r1593Error,setR1593Error]=useState('');
+ const [compareChecked,setCompareChecked]=useState('');
  useEffect(()=>{
-  if(!active||!idsKey)return;const ctrl=new AbortController();let loading=false;
-  const load=async()=>{if(loading||document.visibilityState==='hidden')return;loading=true;
-   try{const apply=(partial:Record<string,PriceCompare>)=>{if(!ctrl.signal.aborted)setR1593Prices(prev=>({...prev,...partial}));};const result={...await fetchComparedTursoOnly(items.filter(x=>x.discovery),ctrl.signal,apply),...await fetchComparedTursoFirst(items.filter(x=>!x.discovery),ctrl.signal,apply)};if(!ctrl.signal.aborted){setR1593Prices(prev=>({...prev,...result}));setR1593Error('');}}
+  if(!active||!idsKey)return;const ctrl=new AbortController();let loading=false,lastStarted:number|null=null;
+  const load=async()=>{if(loading||ctrl.signal.aborted||document.visibilityState==='hidden'||!basketReadDue('COMPARE',lastStarted))return;loading=true;lastStarted=Date.now();
+   try{const apply=(partial:Record<string,PriceCompare>)=>{if(!ctrl.signal.aborted)setR1593Prices(prev=>({...prev,...partial}));};const result={...await fetchComparedTursoOnly(items.filter(x=>x.discovery),ctrl.signal,apply),...await fetchComparedTursoFirst(items.filter(x=>!x.discovery),ctrl.signal,apply)};if(!ctrl.signal.aborted){setR1593Prices(prev=>({...prev,...result}));setCompareChecked(new Date().toISOString());setR1593Error('');}}
    catch(e){if(!ctrl.signal.aborted)setR1593Error(e instanceof Error?e.message:'최근 시세 확인 실패');}
    finally{loading=false;}
   };
@@ -212,10 +214,11 @@ export default function SmartBasket({quickAddRequests,onItemsChange,onAddFeedbac
  // The UI checks frequently; server collection itself occurs via separate Cron.
  useEffect(()=>{
    if(!active||!confirmedKey)return;
-   let disposed=false,inFlight=false;
+   let disposed=false,inFlight=false,lastStarted:number|null=null;
+   const ctrl=new AbortController();
    const load=async()=>{
-    if(inFlight||document.visibilityState==='hidden')return;
-    inFlight=true;
+    if(disposed||inFlight||document.visibilityState==='hidden'||!basketReadDue('LEGACY_WATCH',lastStarted))return;
+    inFlight=true;lastStarted=Date.now();
     try{
      const entries=confirmedKey.split(',');const found:Performance[]=[];
      // The server intentionally caps each watch GET at 100 entries; the UI can
@@ -223,7 +226,7 @@ export default function SmartBasket({quickAddRequests,onItemsChange,onAddFeedbac
      for(let i=0;i<entries.length;i+=70){
       if(disposed)break;
       const url=new URL(API+'/api/basket/watch');url.searchParams.set('items',entries.slice(i,i+70).join(','));
-      const r=await fetch(url.toString(),{credentials:'include',cache:'no-store'});
+      const r=await fetch(url.toString(),{credentials:'include',cache:'no-store',signal:ctrl.signal});
       if(!r.ok)throw Error(r.status===404?'수집 API 배포 전':`조회 API 오류 ${r.status}`);
       const data=await r.json() as {items:Performance[]};
       found.push(...(data.items||[]));
@@ -236,7 +239,7 @@ export default function SmartBasket({quickAddRequests,onItemsChange,onAddFeedbac
    void load();const timer=window.setInterval(()=>{void load();},30000);
    const wake=()=>{if(document.visibilityState==='visible')void load();};
    document.addEventListener('visibilitychange',wake);
-   return()=>{disposed=true;window.clearInterval(timer);document.removeEventListener('visibilitychange',wake);};
+   return()=>{disposed=true;ctrl.abort();window.clearInterval(timer);document.removeEventListener('visibilitychange',wake);};
  },[active,confirmedKey,refreshKey]);
  // R1.5.10.4: sample-floor changes must refresh verified basket evidence.
  // The API only reads D1 chart evidence, never performs a market/KIS request.
@@ -290,16 +293,21 @@ export default function SmartBasket({quickAddRequests,onItemsChange,onAddFeedbac
   void fetchAi();return()=>{mounted=false;};
  },[active]);
  useEffect(()=>{
-  if(!active)return;
-  let mounted=true;
-  const load=async()=>{if(document.visibilityState==='hidden')return;
-   try{const r=await fetch(API+'/api/live/quotes',{credentials:'include',cache:'no-store'});
+  if(!active||!confirmedKey)return;
+  let mounted=true,inFlight=false,lastStarted:number|null=null;
+  const ctrl=new AbortController();
+  const load=async()=>{if(!mounted||inFlight||document.visibilityState==='hidden'||!basketReadDue('LEGACY_LIVE',lastStarted))return;
+   inFlight=true;lastStarted=Date.now();
+   try{const r=await fetch(API+'/api/live/quotes',{credentials:'include',cache:'no-store',signal:ctrl.signal});
     if(!r.ok)return;const data=await r.json() as Quotes;if(mounted)setQuotes(data);
    }catch{/* show previous retrieved snapshots with label */}
+   finally{inFlight=false;}
   };
-  void load();const id=window.setInterval(()=>void load(),60000);
-  return()=>{mounted=false;window.clearInterval(id);};
- },[active,refreshKey]);
+  void load();const id=window.setInterval(()=>void load(),30000);
+  const wake=()=>{if(document.visibilityState==='visible')void load();};
+  document.addEventListener('visibilitychange',wake);
+  return()=>{mounted=false;ctrl.abort();window.clearInterval(id);document.removeEventListener('visibilitychange',wake);};
+ },[active,confirmedKey,refreshKey]);
  // As-of snapshot is captured once on adding. A successful record is never silently replaced.
  async function captureSupply(id:string,code:string,day:string,baseline:number){
   if(supplyLoading.current.has(id))return;
@@ -486,8 +494,9 @@ export default function SmartBasket({quickAddRequests,onItemsChange,onAddFeedbac
    {r1593Error&&<p className="r1593-comparison-status" role="status">저장 시세 비교: {r1593Error}</p>}
    {items.length>0&&<p className="r1593-comparison-status" role="note">최근 확인가는 Turso의 검증된 KRX 확정 종가 우선 · 장애 시 기존 D1 저장 시세 사용. 일봉 최고·최저가는 수집된 날짜만의 부분 관측이며 실시간 현재가가 아닙니다.</p>}
    {items.length>0&&<p className="r153-performance-status" role="status">
-    <RefreshCw size={12}/> 등록 종목 우선 연속 수집 · 서버 분당 최대 18건 처리 · 화면 확인 30초
-    {performanceChecked&&<span> · 마지막 화면 확인 {new Date(performanceChecked).toLocaleTimeString('ko-KR')}</span>}
+    <RefreshCw size={12}/> 저장 시세 확인: 평일 08:00~22:45 약 30초 / 그 외 약 3분 · 보조 조회 2~5분
+    {compareChecked&&<span> · 시세 비교 조회 완료 {new Date(compareChecked).toLocaleTimeString('ko-KR',{timeZone:'Asia/Seoul'})} KST</span>}
+    {confirmedKey&&performanceChecked&&<span> · 기존 추적 조회 완료 {new Date(performanceChecked).toLocaleTimeString('ko-KR',{timeZone:'Asia/Seoul'})} KST</span>}
    </p>}
   <div className="basket-tabs" role="group" aria-label="장바구니 분류">{([['ALL','전체'],['MANUAL','내 선택'],['AI','AI 선택'],['PROTECTED','장기 관찰']] as const).map(([key,title])=><button
     key={key} type="button" aria-pressed={filter===key} className={filter===key?'active':''} onClick={()=>setFilter(key)}>{title}</button>)}</div>
