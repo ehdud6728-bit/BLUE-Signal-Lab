@@ -23,6 +23,7 @@ export default function TursoProvisionalToday({api,day,query=''}:{api:string;day
   const [loading,setLoading]=useState(false);
   const [error,setError]=useState('');
   const [revision,setRevision]=useState(0);
+  const [expanded,setExpanded]=useState(false);
   const refresh=useCallback(()=>setRevision(v=>v+1),[]);
   useEffect(()=>{
     const controller=new AbortController();
@@ -65,10 +66,12 @@ export default function TursoProvisionalToday({api,day,query=''}:{api:string;day
       </p>
       {state?.observed_count===0&&<p>아직 수집된 당일 잠정 시세가 없습니다. KIS 수집기는 별도 설정이 활성화된 경우에만 순차 저장합니다.</p>}
       {state&&state.total>0&&<>
+        <button type="button" aria-expanded={expanded} onClick={()=>setExpanded(v=>!v)}>{expanded?'수집 시세 접기':'수집 시세 보기 ('+won(state.total)+'종목)'}</button>
+        {expanded&&<>
         {state.observation_preview&&<p className="blue-provisional-info">잠정 일봉 관찰: 양봉·고가권·전 기준일 고가·거래량 비교 (기존 BLUE 패턴 신호와 별개)</p>}
         <div className="blue-provisional-list">
           {state.items.map(q=><div className="blue-provisional-row" key={q.code}>
-            <div><strong>{q.name||q.code}</strong> <span>{q.code}</span>
+            <div><strong>{q.name&&q.name!==q.code?q.name:q.code}</strong> {q.name&&q.name!==q.code&&<span>{q.code}</span>}
               <small>시가 {won(q.open)} · 고가 {won(q.high)} · 저가 {won(q.low)}</small>
               {q.observations?.length?<small className="blue-provisional-observations">관찰: {q.observations.map(k=>CANDLE_LABELS[k]).filter(Boolean).join(' · ')}</small>:null}</div>
             <div className="blue-provisional-price"><strong>{won(q.price)}원</strong>
@@ -76,9 +79,10 @@ export default function TursoProvisionalToday({api,day,query=''}:{api:string;day
           </div>)}
         </div>
         {state.total>state.items.length&&<p>조건에 맞는 {won(state.total)}종목 중 최근 수신 {state.items.length}종목을 표시합니다.</p>}
+        </>}
       </>}
       {state&&state.total===0&&state.observed_count>0&&<p>현재 수집된 종목 중 검색어와 일치하는 종목이 없습니다.</p>}
     </>}
-    <p className="blue-provisional-warning">일부 종목의 KIS 미확정 관측값입니다. 표시된 일봉 관찰 조건은 단순 가격 비교로 RSI·MACD·골든크로스 등 BLUE 기술 패턴 검증이나 종목 추천이 아닙니다. 당일 전체시장 수집/확정 종가가 아니며 수신 시각이 오래될 수 있습니다. KRX 감사 일봉과 패턴 저장이 완료되면 확정 검색으로 전환됩니다.</p>
+    <details><summary>잠정 시세 안내</summary><p className="blue-provisional-warning">일부 종목의 KIS 미확정 관측값입니다. 표시된 일봉 관찰 조건은 단순 가격 비교로 RSI·MACD·골든크로스 등 BLUE 기술 패턴 검증이나 종목 추천이 아닙니다. 당일 전체시장 수집/확정 종가가 아니며 수신 시각이 오래될 수 있습니다. KRX 감사 일봉과 패턴 저장이 완료되면 확정 검색으로 전환됩니다.</p></details>
   </section>;
 }
