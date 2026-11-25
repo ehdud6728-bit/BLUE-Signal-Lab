@@ -1,6 +1,6 @@
 import {useEffect,useState} from 'react';
 type Stock={code:string;name:string;close:number;r5:number;r10:number;amount:number;amount_ratio:number|null;signals:string[]|null};
-type Group={membership_source?:string;membership_reason?:string|null;code:string;name:string;rs10:number;momentum:number;entry:string;members:number;matched:number;eligible:number;leaders:Stock[];followers:Stock[]};
+type Group={krx_scope?:string;krx_code?:string;identity_basis?:string;membership_source?:string;membership_reason?:string|null;code:string;name:string;rs10:number;momentum:number;entry:string;members:number;matched:number;eligible:number;leaders:Stock[];followers:Stock[]};
 type Market={market:string;improving:number;analyzed:number;master_members:number;matched_members:number;groups:Group[]};
 type Snapshot={mapping_status?:string;latest_trend_day?:string;reference_basis?:string;status:string;receipt_day:string;master_receipt_day:string;trend_receipt_day:string;day:string;reference5:string;reference10:string;signal_status:string;sector_limit:number;stale_receipt:boolean;trend_superseded:boolean;markets:Market[]};
 const fmt=(v:number)=> (v>0?'+':'')+v.toFixed(2)+'%';
@@ -37,6 +37,7 @@ export default function RotationLeaders({api}:{api:string}){
  {groups.map(g=><details key={g.code} className="blue-research-card"><summary><strong>{g.name}</strong> · {entry(g.entry)} · 대장 {g.leaders.length} / 후발 {g.followers.length}</summary>
  <p>시장 상대성과 {fmt(g.rs10)} · 변화 {g.momentum.toFixed(2)}%p · 일봉 일치 {g.matched}/{g.members}개 · 유동성/가격 조건 {g.eligible}개</p>
  {g.membership_source&&<small>구성 근거: {g.membership_source==='KIS_MASTER_CODE'?'KIS 업종 코드':g.membership_source==='KIS_MASTER_FLAG'?'KIS 지수 구성 플래그':g.membership_source==='KRX_INDEX_CONSTITUENTS'?'KRX 기준일 구성 조회 · 현재 정상 종목만':'미확인'}</small>}
+ {g.krx_scope&&<p><small>지수 계열 {g.krx_scope} · KRX 코드 {g.krx_code} · {g.identity_basis==='CROSS_EXACT_NAME_AND_RELATIVE_HISTORY'?'동일 명칭 및 26관측일 상대성과 교차검증':'동일 시장 지수명 확인'}</small></p>}
  {g.members===0?<p>해당 업종 구성 종목 미확인 ({g.membership_reason??'NO_MASTER_MEMBERS'}) · 종목을 추정하지 않습니다.</p>:<><Stocks title="대장주 관찰 후보" rows={g.leaders}/><Stocks title="초기 회복 후발주 관찰 후보" rows={g.followers}/></>}
  </details>)}
  <p className="blue-note">대장·후발 후보는 가격·거래대금 기준 관찰 분류이며 거래대금은 순매수와 다릅니다. 기업행동, 구성 변경 이력, 실제 매매 성과 및 테마 분류는 검증 전입니다.</p>
