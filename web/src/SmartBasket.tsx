@@ -18,7 +18,7 @@ import {readSupplyAtDiscovery,supplyFromSearchExtras,validSupplyRecord,type Bask
 import {fetchResearchEvidenceTursoFirst} from './turso-research-reader';
 import {discoveryTechnicalBadges,validDiscoveryTechnicalBadges,type DiscoveryTechBadge} from './discovery-technical';
 import {appendBasketRecord,pendingBasketQuickAdds} from './basket-quick-queue';
-import {highestObservedPrice,lowestObservedPrice,basketReturn,rankBasketRecords,chooseBasketObservation,
+import {highestObservedPrice,lowestObservedPrice,basketReturn,rankBasketRecords,chooseBasketObservation,confirmedTrailingHigh,
  type BasketRank,type GainBasis} from './basket-rank';
 
 // R153_PERFORMANCE_MONITOR: KIS results are server-verified; never fabricate missing candles.
@@ -551,6 +551,7 @@ export default function SmartBasket({quickAddRequests,onItemsChange,onAddFeedbac
      const highest=highestObservedPrice({discoveryDay:it.day,performance:pr,compared:comp,
       recent:shownRecent&&shownRecentDay?{price:shownRecent,day:shownRecentDay}:null});
      const maxHigh=highest?.price??null,maxHighDay=highest?.day||null;
+     const trailingHigh=confirmedTrailingHigh(highest);
      const lowest=lowestObservedPrice(it.day,comp);
      const minLow=lowest?.price??null,minLowDay=lowest?.day??null;
      const pending=!pr||['QUEUED','NOT_REGISTERED','HISTORY_PARTIAL'].includes(pr.status);
@@ -588,7 +589,7 @@ export default function SmartBasket({quickAddRequests,onItemsChange,onAddFeedbac
      <div className="basket-record-stats r153-price-grid basket-price-focus" aria-label="장바구니 주요 가격 지표">
        <div className="basket-price-high"><span>{it.discovery?'다음 거래일부터 관측 최고가':'검색 이후 관측 최고가'}</span><b>{maxHigh?`${cash(maxHigh)}원`:'—'}</b>
          <small>{maxHigh?<>최고 수익률 <strong className="basket-extreme-up">{pctText(pctChange(maxHigh,it.baseline))}</strong>
-          {' · '}{maxHighDay||''}{comp&&!comp.high_complete?' · 부분 관측':''}</>:pending?'수집 중':'기간 고가 미확인'}</small></div>
+          {' · '}{maxHighDay||''} · {highest?.source==='KRX_VERIFIED_EOD_HIGH'||highest?.source==='KIS_TURSO_DAY_HIGH'?sourceName(highest.source):highest?.source} · 부분 관측</>:pending?'수집 중':'기간 고가 미확인'}</small></div>
        <div className="basket-price-low"><span>{it.discovery?'다음 거래일부터 관측 최저가':'검색 이후 관측 최저가'}</span><b>{minLow?`${cash(minLow)}원`:'—'}</b>
          <small>{minLow?<>최저 수익률 <strong className="basket-extreme-down">{pctText(pctChange(minLow,it.baseline))}</strong>
           {' · '}{minLowDay||''} · {sourceName(comp?.period_low_source)} · {comp?.low_complete?'확인 구간':'부분 관측'}</>:pending?'수집 중':'기간 저가 미확인'}</small></div>
@@ -606,7 +607,7 @@ export default function SmartBasket({quickAddRequests,onItemsChange,onAddFeedbac
          <small className="r154-no-signal">{it.selectionOrigin==='ANALYSIS'&&it.analysisMatched===false?'검색 신호 미충족 · 사용자 직접 선택':'원본 신호 확인 불가'}</small>}</div>
      </div>
      {!it.discovery&&<StopLossRow active={active} code={it.code} day={it.day} baseline={it.baseline}
-       signals={signalChips} highestObserved={maxHigh} highestDay={maxHighDay}
+       signals={signalChips} highestObserved={trailingHigh?.price??null} highestDay={trailingHigh?.day??null}
        selectedMethod={it.stopMethod} refreshKey={refreshKey}
        onSelectMethod={(method:StopMethod)=>setItems(old=>old.map(x=>x.id===it.id?{...x,stopMethod:method}:x))}/>}
      {it.discovery&&!it.supplyRecord?<p className="basket-selection-note">발견 당시 매물대 자료가 없으며 다른 날짜 자료로 대체하지 않습니다.</p>:<BasketSupplyRecordRow record={it.supplyRecord} day={it.day} baseline={it.baseline}
