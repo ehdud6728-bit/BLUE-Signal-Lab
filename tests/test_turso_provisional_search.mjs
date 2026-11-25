@@ -7,13 +7,13 @@ import {InvalidProvisionalQuery,provisionalCandleObservations,tursoProvisionalSe
 
 const env={TURSO_DATABASE_URL:'libsql://test.invalid',TURSO_AUTH_TOKEN:'dummy'};
 const now=new Date('2026-11-20T00:30:00.000Z');
-function fixture({table=true}={}){
+function fixture({table=true,directory=false}={}){
   const db=new DatabaseSync(':memory:'),sql=[];
   db.exec(`CREATE TABLE blue_eod_ingest_audit_v1
     (trade_day TEXT PRIMARY KEY,row_count INTEGER);
     INSERT INTO blue_eod_ingest_audit_v1 VALUES('2026-11-19',2660);
-    CREATE TABLE blue_eod_daily_v1(trade_day TEXT,code TEXT,high INTEGER,volume INTEGER);`);
-  const eod=db.prepare('INSERT INTO blue_eod_daily_v1 VALUES(?,?,?,?)');
+    CREATE TABLE blue_eod_daily_v1(trade_day TEXT,code TEXT,high INTEGER,volume INTEGER,market TEXT DEFAULT 'KOSPI');`);
+  const eod=db.prepare('INSERT INTO blue_eod_daily_v1(trade_day,code,high,volume) VALUES(?,?,?,?)');
   eod.run('2026-11-19','005930',71500,50000);
   eod.run('2026-11-19','000660',210000,12000);
   for(let i=2;i<2660;i++)eod.run('2026-11-19',String(100000+i),100,1);
@@ -35,6 +35,9 @@ function fixture({table=true}={}){
       'KIS_REST_INQUIRE_PRICE_PROVISIONAL');
     insert.run('2026-11-20','999999','J','wrong-source',10,12,9,11,100,
       '2026-11-19','2026-11-20T00:29:00Z','KIS_REPORTED_TRADE_DATE','UNVERIFIED');
+  }
+  if(directory){
+    db.exec("CREATE TABLE blue_symbol_directory_v1(code TEXT PRIMARY KEY,name TEXT,market TEXT,asof_day TEXT); INSERT INTO blue_symbol_directory_v1 VALUES('005930','삼성전자','KOSPI','2026-11-19'),('000660','다른시장명','KOSDAQ','2026-11-19'); UPDATE blue_kis_provisional_daily_v1 SET name=code WHERE code IN ('005930','000660')");
   }
   const factory=()=>({async execute(command){
     const text=typeof command==='string'?command:command.sql;
@@ -68,6 +71,14 @@ test('name filter applies to the stored subset, without fabricating missing stoc
   assert.equal(result.items[0].code,'000660');
 });
 
+test('directory fallback fixes code-only names and supports name filtering without cross-market matches',async()=>{
+  const f=fixture({directory:true});
+  const result=await tursoProvisionalSearch(env,new URLSearchParams({date:'2026-11-20'}),f.factory,now);
+  assert.equal(result.items[0].name,'삼성전자');
+  assert.equal(result.items[1].name,'000660');
+  const named=await tursoProvisionalSearch(env,new URLSearchParams({date:'2026-11-20',q:'삼성'}),fixture({directory:true}).factory,now);
+  assert.equal(named.total,1);assert.equal(named.items[0].code,'005930');
+});
 test('uninitialized provisional storage is an honest zero-coverage result',async()=>{
   const f=fixture({table:false});
   const result=await tursoProvisionalSearch(env,new URLSearchParams({date:'2026-11-20'}),f.factory,now);
