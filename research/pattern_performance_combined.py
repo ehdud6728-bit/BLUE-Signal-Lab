@@ -2,7 +2,7 @@
 + stored RSI cross + MA20<MA40<MA60. No ranking or production promotion.
 Matched, known-factor cohort only for nested comparisons.
 """
-import argparse,json,math
+import argparse,json,math,hashlib
 from pathlib import Path
 from fractions import Fraction
 from statistics import mean,median
@@ -101,7 +101,9 @@ def analyze(source,evidence,focus="024720"):
 if __name__=="__main__":
     p=argparse.ArgumentParser()
     for name in ("source","factors","output"):p.add_argument("--"+name,type=Path,required=True)
-    a=p.parse_args();out=analyze(json.loads(a.source.read_text()),json.loads(a.factors.read_text()))
+    a=p.parse_args();source=a.source.read_bytes();factors=a.factors.read_bytes();out=analyze(json.loads(source),json.loads(factors))
+    out["source_sha256"]=hashlib.sha256(source).hexdigest()
+    out["factors_sha256"]=hashlib.sha256(factors).hexdigest()
     a.output.write_text(json.dumps(out,ensure_ascii=False,allow_nan=False,indent=2)+"\n")
     selected=[dict(scope=r["scope"],base=r["base"],condition=r["condition"],**{k:r["all"][k] for k in ("n","up_pct","mean_pct")}) for r in out["rows"] if r["sampling"]=="ALL_EVENTS" and r["entry_basis"]=="NEXT_OPEN" and r["horizon"]==3 and r["condition"] in ("LONG_BULL","JOINT","LONG_BULL_NOT_JOINT")]
     print("BLUE_COMBINED_STUDY",json.dumps(dict(asof=out["asof"],audit_sessions=out["audit_sessions"],quality=out["quality"],three_day=selected)))
