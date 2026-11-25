@@ -1,7 +1,7 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {readFile} from 'node:fs/promises';
-import {basketReturn,highestObservedPrice,lowestObservedPrice,rankBasketRecords,chooseBasketObservation}
+import {basketReturn,highestObservedPrice,lowestObservedPrice,rankBasketRecords,chooseBasketObservation,confirmedTrailingHigh}
  from '../web/src/basket-rank.ts';
 
 const items=[
@@ -78,4 +78,16 @@ test('basket selects latest dated valid observation rather than source priority'
  assert.equal(chooseBasketObservation('2026-11-25','2026-11-25T04:30:00Z',[older,unknown],now),null);
  assert.equal(chooseBasketObservation('2026-11-25','2026-11-25T04:30:00Z',[older,later,unknown],now)?.price,105);
  assert.equal(chooseBasketObservation('2026-11-23',undefined,[{...later,at:'2026-11-24T05:00:00Z'}],now),null);
+});
+
+test('Turso resolved high is not overwritten by an incompatible legacy maximum',()=>{
+ const input={discoveryDay:'2026-11-18',performance:{quote_day:'2026-11-19',quote_high:180,highest_day:'2026-11-19',highest_price:200},compared:{period_high:125,period_high_day:'2026-11-19',period_high_source:'KRX_VERIFIED_EOD_HIGH'},recent:{price:120,day:'2026-11-19'}};
+ const high=highestObservedPrice(input);
+ assert.equal(high.price,125);
+ assert.equal(confirmedTrailingHigh(high)?.price,125);
+ input.compared.period_high_source='KIS_TURSO_DAY_HIGH';
+ assert.equal(confirmedTrailingHigh(highestObservedPrice(input)),null);
+ assert.equal(confirmedTrailingHigh(highestObservedPrice({...input,compared:null})),null);
+ assert.equal(lowestObservedPrice('2026-11-18',{period_low:1,period_low_day:'2099-01-01'}),null);
+ assert.equal(highestObservedPrice({discoveryDay:'2026-11-18',recent:{price:1000,day:'2026-11-31'}}),null);
 });
