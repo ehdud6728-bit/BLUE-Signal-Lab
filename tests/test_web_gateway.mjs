@@ -13,7 +13,7 @@ const env={BLUE_WEB_ACCESS_TEAM:team,BLUE_WEB_ACCESS_AUD:aud};
 const request=(token,path='/api/eod/dates',method='GET',origin=WEB_ORIGIN)=>new Request(WEB_ORIGIN+path,{method,headers:{Origin:origin,...token?{'Cf-Access-Jwt-Assertion':token}:{},Cookie:'private',Authorization:'Bearer untrusted','Cf-Access-Authenticated-User-Email':'spoof@example.invalid',...(method==='POST'?{'Content-Type':'text/plain'}:{})},...(method==='POST'?{body:'{"date":"2026-11-25"}'}:{})});
 const handler=(r,e=env,options={now,fetcher},invoke=async req=>Response.json({ok:true}))=>handleVerifiedGateway(r,e,invoke,options);
 test('valid token and stripped credentials',async()=>{
- const r=await handler(request(await sign()),env,{now,fetcher},async req=>{for(const name of ['Cookie','Authorization','Cf-Access-Jwt-Assertion','Cf-Access-Authenticated-User-Email'])assert.equal(req.headers.get(name),null);return Response.json({ok:true});});assert.equal(r.status,200);
+ const r=await handler(request(await sign()),env,{now,fetcher},async req=>{for(const name of ['Cookie','Authorization','Cf-Access-Jwt-Assertion','Cf-Access-Authenticated-User-Email','X-Blue-Gateway-Token'])assert.equal(req.headers.get(name),null);return Response.json({ok:true});});assert.equal(r.status,200);
 });
 test('wrong audience, issuer, expired, future, missing and service token denied',async()=>{
  for(const token of [null,await sign({aud:['b'.repeat(64)]}),await sign({iss:'https://evil.cloudflareaccess.com'}),await sign({exp:sec}),await sign({nbf:sec+1}),await sign({iat:sec+31}),await sign({type:'org'}),await sign({sub:''}),await sign({}, {alg:'none'}),await sign({}, {kid:'unknown'})])assert.equal((await handler(request(token))).status,401);
@@ -30,4 +30,20 @@ test('frontend assets and API separated; no cookies, redirect or cache',async()=
  const t=await sign(),r=await gateway.fetch(request(t),e);assert.equal(r.status,200);assert.equal(r.headers.get('Cache-Control'),'no-store');assert.equal(calls,1);
  assert.equal((await gateway.fetch(request(t,'/api/research/request','POST','https://evil.invalid'),e)).status,403);
  for(const response of [new Response(null,{status:302,headers:{Location:'https://other.invalid'}}),new Response('<html>login</html>')])assert.equal((await gateway.fetch(request(t),{...e,BLUE_API:{fetch:async()=>response}})).status,502);
+});
+
+test('first-party application cookie is verified if Access assertion is absent',async()=>{
+ const token=await sign();
+ const e={BLUE_API:{fetch:async r=>{assert.equal(r.headers.get('X-Blue-Gateway-Token'),token);assert.equal(r.headers.get('Cookie'),null);return handler(r);}}};
+ const r=new Request(WEB_ORIGIN+'/api/eod/dates',{headers:{Cookie:'other=private; CF_Authorization='+token,'X-Blue-Gateway-Token':'forged'}});
+ assert.equal((await gateway.fetch(r,e)).status,200);
+ const duplicate=new Request(WEB_ORIGIN+'/api/eod/dates',{headers:{Cookie:'CF_Authorization='+token+'; CF_Authorization='+token}});
+ assert.equal((await (await gateway.fetch(duplicate,e)).json()).error,'ACCESS_REQUIRED_WEB_TOKEN_MISSING');
+ const injected=new Request(WEB_ORIGIN+'/api/eod/dates',{headers:{'X-Blue-Gateway-Token':token}});
+ assert.equal((await gateway.fetch(injected,e)).status,401);
+});
+test('diagnostic codes never include the token or its claims',async()=>{
+ const missing=await handler(request(null));assert.equal((await missing.json()).error,'ACCESS_REQUIRED_API_TOKEN_MISSING');
+ const wrong=await handler(request(await sign({aud:['b'.repeat(64)]})));assert.equal((await wrong.json()).error,'ACCESS_REQUIRED_API_AUDIENCE_MISMATCH');
+ const keys=await handler(request(await sign()),env,{now,fetcher:async()=>new Response('',{status:503})});assert.equal((await keys.json()).error,'ACCESS_REQUIRED_API_KEYS_UNAVAILABLE');
 });
