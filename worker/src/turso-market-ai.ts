@@ -27,7 +27,7 @@ const bounded=(x:unknown,max=100)=>typeof x==='string'?x.slice(0,max):'';
 const hash=async(s:string)=>Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(s))),v=>v.toString(16).padStart(2,'0')).join('');
 const json=(body:unknown,status=200)=>new Response(JSON.stringify(body),{status,headers:{'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store','X-Content-Type-Options':'nosniff'}});
 function flows(rows:any[],key:'foreign'|'institution'){
- return [3,5,10].map(n=>{const a=rows.slice(0,n),k=a.filter(r=>['BUY','SELL','FLAT'].includes(r[key]));return {window:n,known:k.length,buy:k.filter(r=>r[key]==='BUY').length,sell:k.filter(r=>r[key]==='SELL').length,flat:k.filter(r=>r[key]==='FLAT').length,latest:day(a[0]?.day),earliest:day(a.at(-1)?.day)};});
+ return [3,5,10].map(n=>{const a=rows.slice(0,n),k=a.filter(r=>['BUY','SELL','FLAT'].includes(r[key]));return {window:n,known:k.length,buy:k.filter(r=>r[key]==='BUY').length,sell:k.filter(r=>r[key]==='SELL').length,flat:k.filter(r=>r[key]==='FLAT').length,latest:day(a[0]?.day),earliest:day(a.at(-1)?.day),unique_days:new Set(k.map(r=>day(r.day)).filter(Boolean)).size};});
 }
 const QUADRANTS=['LEADING','IMPROVING','WEAKENING','LAGGING','NEUTRAL'];
 const qLabel:Record<string,string>={LEADING:'주도',IMPROVING:'개선',WEAKENING:'약화',LAGGING:'소외',NEUTRAL:'경계'};
@@ -88,7 +88,7 @@ export function buildMarketEvidence(input:Input,now=new Date()){
  const usAligned=usCore.every((g:any)=>g?.status==='AVAILABLE'&&validDay(g.day)&&num(g.change_pct)!==null)&&new Set(usCore.map((g:any)=>g?.day)).size===1;
  const usDay=usAligned?usCore[0].day:null;
  const domesticMarkets=['KOSPI','KOSDAQ'].map(market=>domestic.find((m:any)=>m.market===market));
- const flowComplete=domesticMarkets.every((m:any)=>m&&m.foreign[0].known===3&&m.institution[0].known===3&&validDay(m.foreign[0].latest)&&validDay(m.institution[0].latest));
+ const flowComplete=domesticMarkets.every((m:any)=>m&&m.foreign[0].known===3&&m.institution[0].known===3&&m.foreign[0].unique_days===3&&m.institution[0].unique_days===3&&validDay(m.foreign[0].latest)&&validDay(m.institution[0].latest));
  const breadthComplete=domesticMarkets.every((m:any)=>m&&num(m.change_pct)!==null&&num(m.breadth_pct)!==null&&m.breadth_pct>=0&&m.breadth_pct<=100);
  const trendMarkets=['KOSPI','KOSDAQ'].map(market=>domesticTrend.find((m:any)=>m.market===market));
  const trendAligned=trendMarkets.every((m:any)=>m&&m.available>0&&validDay(m.benchmark?.day))&&new Set(trendMarkets.map((m:any)=>m?.benchmark?.day)).size===1;
