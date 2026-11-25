@@ -52,3 +52,29 @@
 .hr-feature{margin:7px 0;font-size:14px;font-weight:600}
 .rc-filter input{width:100%;min-width:0;box-sizing:border-box;border:1px solid #aabbd2;border-radius:8px;background:transparent;color:inherit;padding:8px;font:inherit}
 @media(min-width:700px){.rc-tabs{grid-template-columns:repeat(4,minmax(0,1fr))}}
+
+/* Mobile research cards: visible results first, controls on demand. */
+.hr-dashboard{background:#eaf0f8;border-color:#b9cbe2;padding:12px}
+.hr-dashboard h2{color:#244c7b;font-size:19px}
+.hr-overview{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin:10px 0}
+.hr-overview>div{background:#fff;border:1px solid #dbe4ef;border-radius:10px;padding:10px;min-width:0}
+.hr-overview b{display:block;font-size:21px;font-variant-numeric:tabular-nums;color:#244c7b}
+.hr-filter-card{background:#fff;border-radius:10px;padding:10px;border:1px solid #dbe4ef;margin:10px 0;color:#17243b}
+.hr-filter-toggle{display:flex;justify-content:space-between;align-items:center;text-align:left;width:100%;gap:8px;background:transparent;color:inherit;border:0;cursor:pointer;padding:0;font:inherit}
+.hr-filter-toggle strong{font-size:14px}
+.hr-dashboard .hr-result-card{background:#fff;border:1px solid #dbe4ef;border-radius:13px;padding:14px!important;color:#17243b;margin:12px 0}
+.hr-result-card>strong{font-size:15px!important}
+.hr-result-card .hr-feature{color:#244c7b;font-size:15px}
+.hr-state{color:#815a17;font-weight:600}
+.hr-compare .rc-heading b{font-size:20px;font-variant-numeric:tabular-nums}
+.hr-compare .hr-line b{font-size:16px;font-variant-numeric:tabular-nums}
+.hr-compare .hr-track{height:13px}
+.hr-audit{border-top:1px solid #dbe4ef;margin-top:10px;padding-top:4px}
+.hr-result-card .hr-overview>div{background:#f1f5fa}
+.hr-result-card .hr-overview b{font-size:17px}
+.hr-dashboard .rc-note{background:#dce6f3;color:#24364c}
+.hr-dashboard .rc-note summary{padding:4px 0}
+.hr-dashboard .rc-filter select,.hr-dashboard .rc-filter input{background:#fff;color:#17243b;border:1px solid #b9cbe2;min-height:40px;border-radius:8px}
+.rc-tabs{display:flex;overflow-x:auto;flex-wrap:nowrap;gap:6px;scrollbar-width:thin;padding-bottom:4px}
+.rc-tabs button{flex:0 0 auto;white-space:nowrap;padding:8px 11px!important}
+@media(prefers-color-scheme:dark){.hr-dashboard{background:#1c293a;border-color:#425873}.hr-dashboard h2{color:#b3d1ff}.hr-dashboard .rc-note{background:#26374b;color:#e1eaf6}.hr-dashboard .hr-result-card,.hr-dashboard .hr-filter-card,.hr-dashboard .hr-overview>div{background:#253448;color:#e1eaf6;border-color:#425873}.hr-dashboard .hr-feature,.hr-dashboard .hr-overview b{color:#b3d1ff}.hr-dashboard .hr-state{color:#f5d089}.hr-dashboard .rc-filter select,.hr-dashboard .rc-filter input{background:#253448;color:#e1eaf6}.hr-dashboard .hr-track{background:#3c506a}}
