@@ -156,10 +156,20 @@ test('published provisional endpoint reads only promoted generation; EOD takes p
     await assert.rejects(query({gc:'constructor'}),InvalidProvisionalQuery);
     await assert.rejects(query({min_amount_eok:'-1'}),InvalidProvisionalQuery);
     assert.equal((await query({page:'2'})).items.length,0);
+    // EOD-only ingest is not a completed confirmed pattern search.
+    db.exec("INSERT INTO blue_eod_ingest_audit_v1 VALUES('2026-11-20',2660); CREATE TABLE blue_eod_daily_v1(trade_day TEXT,code TEXT); CREATE TABLE blue_research_signal_audit_v1(trade_day TEXT,row_count INT,observed_stocks INT,source_payload_sha256 TEXT); CREATE TABLE blue_research_signals_v1(trade_day TEXT,code TEXT,source_payload_sha256 TEXT);");
+    assert.equal((await query({})).data_status,'KIS_PROVISIONAL_PATTERNS');
+    db.exec("WITH RECURSIVE seq(i) AS (SELECT 1 UNION ALL SELECT i+1 FROM seq WHERE i<2660) INSERT INTO blue_eod_daily_v1 SELECT '2026-11-20',printf('%06d',i) FROM seq");
+    assert.equal((await query({})).data_status,'KIS_PROVISIONAL_PATTERNS');
+    db.exec("INSERT INTO blue_research_signal_audit_v1 VALUES('2026-11-20',1,2660,'proof'); INSERT INTO blue_research_signals_v1 VALUES('2026-11-20','000660','wrong')");
+    assert.equal((await query({})).data_status,'KIS_PROVISIONAL_PATTERNS');
+    db.exec("UPDATE blue_research_signals_v1 SET source_payload_sha256='proof'");
+    assert.equal((await query({})).data_status,'VERIFIED_EOD_AVAILABLE');
+    db.exec("DELETE FROM blue_research_signals_v1; UPDATE blue_research_signal_audit_v1 SET row_count=0");
+    assert.equal((await query({})).data_status,'VERIFIED_EOD_AVAILABLE');
+    db.exec("DELETE FROM blue_research_signal_audit_v1");
     db.prepare('DELETE FROM blue_provisional_pattern_rows_v1 WHERE code=?').run('005930');
     await assert.rejects(query({}),/INVALID_PUBLISHED_PROVISIONAL/);
-    db.exec("INSERT INTO blue_eod_ingest_audit_v1 VALUES('2026-11-20',2660)");
-    assert.equal((await query({})).data_status,'VERIFIED_EOD_AVAILABLE');
   }finally{db.close();}
 });
 
@@ -224,4 +234,13 @@ test('KIS AI matches require exact stored candle, count and sort before paging',
     const legacy=await query({only_pattern:'1'});
     assert.equal(legacy.history_ready,false);assert.equal(legacy.pattern_filter_applied,false);assert.equal(legacy.total,12);
   }finally{db.close();}
+});
+
+test('today transition bypasses stale date gate, keeps Turso source and refreshes selected query',()=>{
+ const web=readFileSync(new URL('../web/src/main.tsx',import.meta.url),'utf8');
+ assert.ok(web.includes("const source=todaySearch?'turso':patternBackend"));
+ assert.ok(web.includes("if(live.data_status==='VERIFIED_EOD_AVAILABLE')confirmedTodayReady=true"));
+ assert.ok(web.includes("if(!confirmedTodayReady&&queryMode==='single'"));
+ assert.ok(web.includes("if(!todaySearch&&source==='turso'&&r.status>=500"));
+ assert.ok(web.includes("if(!busy&&mode==='single'&&date===todayKST())void search(1,false)"));
 });
