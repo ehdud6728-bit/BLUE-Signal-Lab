@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {DatabaseSync} from 'node:sqlite';
+import {officialMacroCalendar} from '../worker/src/official-macro-calendar.ts';
 import {buildMarketEvidence,marketPrompt,validateMarketReport,handleTursoMarketAi} from '../worker/src/turso-market-ai.ts';
 const now=new Date('2026-11-25T00:30:00Z'),day='2026-11-24',at='2026-11-24T16:09:00Z',proof='a'.repeat(64);
 const flow=[{day,foreign:'BUY',institution:'SELL'},{day:'2026-11-23',foreign:'BUY',institution:null}];
@@ -61,4 +62,24 @@ test('invalid generated evidence ID is rejected and never cached as READY',async
  const fetchFn=async()=>{calls++;return new Response(JSON.stringify({candidates:[{content:{parts:[{text:JSON.stringify(output('INVALID_REF'))}]}}]}));};
  const run=method=>handleTursoMarketAi(new Request('https://example.test',{method}),env,fixture(),{factory,now,fetchFn});
  try{const r=await run('POST');assert.equal(r.status,502);assert.equal((await r.json()).error,'AI_REPORT_INVALID');const again=await run('POST');assert.equal(again.status,503);assert.equal(calls,1);assert.equal(db.prepare("SELECT COUNT(*) n FROM blue_ai_market_calls_v1 WHERE status='READY'").get().n,0);}finally{db.close();}
+});
+
+test('official calendar preserves ET/UTC dates, filters passed events and expires AI evidence',()=>{
+ const cal=officialMacroCalendar(now);
+ assert.equal(cal.status,'REVIEWED_SCHEDULE');
+ assert.equal(cal.events.find(e=>e.id==='E_FOMC_DEC').scheduled_utc,'2026-12-09T19:00:00.000Z');
+ assert.equal(cal.events.find(e=>e.id==='E_JOBS_NOV').scheduled_utc,'2026-12-04T13:30:00.000Z');
+ assert.equal(cal.events.find(e=>e.id==='E_PCE_OCT').scheduled_utc,'2026-11-25T13:30:00.000Z');
+ assert.ok(cal.events.every(e=>e.status==='SCHEDULED_NOT_RESULT'&&e.source_url.startsWith('https://')));
+ assert.equal(cal.vix_futures.f1,null);assert.equal(cal.vix_futures.structure,null);
+ assert.equal(officialMacroCalendar(new Date('2026-11-24T10:00:00Z')).events.length,0);
+ assert.equal(officialMacroCalendar(new Date('2026-11-25T14:00:00Z')).events.some(e=>e.id==='E_PCE_OCT'),false);
+ const e=buildMarketEvidence(fixture(),now);
+ assert.ok(e.facts.macro_calendar.events.some(x=>x.id==='E_FOMC_DEC'));
+ assert.ok(e.refs.some(x=>x.id==='E_FOMC_DEC'));
+ assert.ok(!('f1' in e.facts.vix_futures));
+ const stale=buildMarketEvidence(fixture(),new Date('2026-12-10T00:00:00Z'));
+ assert.equal(stale.macro.status,'REVIEW_REQUIRED');
+ assert.equal(stale.facts.macro_calendar.events.length,0);
+ assert.ok(!stale.refs.some(x=>x.id.startsWith('E_')));
 });
