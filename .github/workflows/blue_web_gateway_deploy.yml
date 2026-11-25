@@ -4,20 +4,23 @@ on:
     inputs:
       mode:
         type: choice
-        options: [verify_only, deploy_api_and_web]
+        options: [verify_only, deploy_web, deploy_api, deploy_api_and_web]
         default: verify_only
         required: true
       access_team:
-        description: 'Exact frontend Access team domain (team.cloudflareaccess.com, no https://)'
+        description: 'KEEP_EXISTING (default), or exact new Access team domain for an intentional auth change'
         type: string
+        default: KEEP_EXISTING
         required: false
       access_aud:
-        description: 'Exact frontend Access Application Audience (64 hex characters)'
+        description: 'KEEP_EXISTING (default), or exact new Access Application Audience'
         type: string
+        default: KEEP_EXISTING
         required: false
       confirm_policy:
-        description: 'For deployment only: compare web and API Access policies, then type WEB_API_ACCESS_POLICY_VERIFIED'
+        description: 'KEEP_EXISTING for routine releases; WEB_API_ACCESS_POLICY_VERIFIED only after intentional Access policy review'
         type: string
+        default: KEEP_EXISTING
         required: false
 permissions:
   contents: read
@@ -45,13 +48,19 @@ jobs:
         run: |
           set -euo pipefail
           test "$GITHUB_REPOSITORY" = ehdud6728-bit/BLUE-Signal-Lab
-          test "$MODE" = verify_only || test "$MODE" = deploy_api_and_web
-          if [[ "$MODE" = deploy_api_and_web ]]; then
+          case "$MODE" in verify_only|deploy_web|deploy_api|deploy_api_and_web) ;; *) exit 1;; esac
+          if [[ "$MODE" != verify_only ]]; then
             test "$GITHUB_REF" = refs/heads/main
-            test "$CONFIRM" = WEB_API_ACCESS_POLICY_VERIFIED
-            [[ "$TEAM" =~ ^[a-z0-9-]+\.cloudflareaccess\.com$ ]]
-            [[ "$AUD" =~ ^[a-f0-9]{64}$ ]]
-            echo 'Operator confirmed existing Access policy review; this is not an independent policy audit.'
+            if [[ "$TEAM" = KEEP_EXISTING && "$AUD" = KEEP_EXISTING ]]; then
+              test "$CONFIRM" = KEEP_EXISTING
+              echo 'Routine deploy: preserve existing Access variables; does not independently audit Access policies.'
+            else
+              test "$MODE" = deploy_api_and_web
+              test "$CONFIRM" = WEB_API_ACCESS_POLICY_VERIFIED
+              [[ "$TEAM" =~ ^[a-z0-9-]+\.cloudflareaccess\.com$ ]]
+              [[ "$AUD" =~ ^[a-f0-9]{64}$ ]]
+              echo 'Operator confirmed Access configuration change and policy review.'
+            fi
           fi
       - name: Offline gateway authentication tests
         run: node --test tests/test_web_gateway.mjs
@@ -71,10 +80,12 @@ jobs:
         working-directory: web
         run: npx --yes wrangler@4 deploy --config wrangler.gateway.jsonc --dry-run
       - name: Read existing Worker settings and rollback versions
-        if: inputs.mode == 'deploy_api_and_web'
+        if: inputs.mode != 'verify_only'
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_WORKER_DEPLOY_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          TEAM: ${{ inputs.access_team }}
+          AUD: ${{ inputs.access_aud }}
         shell: bash
         run: |
           set -euo pipefail
@@ -103,6 +114,8 @@ jobs:
               if not isinstance(bindings,list) or any(not isinstance(b,dict) for b in bindings):
                   raise SystemExit('BLOCKED: invalid Worker bindings')
               if worker=='blue-signal-lab':
+                  if os.environ['TEAM']=='KEEP_EXISTING' and not any(b.get('type')=='service' and b.get('name')=='BLUE_API' and b.get('service')=='blue-signal-lab-api-v2' and b.get('entrypoint')=='BlueWebGateway' for b in bindings):
+                      raise SystemExit('BLOCKED: routine deployment requires existing same-origin service binding')
                   for b in bindings:
                       if b.get('type') in ('assets','version_metadata'): continue
                       if b.get('type')=='service' and b.get('name')=='BLUE_API' and b.get('service')=='blue-signal-lab-api-v2' and b.get('entrypoint')=='BlueWebGateway': continue
@@ -111,6 +124,13 @@ jobs:
                   names={b.get('name'):b.get('type') for b in bindings}
                   if names.get('DB')!='d1' or names.get('KIS_COLLECTOR')!='service':
                       raise SystemExit('BLOCKED: expected API bindings missing')
+                  if os.environ['TEAM']=='KEEP_EXISTING':
+                      values={b.get('name'):b.get('text','') for b in bindings if b.get('type')=='plain_text'}
+                      team=values.get('BLUE_WEB_ACCESS_TEAM','')
+                      aud=values.get('BLUE_WEB_ACCESS_AUD','')
+                      if not isinstance(team,str) or not isinstance(aud,str) or not re.fullmatch(r'[a-z0-9-]+\.cloudflareaccess\.com',team) or not re.fullmatch(r'[a-f0-9]{64}',aud):
+                          raise SystemExit('BLOCKED: existing gateway Access variables missing or invalid')
+                      print('BLUE_EXISTING_ACCESS_CONFIG_VERIFIED_FORMAT_ONLY')
               deployments=read(worker,'deployments').get('deployments')
               if not isinstance(deployments,list) or not deployments:
                   raise SystemExit('BLOCKED: no rollback deployment')
@@ -124,7 +144,7 @@ jobs:
               print(f'BLUE_ROLLBACK_VERSION {worker} {version}')
           PY
       - name: Deploy existing API with verified gateway configuration
-        if: inputs.mode == 'deploy_api_and_web'
+        if: inputs.mode == 'deploy_api' || inputs.mode == 'deploy_api_and_web'
         working-directory: worker
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_WORKER_DEPLOY_TOKEN }}
@@ -134,10 +154,14 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          npx wrangler deploy --keep-vars --var "BLUE_WEB_ACCESS_TEAM:$TEAM" "BLUE_WEB_ACCESS_AUD:$AUD"
+          if [[ "$TEAM" = KEEP_EXISTING ]]; then
+            npx wrangler deploy --keep-vars
+          else
+            npx wrangler deploy --keep-vars --var "BLUE_WEB_ACCESS_TEAM:$TEAM" "BLUE_WEB_ACCESS_AUD:$AUD"
+          fi
           echo BLUE_GATEWAY_API_DEPLOYED
       - name: Deploy same-origin frontend to existing URL
-        if: inputs.mode == 'deploy_api_and_web'
+        if: inputs.mode == 'deploy_web' || inputs.mode == 'deploy_api_and_web'
         working-directory: web
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_WORKER_DEPLOY_TOKEN }}
