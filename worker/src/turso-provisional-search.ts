@@ -80,16 +80,19 @@ export async function tursoProvisionalSearch(env:Env,p:URLSearchParams,
     const observed_count=Number(count.rows[0]?.n||0);
     if(!Number.isSafeInteger(observed_count)||observed_count<0||
       observed_count>reference_market_count!)throw Error('INVALID_PROVISIONAL_COVERAGE');
-    const condition=q?` AND (p.code LIKE ? ESCAPE '\\' OR p.name LIKE ? ESCAPE '\\')`:'';
+    const directory=await client.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='blue_symbol_directory_v1'");
+    const withNames=directory.rows.length>0;
+    const from=withNames?`FROM blue_kis_provisional_daily_v1 p LEFT JOIN blue_eod_daily_v1 e ON e.trade_day=p.reference_day AND e.code=p.code LEFT JOIN blue_symbol_directory_v1 d ON d.code=p.code AND d.market=e.market`:`FROM blue_kis_provisional_daily_v1 p LEFT JOIN blue_eod_daily_v1 e ON e.trade_day=p.reference_day AND e.code=p.code`;
+    const display=withNames?"CASE WHEN TRIM(COALESCE(p.name,''))<>'' AND p.name<>p.code THEN p.name ELSE COALESCE(NULLIF(d.name,p.code),p.code) END":"p.name";
+    const condition=q?` AND (p.code LIKE ? ESCAPE '\\' OR ${display} LIKE ? ESCAPE '\\')`:'';
     const args=q?[day,reference_day,like(q),like(q)]:[day,reference_day];
     const filtered=q?await client.execute({sql:`SELECT COUNT(*) AS n
-      FROM blue_kis_provisional_daily_v1 p WHERE ${trusted}${condition}`,args}):null;
+      ${from} WHERE ${trusted}${condition}`,args}):null;
     const total=filtered?Number(filtered.rows[0]?.n):observed_count;
-    const rows=await client.execute({sql:`SELECT p.trade_day,p.code,p.name,p.open,p.high,
+    const rows=await client.execute({sql:`SELECT p.trade_day,p.code,${display} AS name,p.open,p.high,
       p.low,p.close,p.volume,p.reference_day,p.observed_at_utc,p.date_basis,p.source,
       e.high AS previous_high,e.volume AS previous_volume
-      FROM blue_kis_provisional_daily_v1 p
-      LEFT JOIN blue_eod_daily_v1 e ON e.trade_day=p.reference_day AND e.code=p.code
+      ${from}
       WHERE ${trusted}${condition}
       ORDER BY p.observed_at_utc DESC,p.code ASC LIMIT ?`,args:[...args,limit]});
     const items=rows.rows.map(r=>{
