@@ -64,7 +64,7 @@ def brief(items):
     v=metrics(items);p=v["return_profile"]
     return dict(n=v["sample_count"],dates=v["distinct_signal_dates"],stocks=v["distinct_stocks"],up_pct=v["positive_return_probability_pct"],mean_pct=v["mean_return_pct"],median_pct=v["median_return_pct"],payoff=p["payoff_ratio"],pf=p["profit_factor"],tail=p["worst_5pct_mean_pct"])
 
-def build(source,evidence,source_hash,factor_hash):
+def build(source,evidence,source_hash,factor_hash,published=None):
     selected={}
     report=analyze(source,evidence,case_sink=lambda b,g,rows:selected.__setitem__((b,g),rows))
     days=[d["day"] for d in source["eod_days"]];split=len(days)*7//10
@@ -78,7 +78,7 @@ def build(source,evidence,source_hash,factor_hash):
         for i,c in sorted(cohort,key=lambda x:(-x[0],x[1])):
             d=days[i];b=bars[d,c];f=factors[d,c]
             if (i,c) not in audit_cache:audit_cache[i,c]=independent_rsi(days,bars,i,c,f)
-            indicators={k:f.get(k) for k in ("rsi_gc","ma_down","rsi_value","rsi_signal","prior_rsi","prior_rsi_signal","rsi_delta3","rsi_delta5","rsi_gap","rsi_prior5_min","rsi_value_chart_consistent","rsi_cross_value_consistent","ma_chart_consistent","rsi_chart_consistent","ma20","ma40","ma60","amount_ratio20","record_sha256")}
+            indicators={k:f.get(k) for k in ("rsi_gc","ma_down","rsi_value","rsi_signal","prior_rsi","prior_rsi_signal","prior_day","rsi_delta3_day","rsi_delta5_day","rsi_delta3","rsi_delta5","rsi_gap","rsi_prior5_min","rsi_value_chart_consistent","rsi_cross_value_consistent","ma_chart_consistent","rsi_chart_consistent","ma20","ma40","ma60","amount_ratio20","record_sha256")}
             row=dict(code=c,name=names.get((d,c)),day=d,market=b["market"],ohlc={k:b[k] for k in ("open","high","low","close")},indicators=indicators,rsi_audit=audit_cache[i,c],outcomes={})
             for h in HORIZONS:
                 future=days[i+h] if i+h<len(days) else None
@@ -117,16 +117,33 @@ def build(source,evidence,source_hash,factor_hash):
             raw=pack(rows[j:j+PAGE]);hashes.append(digest(raw.encode()))
             pages.append(dict(base=base,group=group,page=j//PAGE,payload=raw,sha256=hashes[-1]))
         groups.append(dict(base=base,group=group,total=len(rows),page_hashes=hashes,horizons=horizons))
+    publication="NOT_PUBLISHED"
+    if published is not None:
+        if published.get("schema")!="BLUE_COMBINED_WEB_V1":raise ValueError("unknown public study format")
+        if published.get("asof")==report["asof"] and published.get("source_sha256")==source_hash and published.get("factors_sha256")==evidence.get("legacy_factors_sha256"):
+            indexed={(r["base"],r["condition"],r["entry_basis"],r["horizon"]):r for r in published["rows"] if r["scope"]=="MARKET" and r["sampling"]=="ALL_EVENTS"}
+            for g in groups:
+                for h,v in g["horizons"].items():
+                    for basis,stats in v["stats"].items():
+                        p=indexed.get((g["base"],g["group"],basis,int(h)))
+                        if p is None or any(p[k]!=stats[k] for k in ("all","train","holdout","research_status")) or p["total_signals"]!=g["total"] or p["pending"]!=v["pending"] or p["missing"]!=v["missing"]:raise ValueError("published cohort mismatch")
+            publication="EXACT_PUBLISHED_SNAPSHOT_MATCH"
+        else:publication="DIFFERENT_PUBLISHED_SNAPSHOT"
     quality=dict(report["quality"])
     for x in audit_cache.values():
         k="rsi_audit_"+x["status"].lower();quality[k]=quality.get(k,0)+1
-    manifest=dict(schema="BLUE_PRIVATE_COMBINED_CASES_V1",asof=report["asof"],source_sha256=source_hash,factors_sha256=factor_hash,audit_sessions=len(days),signal_audit_sessions=report["signal_audit_sessions"],page_size=PAGE,quality=quality,groups=groups,scope="EXACT_COHORT_RECONSTRUCTION_STORED_INDICATORS_EXPLORATORY")
+    manifest=dict(schema="BLUE_PRIVATE_COMBINED_CASES_V1",asof=report["asof"],source_sha256=source_hash,factors_sha256=factor_hash,legacy_factors_sha256=evidence.get("legacy_factors_sha256"),published_comparison=publication,audit_sessions=len(days),signal_audit_sessions=report["signal_audit_sessions"],page_size=PAGE,quality=quality,groups=groups,scope="EXACT_COHORT_RECONSTRUCTION_STORED_INDICATORS_EXPLORATORY")
     return dict(manifest=pack(manifest),pages=pages)
 if __name__=="__main__":
     p=argparse.ArgumentParser()
     for n in ("source","factors","output"):p.add_argument("--"+n,type=Path,required=True)
+    p.add_argument("--published",type=Path)
     a=p.parse_args();s=a.source.read_bytes();f=a.factors.read_bytes()
-    out=build(json.loads(s),json.loads(f),digest(s),digest(f))
+    published=None
+    if a.published and a.published.exists():
+        text=a.published.read_text()
+        published=json.loads(text.split("export const COMBINED_DATA: unknown = ",1)[1].strip().removesuffix(";"))
+    out=build(json.loads(s),json.loads(f),digest(s),digest(f),published)
     a.output.write_text(pack(out)+"\n")
     m=json.loads(out["manifest"])
-    print("BLUE_PRIVATE_CASE_RECONSTRUCTION",json.dumps(dict(asof=m["asof"],quality=m["quality"],groups=[dict(base=g["base"],group=g["group"],total=g["total"],mature_3=g["horizons"]["3"]["complete"]) for g in m["groups"]],pages=len(out["pages"])),ensure_ascii=False))
+    print("BLUE_PRIVATE_CASE_RECONSTRUCTION",json.dumps(dict(asof=m["asof"],quality=m["quality"],published_comparison=m["published_comparison"],groups=[dict(base=g["base"],group=g["group"],total=g["total"],mature_3=g["horizons"]["3"]["complete"]) for g in m["groups"]],pages=len(out["pages"])),ensure_ascii=False))
