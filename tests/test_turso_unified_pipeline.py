@@ -1,10 +1,12 @@
 """No secrets, DB, token issuance or network: one daily EOD+research contract."""
-from datetime import date
+from datetime import date, datetime, timezone
 from pathlib import Path
 import unittest
 
 from scripts.turso_unified_day_guard import CONFIRM, select_pipeline_day
 
+
+SCHEDULE_NOW = datetime(2026, 11, 19, 13, 20, tzinfo=timezone.utc)
 
 ROOT = Path(__file__).resolve().parents[1]
 EOD = ROOT / '.github/workflows/blue_turso_daily_verified_eod_auto.yml'
@@ -29,9 +31,9 @@ class TursoUnifiedPipelineTests(unittest.TestCase):
 
     def test_schedule_writes_only_audited_eod_until_research_opt_in(self):
         disabled = select_pipeline_day('', 'apply', 'schedule', '',
-                                       today=date(2026, 11, 19))
+                                       now=SCHEDULE_NOW)
         enabled = select_pipeline_day('', 'apply', 'schedule', '', auto_research='true',
-                                      today=date(2026, 11, 19))
+                                      now=SCHEDULE_NOW)
         self.assertEqual(disabled['RUN_RESEARCH'], 'false')
         self.assertEqual(enabled['RUN_RESEARCH'], 'true')
         self.assertEqual(enabled['RUN_INDICATORS'], 'false')
@@ -40,7 +42,25 @@ class TursoUnifiedPipelineTests(unittest.TestCase):
                      ('', 'dry_run', 'schedule', ''),
                      ('', 'apply', 'schedule', CONFIRM)]:
             with self.assertRaisesRegex(ValueError, 'INVALID_UNIFIED_SCHEDULE_INPUTS'):
-                select_pipeline_day(*args, today=date(2026, 11, 19))
+                select_pipeline_day(*args, now=SCHEDULE_NOW)
+
+    def test_delayed_schedule_selects_most_recent_elapsed_weekday_slot(self):
+        for utc, expected in (
+            ('2026-11-24T23:06:30+00:00', '2026-11-24'),
+            ('2026-11-25T13:19:59+00:00', '2026-11-24'),
+            ('2026-11-25T13:20:00+00:00', '2026-11-25'),
+            ('2026-11-27T23:10:00+00:00', '2026-11-27'),
+            ('2026-11-30T01:00:00+00:00', '2026-11-27'),
+            ('2027-01-01T00:00:00+00:00', '2026-12-31'),
+        ):
+            with self.subTest(utc=utc):
+                result = select_pipeline_day('', 'apply', 'schedule', '',
+                                             now=datetime.fromisoformat(utc))
+                self.assertEqual(result['TRADE_DAY'], expected)
+        # An explicitly requested manual date is not reinterpreted by cron policy.
+        result = select_pipeline_day('2026-11-25', 'dry_run', 'workflow_dispatch', '',
+                                     now=datetime.fromisoformat('2026-11-25T01:00:00+00:00'))
+        self.assertEqual(result['TRADE_DAY'], '2026-11-25')
 
     def test_no_date_substitution_or_invalid_calendar(self):
         for day in ('2026-11-20', '2026-11-21', '2026-11-31', 'latest', '../../2026-11-18'):
@@ -55,10 +75,10 @@ class TursoUnifiedPipelineTests(unittest.TestCase):
                                      CONFIRM, include_indicators='true', today=date(2026, 11, 19))
         self.assertEqual(manual['RUN_INDICATORS'], 'true')
         off = select_pipeline_day('', 'apply', 'schedule', '', auto_indicators='true',
-                                  today=date(2026, 11, 19))
+                                  now=SCHEDULE_NOW)
         self.assertEqual(off['RUN_INDICATORS'], 'false')
         on = select_pipeline_day('', 'apply', 'schedule', '', auto_research='true',
-                                 auto_indicators='true', today=date(2026, 11, 19))
+                                 auto_indicators='true', now=SCHEDULE_NOW)
         self.assertEqual(on['RUN_INDICATORS'], 'true')
 
     def test_one_schedule_has_ordered_eod_and_research_with_bounded_kis_secondary(self):

@@ -14,6 +14,11 @@ on:
       - 'tests/test_turso_signal_snapshot_export.py'
       - 'tools/turso/signal-snapshot-import.mjs'
       - 'tools/turso/signal-snapshot-import.test.mjs'
+      - 'tools/turso/krx-kis-fallback-collect.mjs'
+      - 'tools/turso/krx-kis-fallback-collect.test.mjs'
+      - 'collector/src/turso-provisional.mjs'
+      - 'collector/src/turso-direct.mjs'
+      - 'collector/package.json'
       - 'scripts/market_scan.py'
       - 'scripts/market_scan_r06.py'
       - 'scripts/market_scan_r08_diagnostics.py'
@@ -71,3 +76,8 @@ jobs:
         run: npm install --no-audit --no-fund --ignore-scripts --no-package-lock
       - name: Test audited EOD prerequisite, exact close and immutable read-back
         run: node --test tools/turso/signal-snapshot-import.test.mjs tools/turso/indicator-snapshot-import.test.mjs
+      - name: Install Collector runtime dependency (no scripts)
+        working-directory: collector
+        run: npm install --omit=dev --no-audit --no-fund --ignore-scripts --no-package-lock
+      - name: Test production KIS fallback imports without secrets
+        run: node --test tools/turso/krx-kis-fallback-collect.test.mjs

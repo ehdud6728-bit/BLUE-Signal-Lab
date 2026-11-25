@@ -81,6 +81,13 @@ jobs:
       - name: Install isolated Turso importer
         working-directory: tools/turso
         run: npm install --no-audit --no-fund --ignore-scripts --no-package-lock
+      - name: Install Collector runtime dependency for KIS fallback
+        if: ${{ steps.krx_fetch.outcome == 'failure' && env.MODE == 'apply' }}
+        working-directory: collector
+        run: npm install --omit=dev --no-audit --no-fund --ignore-scripts --no-package-lock
+      - name: Verify KIS fallback module imports and isolated fixtures
+        if: ${{ steps.krx_fetch.outcome == 'failure' && env.MODE == 'apply' }}
+        run: node --test tools/turso/krx-kis-fallback-collect.test.mjs
       - name: On KRX failure collect exact-day KIS secondary observations (apply only)
         if: ${{ steps.krx_fetch.outcome == 'failure' && env.MODE == 'apply' }}
         env:
