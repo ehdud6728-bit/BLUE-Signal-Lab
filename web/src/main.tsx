@@ -760,6 +760,10 @@ function App(){
   const goldSignal=(r:Signal)=>r.provisional?null:validatedResearchSignal(r,storageMode==='turso'&&searchSource==='patterns'&&patternBackend==='turso');
   const researchFeatures=(r:Signal)=>r.provisional?r.extras?.provisional_candle_features:r.extras?.audited_candle_features;
   const recentMatch=(r:Signal)=>(r.provisional?activeProvisional?.ai_asof===RECENT_ASOF&&typeof activeProvisional?.ai_count==='number':patternBackend==='turso')&&matchedRecent(r.day,r.signals,researchFeatures(r),!r.provisional).length>0;
+  const tomatoResearch=(r:Signal)=>{
+    const up=patternUp(r),n=num(r,'r159_pattern_n_10d'),label=extra(r,'r159_pattern_label_10d');
+    return up!==null&&up>=0&&up<=100&&n!==null&&Number.isInteger(n)&&n>0?{up,n,label:typeof label==='string'?label.slice(0,150):''}:null;
+  };
   const stockHighlight=(r:Signal)=>researchCardClasses(goldSignal(r)!==null||recentMatch(r),patternUp(r)!==null);
   const goldEvidenceBlock=(r:Signal)=>{const signal=goldSignal(r);
     return signal?<div className="r-research-gold-label" role="note">★ 검증 연구 추천 패턴 · {showSignal(signal)}</div>:null;};
@@ -1245,7 +1249,7 @@ function App(){
                  <div className="r15125-amount-change">{amountChange(r)}{sortedPercent(r)&&<span> · {sortedPercent(r)}</span>}</div>
                  {goldEvidenceBlock(r)}
               {(!r.provisional||recentMatch(r))&&<RecentPatternReference provisional={r.provisional} day={r.day} signals={r.signals} matched={recentMatch(r)} features={researchFeatures(r)} onDetails={storageMode==="turso"?()=>{setAiResearchTab(recentMatch(r)?"recommend":"ranking");nav("ai");}:undefined}/>}
-              {storageMode==="turso"&&searchSource==="patterns"&&(r.provisional?activeProvisional?.ai_asof===RECENT_ASOF:patternBackend==="turso")&&<StockResearchReference key={r.code+":"+r.day} day={r.day} signals={r.signals} features={researchFeatures(r)} provisional={r.provisional} onProfit={()=>{setAiResearchTab("profit");nav("ai");}} onHigh={()=>{setAiResearchTab("highreturn");nav("ai");}}/>}
+              {storageMode==="turso"&&searchSource==="patterns"&&(r.provisional?activeProvisional?.ai_asof===RECENT_ASOF:patternBackend==="turso")&&<StockResearchReference key={r.code+":"+r.day} day={r.day} signals={r.signals} features={researchFeatures(r)} provisional={r.provisional} tomato={tomatoResearch(r)} recent={recentMatch(r)?matchedRecent(r.day,r.signals,researchFeatures(r),!r.provisional)[0]??null:null} validated={goldSignal(r)} onProfit={()=>{setAiResearchTab("profit");nav("ai");}} onHigh={()=>{setAiResearchTab("highreturn");nav("ai");}}/>}
                  {patternEvidenceBlock(r)}
                  {patternDays(r).length>0&&<div className="r1599-pattern-dates" title={patternDays(r).join(' · ')}>과거 신호일 {patternDays(r).slice(-3).join(' · ')}{patternDays(r).length>3?' 외':''}</div>}</div>
                  <button type="button" className={'r151-quick-add '+(inBasket(r)?'saved':'')}
@@ -1275,7 +1279,7 @@ function App(){
               <div className="stock-top"><div className="stock-identity"><strong>{displayName(r)}</strong><span>{r.code} <span className="stock-dot">·</span> {r.day}</span></div><div className="stock-price"><b>{money(r.close_price)}<small>원</small></b><span>{r.provisional?'KIS 관측가':'종가'}</span></div><ChevronRight size={19} className="stock-chevron"/></div>
               {goldEvidenceBlock(r)}
               {(!r.provisional||recentMatch(r))&&<RecentPatternReference provisional={r.provisional} day={r.day} signals={r.signals} matched={recentMatch(r)} features={researchFeatures(r)} onDetails={storageMode==="turso"?()=>{setAiResearchTab(recentMatch(r)?"recommend":"ranking");nav("ai");}:undefined}/>}
-              {storageMode==="turso"&&searchSource==="patterns"&&(r.provisional?activeProvisional?.ai_asof===RECENT_ASOF:patternBackend==="turso")&&<StockResearchReference key={r.code+":"+r.day} day={r.day} signals={r.signals} features={researchFeatures(r)} provisional={r.provisional} onProfit={()=>{setAiResearchTab("profit");nav("ai");}} onHigh={()=>{setAiResearchTab("highreturn");nav("ai");}}/>}
+              {storageMode==="turso"&&searchSource==="patterns"&&(r.provisional?activeProvisional?.ai_asof===RECENT_ASOF:patternBackend==="turso")&&<StockResearchReference key={r.code+":"+r.day} day={r.day} signals={r.signals} features={researchFeatures(r)} provisional={r.provisional} tomato={tomatoResearch(r)} recent={recentMatch(r)?matchedRecent(r.day,r.signals,researchFeatures(r),!r.provisional)[0]??null:null} validated={goldSignal(r)} onProfit={()=>{setAiResearchTab("profit");nav("ai");}} onHigh={()=>{setAiResearchTab("highreturn");nav("ai");}}/>}
               {patternEvidenceBlock(r)}
               {r.provisional?<div className="r1599-mobile-meta">{observedKst(r.observed_at_utc)} 수신 · 미확정</div>:<PriceCompareMini compact data={r1593Prices[comparisonKey(r)]} baseline={r.close_price} loading={r1593Busy&&!r1593Prices[comparisonKey(r)]}
                 onRequest={()=>{void requestMissingQuote(r);}} requesting={r1595Requesting===comparisonKey(r)}
