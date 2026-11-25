@@ -107,3 +107,11 @@ test('market evidence quality distinguishes receipt from trade day, partial flow
  assert.equal(buildMarketEvidence(input,now).facts.quality.domestic_receipt,'TODAY_RECEIPT_ONLY');
  assert.equal(buildMarketEvidence(input,now).facts.quality.domestic_quote_day,'UNVERIFIED');
 });
+
+test('duplicate flow dates do not satisfy three-observation evidence quality',()=>{
+ const input=fixture();
+ for(const m of input.rotation.markets)m.flows=[{day,foreign:'BUY',institution:'BUY'},{day,foreign:'BUY',institution:'BUY'},{day:'2026-11-23',foreign:'BUY',institution:'BUY'}];
+ assert.equal(buildMarketEvidence(input,now).facts.quality.flow_3_observations,'PARTIAL_OR_MISSING');
+ for(const m of input.rotation.markets)m.flows[1]={day:'2026-11-20',foreign:'BUY',institution:'BUY'};
+ assert.equal(buildMarketEvidence(input,now).facts.quality.flow_3_observations,'BOTH_MARKETS');
+});
