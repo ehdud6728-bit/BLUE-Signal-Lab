@@ -76,15 +76,47 @@ jobs:
           python-version: '3.11'
       - run: pip install pandas numpy requests pyarrow pykrx
         if: steps.evidence.outputs.ready == 'true'
+      - name: Resolve public MARCAP source revision
+        id: marcap
+        if: steps.evidence.outputs.ready == 'true'
+        run: |
+          REF=$(python -c 'import json; print(json.load(open("output/provisional/quotes.meta.json"))["reference"])')
+          REV=$(timeout 20s git ls-remote https://github.com/FinanceData/marcap.git refs/heads/master | awk '$2=="refs/heads/master" {print $1}') || REV=
+          if [[ "$REV" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "revision=$REV" >> "$GITHUB_OUTPUT"
+            echo "year=${REF:0:4}" >> "$GITHUB_OUTPUT"
+          else
+            echo "BLUE_MARCAP_CACHE_BYPASS: source revision unavailable"
+          fi
+      - name: Restore exact public MARCAP source cache
+        id: marcap_cache
+        if: steps.evidence.outputs.ready == 'true' && steps.marcap.outputs.revision != ''
+        uses: actions/cache/restore@v4
+        continue-on-error: true
+        with:
+          path: output/provisional/marcap-cache
+          key: blue-marcap-raw-v1-${{ steps.marcap.outputs.year }}-${{ steps.marcap.outputs.revision }}
       - name: Prepare verified reference history
         if: steps.evidence.outputs.ready == 'true'
         env:
           KRX_DATA_ID: ${{ secrets.KRX_DATA_ID }}
           KRX_DATA_PW: ${{ secrets.KRX_DATA_PW }}
           KRX_AUTH_KEY: ${{ secrets.KRX_AUTH_KEY }}
+          MARCAP_REVISION: ${{ steps.marcap.outputs.revision }}
         run: |
           REF=$(python -c 'import json; print(json.load(open("output/provisional/quotes.meta.json"))["reference"])')
-          python scripts/provisional_history.py --reference "$REF" --output output/provisional/history.csv
+          ARGS=()
+          if [[ -n "$MARCAP_REVISION" ]]; then
+            ARGS+=(--marcap-revision "$MARCAP_REVISION" --cache-dir output/provisional/marcap-cache)
+          fi
+          python scripts/provisional_history.py --reference "$REF" --output output/provisional/history.csv "${ARGS[@]}"
+      - name: Save validated public MARCAP bytes only
+        if: steps.evidence.outputs.ready == 'true' && steps.marcap.outputs.revision != '' && steps.marcap_cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        continue-on-error: true
+        with:
+          path: output/provisional/marcap-cache
+          key: blue-marcap-raw-v1-${{ steps.marcap.outputs.year }}-${{ steps.marcap.outputs.revision }}
       - name: Scan provisional patterns
         if: steps.evidence.outputs.ready == 'true'
         run: |
