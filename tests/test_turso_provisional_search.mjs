@@ -238,9 +238,22 @@ test('KIS AI matches require exact stored candle, count and sort before paging',
 
 test('today transition bypasses stale date gate, keeps Turso source and refreshes selected query',()=>{
  const web=readFileSync(new URL('../web/src/main.tsx',import.meta.url),'utf8');
- assert.ok(web.includes("const source=todaySearch?'turso':patternBackend"));
+ assert.ok(web.includes("const source=todaySearch||confirmedReadOnly?'turso':patternBackend"));
  assert.ok(web.includes("if(live.data_status==='VERIFIED_EOD_AVAILABLE')confirmedTodayReady=true"));
  assert.ok(web.includes("if(!confirmedTodayReady&&queryMode==='single'"));
- assert.ok(web.includes("if(!todaySearch&&source==='turso'&&r.status>=500"));
+ assert.ok(web.includes("if(!todaySearch&&!confirmedReadOnly&&source==='turso'&&r.status>=500"));
  assert.ok(web.includes("if(!busy&&mode==='single'&&date===todayKST())void search(1,false)"));
+});
+
+test('completed Turso scan only rereads stored results and does not restart POST on stale search',()=>{
+ const web=readFileSync(new URL('../web/src/main.tsx',import.meta.url),'utf8');
+ const req=web.slice(web.indexOf('async function requestTursoScan('),web.indexOf('// Only single-day missing results'));
+ assert.ok(req.indexOf('tursoReadyDays.current.has(day)')<req.indexOf("API+'/api/research/request'"));
+ assert.ok(req.includes('tursoRequestInFlight.current||tursoWatchDate===day'));
+ assert.ok(req.includes('tursoReadyDays.current.add(day)'));
+ assert.ok(req.includes('day,undefined,techFields,techLogic,undefined,true'));
+ assert.ok(web.includes('let confirmedTodayReady=confirmedReadOnly'));
+ assert.ok(web.includes('if(confirmedTodayReady){setStatus('));
+ assert.ok(web.includes('if(cancelled||tursoReadyDays.current.has(tursoWatchDate))return'));
+ assert.ok(web.includes('tursoWatchDate,undefined,techFields,techLogic,undefined,true'));
 });
