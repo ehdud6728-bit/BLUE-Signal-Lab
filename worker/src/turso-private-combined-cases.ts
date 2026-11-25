@@ -36,7 +36,28 @@ export async function tursoPrivateCombinedCases(env:Env,params:URLSearchParams,f
    if(payload.length>128*1024||p.payload_sha256!==g.page_hashes[page]||await digest(payload)!==p.payload_sha256)throw Error('CASE_PAGE_HASH_MISMATCH');
    const items=JSON.parse(payload);
    if(!Array.isArray(items)||items.length!==Math.min(20,g.total-page*20)||items.some(x=>!day(x.day)||x.day>asof||!/^[0-9A-Z]{6}$/.test(x.code)||!hash(x.indicators?.record_sha256)))throw Error('CASE_PAGE_INVALID');
-   rows=items;
+   // Price evidence is immutable. Resolve missing display names separately,
+   // only after verifying the saved payload hash. Never use directory names
+   // as proof of the historical name or change a research cohort.
+   const validName=(v:unknown,code:string):v is string=>typeof v==='string'&&v.trim().length>0&&v.trim()!==code&&v.length<=100&&!/[\u0000-\u001f\u007f]/.test(v);
+   const missing=items.filter(x=>!validName(x.name,x.code)&&['KOSPI','KOSDAQ'].includes(x.market));
+   const directory=new Map<string,{name:string;asof_day:string}>();
+   if(missing.length&&(await q("SELECT name FROM sqlite_master WHERE type='table' AND name='blue_symbol_directory_v1'")).rows.length){
+    const pairs=[...new Map(missing.map(x=>[x.market+'/'+x.code,x])).values()];
+    const found=await q('SELECT code,market,name,asof_day FROM blue_symbol_directory_v1 WHERE '+pairs.map(()=>'(code=? AND market=?)').join(' OR '),pairs.flatMap(x=>[x.code,x.market]));
+    const ambiguous=new Set<string>();
+    for(const n of found.rows){
+     const code=String(n.code),market=String(n.market),k=market+'/'+code,asof_day=String(n.asof_day??'');
+     if(!pairs.some(x=>x.code===code&&x.market===market)||!validName(n.name,code)||!day(asof_day))continue;
+     if(directory.has(k)||ambiguous.has(k)){directory.delete(k);ambiguous.add(k);continue;}
+     directory.set(k,{name:n.name.trim(),asof_day});
+    }
+   }
+   rows=items.map(x=>{
+    if(validName(x.name,x.code))return {...x,display_name:x.name.trim(),name_source:'SIGNAL_EOD',name_asof_day:x.day};
+    const n=directory.get(x.market+'/'+x.code);
+    return {...x,display_name:n?.name??null,name_source:n?'SYMBOL_DIRECTORY':'UNKNOWN',name_asof_day:n?.asof_day??null};
+   });
   }
   return {status:'READY',asof,snapshot:id,source_sha256:m.source_sha256,factors_sha256:m.factors_sha256,published_comparison:m.published_comparison,legacy_factors_sha256:m.legacy_factors_sha256,audit_sessions:m.audit_sessions,signal_audit_sessions:m.signal_audit_sessions,quality:m.quality,base,group,total:g.total,page,page_count:g.page_hashes.length,horizons:g.horizons,rows};
  }finally{db.close();}
