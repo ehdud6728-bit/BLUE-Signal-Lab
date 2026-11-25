@@ -39,7 +39,10 @@ export async function exportInputs(client,day,now,sessions=260,{quotesOnly=false
   if(afterClose?(q.source!=='KIS_REST_INQUIRE_DAILY_PRICE_PROVISIONAL'||at<closeAt):cutoff-at>90*60000){skip(afterClose?'PRE_CLOSE_OBSERVATION':'STALE_INTRADAY');continue;}
   let p;
   try{p=JSON.parse(String(q.payload_json));}catch{skip('MALFORMED_PAYLOAD');continue;}
-  if(!p||typeof p!=='object'||p.code!==q.code||p.trade_date_kst!==day||p.received_at_utc!==q.observed_at_utc||p.price!==Number(q.close)||p.accumulated_volume!==Number(q.volume)){skip('QUOTE_MISMATCH');continue;}
+  if(!p||typeof p!=='object'||p.code!==q.code||p.trade_date_kst!==day||p.received_at_utc!==q.observed_at_utc||p.price!==Number(q.close)||p.accumulated_volume!==Number(q.volume)||p.open!==Number(q.open)||p.high!==Number(q.high)||p.low!==Number(q.low)){skip('QUOTE_MISMATCH');continue;}
+  if(q.source==='KIS_REST_INQUIRE_DAILY_PRICE_PROVISIONAL'&&
+    (q.date_basis!=='KIS_REPORTED_TRADE_DATE'||p.reported_trade_date!==day.replaceAll('-','')||
+     p.source!=='KIS_REST_INQUIRE_DAILY_PRICE'||p.is_confirmed_daily!==false)){skip('DAILY_DATE_EVIDENCE_MISMATCH');continue;}
   const [o,h,l,c,v]=[q.open,q.high,q.low,q.close,q.volume].map(Number);
   if(!/^[0-9A-Z]{6}$/.test(String(q.code))||![o,h,l,c,v].every(Number.isSafeInteger)||!(0<l&&l<=Math.min(o,c)&&Math.max(o,c)<=h&&v>0)){skip('INVALID_OHLCV');continue;}
   if(!stats.newest||q.observed_at_utc>stats.newest)stats.newest=q.observed_at_utc;

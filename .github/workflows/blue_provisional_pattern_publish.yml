@@ -54,16 +54,30 @@ jobs:
           node tools/turso/provisional-input-export.mjs "$DAY" output/provisional/quotes --quotes-only
           python3 -c 'import json; m=json.load(open("output/provisional/quotes.meta.json")); print(m)'
       - name: Ensure usable current-session evidence
+        id: evidence
         if: steps.gate.outputs.ready == 'true'
-        run: python3 -c 'import json; m=json.load(open("output/provisional/quotes.meta.json")); assert m["eligible"]>0,"NO_VALID_CURRENT_SESSION_QUOTES"'
+        run: |
+          python3 - <<'PY'
+          import json, os
+          m=json.load(open("output/provisional/quotes.meta.json"))
+          n=m["eligible"]
+          if type(n) is not int or n<0:
+              raise ValueError("INVALID_ELIGIBLE_COUNT")
+          ready=n>0
+          print("BLUE_PROVISIONAL_EXPORT_GATE",json.dumps({"ready":ready,"eligible":n,"reason":"USABLE_QUOTES" if ready else "NO_VALID_CURRENT_SESSION_QUOTES"}))
+          with open(os.environ["GITHUB_OUTPUT"],"a") as f:
+              f.write("ready="+str(ready).lower()+"\n")
+          if not ready and os.environ["GITHUB_EVENT_NAME"]!="schedule":
+              raise ValueError("NO_VALID_CURRENT_SESSION_QUOTES")
+          PY
       - uses: actions/setup-python@v5
-        if: steps.gate.outputs.ready == 'true'
+        if: steps.evidence.outputs.ready == 'true'
         with:
           python-version: '3.11'
       - run: pip install pandas numpy requests pyarrow pykrx
-        if: steps.gate.outputs.ready == 'true'
+        if: steps.evidence.outputs.ready == 'true'
       - name: Prepare verified reference history
-        if: steps.gate.outputs.ready == 'true'
+        if: steps.evidence.outputs.ready == 'true'
         env:
           KRX_DATA_ID: ${{ secrets.KRX_DATA_ID }}
           KRX_DATA_PW: ${{ secrets.KRX_DATA_PW }}
@@ -72,12 +86,12 @@ jobs:
           REF=$(python -c 'import json; print(json.load(open("output/provisional/quotes.meta.json"))["reference"])')
           python scripts/provisional_history.py --reference "$REF" --output output/provisional/history.csv
       - name: Scan provisional patterns
-        if: steps.gate.outputs.ready == 'true'
+        if: steps.evidence.outputs.ready == 'true'
         run: |
           python -c 'import json; assert json.load(open("output/provisional/quotes.meta.json"))["eligible"]>0,"NO_VALID_KIS_QUOTES"'
           python scripts/provisional_pipeline.py --history output/provisional/history.csv --quote-prefix output/provisional/quotes --day "$DAY" --now "$(date -u +%FT%TZ)" --output output/provisional/result.json
       - name: Validate and optionally publish provisional snapshot
-        if: steps.gate.outputs.ready == 'true'
+        if: steps.evidence.outputs.ready == 'true'
         env:
           TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
           TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
