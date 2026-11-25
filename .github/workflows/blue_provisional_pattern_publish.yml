@@ -1,8 +1,12 @@
 name: BLUE Provisional Pattern Publish
 on:
-  # KST 11:20, 14:20, 18:50 on weekdays. Saved quotes only; no KIS calls.
+  # KST weekdays: 09:20-14:20 every 30 min, 14:35-15:25 every 10 min,
+  # 15:50 and 18:50. 19 scheduled opportunities, not guaranteed execution times.
+  # Saved quotes only; no KIS calls. Gate skips unchanged/unavailable quotes.
   schedule:
-    - cron: '20 2,5 * * 1-5'
+    - cron: '20,50 0-4 * * 1-5'
+    - cron: '20,35,45,55 5 * * 1-5'
+    - cron: '5,15,25,50 6 * * 1-5'
     - cron: '50 9 * * 1-5'
   workflow_dispatch:
     inputs:
@@ -26,13 +30,9 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - run: pip install pandas numpy requests pyarrow pykrx
       - run: npm --prefix tools/turso install --no-audit --no-fund --ignore-scripts --no-package-lock
       - name: Check current-day publication eligibility
         id: gate
@@ -50,7 +50,16 @@ jobs:
           DAY=$(TZ=Asia/Seoul date +%F)
           echo "DAY=$DAY" >> "$GITHUB_ENV"
           node tools/turso/provisional-input-export.mjs "$DAY" output/provisional/quotes --quotes-only
-          python -c 'import json; m=json.load(open("output/provisional/quotes.meta.json")); print(m)'
+          python3 -c 'import json; m=json.load(open("output/provisional/quotes.meta.json")); print(m)'
+      - name: Ensure usable current-session evidence
+        if: steps.gate.outputs.ready == 'true'
+        run: python3 -c 'import json; m=json.load(open("output/provisional/quotes.meta.json")); assert m["eligible"]>0,"NO_VALID_CURRENT_SESSION_QUOTES"'
+      - uses: actions/setup-python@v5
+        if: steps.gate.outputs.ready == 'true'
+        with:
+          python-version: '3.11'
+      - run: pip install pandas numpy requests pyarrow pykrx
+        if: steps.gate.outputs.ready == 'true'
       - name: Prepare verified reference history
         if: steps.gate.outputs.ready == 'true'
         env:
