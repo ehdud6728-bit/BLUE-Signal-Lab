@@ -1,0 +1,37 @@
+name: BLUE Rotation Prospective Outcomes
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        type: choice
+        options: [inspect, apply]
+        default: inspect
+        required: true
+  pull_request:
+    paths:
+      - 'collector/src/rotation-outcomes*'
+      - '.github/workflows/blue_rotation_outcomes.yml'
+permissions:
+  contents: read
+concurrency:
+  group: blue-rotation-prospective-outcomes
+  cancel-in-progress: false
+jobs:
+  track:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm install --prefix collector --no-package-lock --no-audit --no-fund
+      - name: Offline prospective tracking tests
+        run: node --test collector/src/rotation-outcomes.test.mjs
+      - name: Archive current receipt and calculate matured outcomes
+        if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
+        env:
+          MODE: ${{ inputs.mode }}
+          TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
+          TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
+        run: node collector/src/rotation-outcomes.mjs "$MODE"
