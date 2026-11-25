@@ -241,6 +241,10 @@ function App(){
   const summaryRef=useRef<HTMLDivElement>(null);
   const aiRef=useRef<HTMLDivElement>(null);
   const searchVersion=useRef(0);
+  // READY is terminal for automatic requests in this browser session. A read
+  // failure is surfaced separately; it must not restart an already stored scan.
+  const tursoReadyDays=useRef(new Set<string>());
+  const tursoRequestInFlight=useRef(false);
   const [r1594Refresh,setR1594Refresh]=useState(0);
   const [r1594TrackingRefresh,setR1594TrackingRefresh]=useState(0);
   const [r1594BasketRefresh,setR1594BasketRefresh]=useState(0);
@@ -448,6 +452,11 @@ function App(){
   },[tursoWatchDate]);
 
   async function requestTursoScan(day:string){
+    if(tursoReadyDays.current.has(day)){
+      setStatus('분석 완료 상태입니다. 저장된 결과를 다시 조회해 주세요.');return;
+    }
+    if(tursoRequestInFlight.current||tursoWatchDate===day)return;
+    tursoRequestInFlight.current=true;
     setRequestBusy(true);
     setTursoRequestDate(day);
     setTursoStage('REQUESTED');setTursoStartedAt(Date.now());setTursoFinishedAt(0);
@@ -460,11 +469,13 @@ function App(){
       });
       const result=await response.json() as {status?:string;error?:string;deduplicated?:boolean};
       if(!response.ok)throw Error(result.error||'TURSO_RESEARCH_REQUEST_UNAVAILABLE');
+      if(tursoReadyDays.current.has(day))return;
       if(result.status==='READY'){
+        tursoReadyDays.current.add(day);
         setTursoWatchDate('');setTursoCompletedDate(day);
         setTursoStage('READY');setTursoFinishedAt(Date.now());
         setTursoScanInfo(`${day} 패턴 분석이 이미 준비되어 있습니다.`);
-        if(mode==='single'&&date===day)void search(1,false,gcFields,gcLogic,day);
+        if(mode==='single'&&date===day)void search(1,false,gcFields,gcLogic,day,undefined,techFields,techLogic,undefined,true);
       }else{
         setTursoCompletedDate('');setTursoWatchDate(day);
         setTursoStage('QUEUED');
@@ -473,10 +484,11 @@ function App(){
           `${day} KRX 일봉 검증과 전체시장 패턴 분석을 시작했습니다. 완료되면 자동으로 검색합니다.`);
       }
     }catch(e){
+      if(tursoReadyDays.current.has(day))return;
       setTursoWatchDate('');setTursoCompletedDate('');setTursoStage('FAILED');
       setTursoFinishedAt(Date.now());
       setTursoScanInfo(researchRequestError(e instanceof Error?e.message:''));
-    }finally{setRequestBusy(false);}
+    }finally{tursoRequestInFlight.current=false;setRequestBusy(false);}
   }
 
   // Only single-day missing results trigger the existing server-managed scan workflow.
@@ -502,15 +514,17 @@ function App(){
     }catch(e){setError(String(e));}
     finally{setRequestBusy(false);}
   }
-  async function search(p=1,scroll=true,selectedGc:GcKey[]=gcFields,selectedGcLogic:'any'|'all'=gcLogic,requestedDay?:string,patternOverride?:{enabled?:boolean;threshold?:number|null;minSamples?:number;amountEok?:number},selectedTech:TechKey[]=techFields,selectedTechLogic:'any'|'all'=techLogic,queryOverride?:{q?:string;sort?:ResultSort;aiOnly?:boolean}){
+  async function search(p=1,scroll=true,selectedGc:GcKey[]=gcFields,selectedGcLogic:'any'|'all'=gcLogic,requestedDay?:string,patternOverride?:{enabled?:boolean;threshold?:number|null;minSamples?:number;amountEok?:number},selectedTech:TechKey[]=techFields,selectedTechLogic:'any'|'all'=techLogic,queryOverride?:{q?:string;sort?:ResultSort;aiOnly?:boolean},readOnlyAfterReady=false){
+    const selectedDay=requestedDay||date;
+    const confirmedReadOnly=readOnlyAfterReady||((!!requestedDay||mode==='single')&&tursoReadyDays.current.has(selectedDay));
     const todaySearch=storageMode==='turso'&&searchSource==='patterns'&&(requestedDay||date)===todayKST()&&(!!requestedDay||mode==='single');
-    if(storageMode==='turso'&&patternStatus!=='ready'&&!todaySearch){
+    if(storageMode==='turso'&&patternStatus!=='ready'&&!todaySearch&&!confirmedReadOnly){
       setError('기술 패턴 검색에 사용할 감사 완료 분석 데이터 연결을 먼저 확인해 주세요.');
       return;
     }
     // Today's source is authoritative Turso, even if the cached date/backend is stale.
-    const source=todaySearch?'turso':patternBackend;
-    let confirmedTodayReady=false;
+    const source=todaySearch||confirmedReadOnly?'turso':patternBackend;
+    let confirmedTodayReady=confirmedReadOnly;
     const serial=++searchVersion.current;
     const effectiveAiOnly=(source==='turso'||todaySearch)&&(queryOverride?.aiOnly??aiOnly);
     const queryAmountEok=patternOverride?.amountEok??amountEok;
@@ -547,7 +561,7 @@ function App(){
       }
       // Today's published KIS scan is a real search source, independent of
       // the latest confirmed research date. Never feed it into EOD effects.
-      if(todaySearch){
+      if(todaySearch&&!confirmedReadOnly){
         const provisionalUrl=new URL(API+'/api/research/provisional-patterns');
         for(const k of ['date','q','signals','logic','gc','gc_logic','tech','tech_logic','min_amount_eok','page']){
           const value=u.searchParams.get(k);if(value!==null)provisionalUrl.searchParams.set(k,value);
@@ -612,7 +626,7 @@ function App(){
       let r=await fetch(u.toString(),{credentials:'include',cache:'no-store'});
       // D1 is only a secondary path. An HTTP 400 means the query was invalid
       // and must not silently turn into a different source/result.
-      if(!todaySearch&&source==='turso'&&r.status>=500&&querySort!=='recommended'&&!effectiveAiOnly){
+      if(!todaySearch&&!confirmedReadOnly&&source==='turso'&&r.status>=500&&querySort!=='recommended'&&!effectiveAiOnly){
         u.pathname='/api/search';
         r=await fetch(u.toString(),{credentials:'include',cache:'no-store'});
         if(r.ok){setPatternBackend('d1');setPatternSourceError('Turso 패턴 검색 불가 · D1 보조 DB로 전환됨');}
@@ -627,6 +641,13 @@ function App(){
       // No imported daily candles is NOT a genuine zero-signal scan.
       if(effectiveAiOnly&&d.ai_only!==true)throw Error('AI 추천 필터 API 배포가 필요합니다.');
       setAiCount(d.ai_asof===RECENT_ASOF&&typeof d.ai_count==='number'?d.ai_count:null);setAllCount(d.unfiltered_total??d.total);setAiOnly(d.ai_only===true);
+      if(source==='turso'&&d.storage==='TURSO'&&queryMode==='single'&&d.data_status==='AVAILABLE'){
+        tursoReadyDays.current.add(queryDate);
+        if(tursoRequestDate===queryDate||tursoWatchDate===queryDate||tursoCompletedDate===queryDate){
+          setTursoWatchDate('');setTursoCompletedDate(queryDate);setTursoStage('READY');
+          setTursoFinishedAt(v=>v||Date.now());setTursoScanInfo(`${queryDate} 패턴 분석 완료 · 저장된 결과를 조회했습니다.`);
+        }
+      }
       if(confirmedTodayReady&&d.data_status==='AVAILABLE'){
         if(d.storage!=='TURSO')throw Error('확정 검색 응답 출처 불일치');
         setPatternBackend('turso');setPatternStatus('ready');setPatternSourceError('');
@@ -642,6 +663,7 @@ function App(){
         requestAnimationFrame(()=>resultRef.current?.scrollIntoView({behavior:'smooth',block:'start'}));
       }
       if(d.data_status==='NOT_IMPORTED'){
+        if(confirmedTodayReady){setStatus('완료 상태와 저장 결과 조회가 일치하지 않습니다. 분석을 재요청하지 않고 조회 상태를 확인해 주세요.');return;}
         if(queryMode==='single'){
           if(source==='turso'){
             if(queryDate===todayKST()&&provisionalWindowKST())
@@ -721,18 +743,19 @@ function App(){
         const result=await response.json() as {status?:string;error?:string;reason?:string;
           actions_url?:string;stage?:TursoProgressStage;requested_at_utc?:string};
         if(!response.ok)throw Error(result.error||`분석 상태 오류 ${response.status}`);
-        if(cancelled)return;
+        if(cancelled||tursoReadyDays.current.has(tursoWatchDate))return;
         if(result.actions_url)setTursoActionsUrl(result.actions_url);
         if(result.requested_at_utc){
           const started=Date.parse(result.requested_at_utc);
           if(Number.isFinite(started))setTursoStartedAt(started);
         }
         if(result.status==='READY'){
+          tursoReadyDays.current.add(tursoWatchDate);
           setTursoWatchDate('');setTursoCompletedDate(tursoWatchDate);
           setTursoStage('READY');setTursoFinishedAt(Date.now());
           setTursoScanInfo(`${tursoWatchDate} 패턴 분석 완료 · 저장된 결과를 불러옵니다.`);
           if(!latest||tursoWatchDate>latest)setLatest(tursoWatchDate);
-          if(mode==='single'&&date===tursoWatchDate)void search(1,false,gcFields,gcLogic,tursoWatchDate);
+          if(mode==='single'&&date===tursoWatchDate)void search(1,false,gcFields,gcLogic,tursoWatchDate,undefined,techFields,techLogic,undefined,true);
         }else if(result.status==='FAILED'){
           setTursoWatchDate('');
           setTursoStage('FAILED');setTursoFinishedAt(Date.now());
@@ -746,7 +769,7 @@ function App(){
           setTursoStage('FAILED');setTursoFinishedAt(Date.now());
           setTursoScanInfo(`${tursoWatchDate} 분석 요청이 없습니다. 검색 버튼으로 다시 요청할 수 있습니다.`);
         }
-      }catch(e){if(!cancelled)setTursoScanInfo('상태를 일시적으로 확인하지 못했습니다. 15초 후 다시 시도합니다. · '+
+      }catch(e){if(!cancelled&&!tursoReadyDays.current.has(tursoWatchDate))setTursoScanInfo('상태를 일시적으로 확인하지 못했습니다. 15초 후 다시 시도합니다. · '+
         researchRequestError(e instanceof Error?e.message:''));}
       finally{inFlight=false;}
     };
@@ -1132,7 +1155,7 @@ function App(){
             startedAt={tursoStartedAt} finishedAt={tursoFinishedAt}
             onViewResults={()=>{
               const day=tursoCompletedDate;setActiveView('research');
-              void search(1,false,gcFields,gcLogic,day);
+              void search(1,false,gcFields,gcLogic,day,undefined,techFields,techLogic,undefined,true);
             }}/>}
         {storageMode==='turso'&&searchSource==='patterns'&&patternBackend==='turso'&&
           mode==='single'&&date===todayKST()&&!activeProvisional&&(!rows.length||dataStatus==='NOT_IMPORTED')&&
