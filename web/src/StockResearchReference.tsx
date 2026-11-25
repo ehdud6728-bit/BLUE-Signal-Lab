@@ -4,6 +4,7 @@ import {PROFITABILITY_DATA} from './research-profitability-data';
 import {HIGH_RETURN_PROFILES} from './high-return-profiles-data';
 import {selectStockResearch} from './stock-research-reference';
 import {synthesizeStockResearch} from './stock-research-synthesis';
+import {stockObservationContext} from './stock-observation-context';
 import {CombinedStockEvidence,selectCombinedRows} from './CombinedPatternResearch';
 import {patternLabel} from './research-pattern-label';
 import './stock-research-reference.css';
@@ -16,7 +17,7 @@ const fmt=(v:number|null)=>v==null||!Number.isFinite(v)?'—':(v>0?'+':'')+v.toF
 const pct=(v:number|null)=>v==null||!Number.isFinite(v)?'—':v.toFixed(1)+'%';
 const ratio=(v:number|null)=>v==null||!Number.isFinite(v)?'—':v.toFixed(2);
 const status:Record<string,string>={HOLDOUT_AGREES_EXPLORATORY:'후속 방향 일치 · 탐색',INSUFFICIENT_HOLDOUT:'후속 표본 부족',HOLDOUT_DISAGREES:'후속 불일치'};
-export default function StockResearchReference({day,signals,features,provisional,tomato,recent,validated,extras,onCombined,onProfit,onHigh}:{day:string;signals:string[];features:unknown;provisional?:boolean;tomato:{label:string;up:number;n:number}|null;recent:{pattern:string;horizon_trading_days:number;positive_return_probability_pct:number;median_return_pct:number;sample_count:number}|null;validated:string|null;extras?:Record<string,unknown>;onCombined:()=>void;onProfit:()=>void;onHigh:()=>void}){
+export default function StockResearchReference({day,signals,features,provisional,tomato,recent,validated,extras,referencePrice,onCombined,onProfit,onHigh}:{day:string;signals:string[];features:unknown;provisional?:boolean;tomato:{label:string;up:number;n:number}|null;recent:{pattern:string;horizon_trading_days:number;positive_return_probability_pct:number;median_return_pct:number;sample_count:number}|null;validated:string|null;extras?:Record<string,unknown>;referencePrice?:number|null;onCombined:()=>void;onProfit:()=>void;onHigh:()=>void}){
  const [open,setOpen]=useState(false);
  const {profits,high,retrospective}=selectStockResearch({day,asof:RECENT_ASOF,signals,features,profit,profiles,allowRetrospective:!provisional});
  const combined=selectCombinedRows(signals,features,extras,provisional);
@@ -25,7 +26,23 @@ export default function StockResearchReference({day,signals,features,provisional
   mean:x.joint.all.mean_pct,median:x.joint.all.median_pct,profitFactor:x.joint.all.profile?.profit_factor??null
  }]:[]));
  if(!profits.length&&!high.length&&!tomato&&!recent&&!validated&&!combined.length)return null;
- return <details className="sr-reference" open={open} onToggle={e=>setOpen(e.currentTarget.open)} onClick={e=>e.stopPropagation()}>
+ const context=stockObservationContext(extras,referencePrice);
+ return <div className="sr-context-wrap">
+ <div className="sr-context" aria-label="신호일 관측 요약">
+ <strong>신호일 종합 관찰 · {provisional?'잠정':'확정'}</strong>
+ <small>{day} · {synthesis.label}{retrospective?' · 사후 연구 참고':''}</small>
+ <div className="sr-context-grid">
+ <span>이평 배열 <b>{context.trend}</b></span>
+ <span>거래대금/20일 평균 <b>{context.turnover}</b></span>
+ <span>RSI <b>{context.rsi===null?'미계산':context.rsi.toFixed(1)}</b></span>
+ <span>추정 매물대 <b>{context.supply?context.supply.grade+' · '+context.supply.price.toLocaleString('ko-KR')+'원':'미확인'}</b></span>
+ </div>
+ <small>{context.momentum}</small>
+ {context.supply?.distancePct!=null&&<small>신호일 기준가격 대비 매물대 기준가 {fmt(context.supply.distancePct)} · 실제 매도잔량 아님</small>}
+ <p>{[...(provisional?['확정 일봉에서 조건 유지 확인']:[]),...context.checks].join(' · ')||'추가 확인: 신호 유지와 손실 위험'}.</p>
+ <small>과거 연구와 당시 관측의 요약 · 현재가 예측이나 매수 추천 아님</small>
+ </div>
+ <details className="sr-reference" open={open} onToggle={e=>setOpen(e.currentTarget.open)} onClick={e=>e.stopPropagation()}>
  <summary><span>연구 종합 해석</span><small>{synthesis.label} · 상세 보기</small></summary>
  {open&&<>
  <div className="sr-synthesis"><strong>{synthesis.label}</strong><small>{retrospective?'최신 시장 연구로 과거 신호 비교':provisional?'장중 잠정 조건':'확정 신호'} · 수익성 {profits.length}건 · 고수익 특징 {high.length}건</small>
@@ -52,5 +69,6 @@ export default function StockResearchReference({day,signals,features,provisional
  <button type="button" onClick={onHigh}>고수익 특성 연구 상세 ›</button>
  <p className="sr-note">표시 가능한 캔들 형태·몸통·종가 위치만 비교합니다. 기타 특징은 미확인입니다. 패턴별 대표 조건은 세부 일치·표본 수 기준이며, 일치 건수는 확률이나 점수가 아닙니다. 거래비용·실제 체결·기업행동 검증 전.</p>
  </>}
- </details>;
+ </details>
+ </div>;
 }
