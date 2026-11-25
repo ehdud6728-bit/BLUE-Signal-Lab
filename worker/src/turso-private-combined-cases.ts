@@ -38,6 +38,6 @@ export async function tursoPrivateCombinedCases(env:Env,params:URLSearchParams,f
    if(!Array.isArray(items)||items.length!==Math.min(20,g.total-page*20)||items.some(x=>!day(x.day)||x.day>asof||!/^[0-9A-Z]{6}$/.test(x.code)||!hash(x.indicators?.record_sha256)))throw Error('CASE_PAGE_INVALID');
    rows=items;
   }
-  return {status:'READY',asof,snapshot:id,source_sha256:m.source_sha256,factors_sha256:m.factors_sha256,audit_sessions:m.audit_sessions,signal_audit_sessions:m.signal_audit_sessions,quality:m.quality,base,group,total:g.total,page,page_count:g.page_hashes.length,horizons:g.horizons,rows};
+  return {status:'READY',asof,snapshot:id,source_sha256:m.source_sha256,factors_sha256:m.factors_sha256,published_comparison:m.published_comparison,legacy_factors_sha256:m.legacy_factors_sha256,audit_sessions:m.audit_sessions,signal_audit_sessions:m.signal_audit_sessions,quality:m.quality,base,group,total:g.total,page,page_count:g.page_hashes.length,horizons:g.horizons,rows};
  }finally{db.close();}
 }
