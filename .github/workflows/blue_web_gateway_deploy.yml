@@ -4,7 +4,7 @@ on:
     inputs:
       mode:
         type: choice
-        options: [verify_only, deploy_web, deploy_api, deploy_api_and_web]
+        options: [verify_only, inspect_live, deploy_web, deploy_api, deploy_api_and_web]
         default: verify_only
         required: true
       access_team:
@@ -29,6 +29,7 @@ concurrency:
   cancel-in-progress: false
 jobs:
   verify_and_deploy:
+    if: inputs.mode != 'inspect_live'
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
@@ -66,6 +67,7 @@ jobs:
         run: |
           node --test tests/test_web_gateway.mjs tests/test_gateway_deploy_defaults.mjs
           python3 -m unittest discover -s tests -p 'test_gateway_binding_preflight.py'
+          python3 -m unittest discover -s tests -p 'test_gateway_live_inspection.py'
       - working-directory: worker
         run: npm install --no-package-lock --no-audit --no-fund
       - name: Dry-run API Worker
@@ -208,3 +210,21 @@ jobs:
       - name: Verify-only summary
         if: inputs.mode == 'verify_only'
         run: echo 'BLUE_GATEWAY_VERIFY_ONLY - no production changes'
+  inspect_live:
+    if: inputs.mode == 'inspect_live'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Validate read-only scope
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REPOSITORY" = ehdud6728-bit/BLUE-Signal-Lab
+          test "$GITHUB_REF" = refs/heads/main
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Inspect Cloudflare deployment history and active bindings (GET only)
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_WORKER_DEPLOY_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: python3 -m tools.gateway_live_inspection
