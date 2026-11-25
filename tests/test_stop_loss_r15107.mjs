@@ -39,3 +39,12 @@ test('prefers structural stop for B40/ENV but ATR for momentum-only',()=>{
  assert.equal(preferredStopMethod(['ENV20']),'SUPPORT');
  assert.equal(preferredStopMethod(['MACD_GC']),'ATR');
 });
+
+test('duplicate, invalid open, missing discovery candle and baseline mismatch withhold stops',()=>{
+ const allNull=x=>assert.ok(x.every(y=>y.price===null));
+ allNull(calculateStopCandidates([...bars,bars.at(-1)],asof,1044));
+ allNull(calculateStopCandidates([...bars.slice(0,-1),{...bars.at(-1),o:99999}],asof,1044));
+ allNull(calculateStopCandidates(bars.slice(0,-1),asof,1044));
+ allNull(calculateStopCandidates(bars,asof,1045));
+ assert.equal(row('TRAILING',calculateStopCandidates(bars,asof,1044,1300,'2099-01-01')).price,null);
+});
