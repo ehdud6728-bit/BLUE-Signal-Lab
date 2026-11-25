@@ -55,9 +55,9 @@ def return_profile(returns):
         payoff_ratio=rnd(gain/abs(loss) if gain is not None and loss is not None else None),
         profit_factor=rnd(sum(wins)/abs(sum(losses)) if losses else None),
         worst_5pct_mean_pct=rnd(mean(tail)),tail_count=len(tail),
-        target_5_pct=round(100*sum(r>=5 for r in returns)/len(returns),2),
-        target_10_pct=round(100*sum(r>=10 for r in returns)/len(returns),2),
-        target_20_pct=round(100*sum(r>=20 for r in returns)/len(returns),2))
+        target_5_pct=round(100*sum(r>=5-1e-9 for r in returns)/len(returns),2),
+        target_10_pct=round(100*sum(r>=10-1e-9 for r in returns)/len(returns),2),
+        target_20_pct=round(100*sum(r>=20-1e-9 for r in returns)/len(returns),2))
 
 def summarize(rows):
     groups = defaultdict(list)
