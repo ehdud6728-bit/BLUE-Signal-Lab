@@ -20,17 +20,10 @@ export default function StockResearchReference({day,signals,features,provisional
  const [open,setOpen]=useState(false);
  const {profits,high,retrospective}=selectStockResearch({day,asof:RECENT_ASOF,signals,features,profit,profiles,allowRetrospective:!provisional});
  const combined=selectCombinedRows(signals,features,extras,provisional);
- const synthesis=synthesizeStockResearch(profits,high,tomato,recent,validated);
- for(const x of combined){
-  const r=x.joint;
-  if(!r)continue;
-  const name=patternLabel(x.base);
-  if(r.research_status!=='DESCRIPTIVE_ONLY'){synthesis.limits.push(name+' 복합 조건: 완료 표본 '+r.all.n+'건, 판단 보류.');continue;}
-  if(r.all.mean_pct!==null&&r.all.mean_pct<0){
-   synthesis.risk.push(name+' 복합 조건 3일 다음 시가 기준 평균 '+fmt(r.all.mean_pct)+' ('+r.all.n+'건).');
-   synthesis.label=synthesis.positive.length?'긍정·부정 근거 혼재':'수익성 주의';
-  }else synthesis.limits.push(name+' 복합 조건: 과거 성과 관측, 저장 지표 및 독립 기간 검증 전.');
- }
+ const synthesis=synthesizeStockResearch(profits,high,tomato,recent,validated,combined.flatMap(x=>x.joint?[{
+  label:patternLabel(x.base),status:x.joint.research_status,n:x.joint.all.n,
+  mean:x.joint.all.mean_pct,median:x.joint.all.median_pct,profitFactor:x.joint.all.profile?.profit_factor??null
+ }]:[]));
  if(!profits.length&&!high.length&&!tomato&&!recent&&!validated&&!combined.length)return null;
  return <details className="sr-reference" open={open} onToggle={e=>setOpen(e.currentTarget.open)} onClick={e=>e.stopPropagation()}>
  <summary><span>연구 종합 해석</span><small>{synthesis.label} · 상세 보기</small></summary>
@@ -39,6 +32,14 @@ export default function StockResearchReference({day,signals,features,provisional
  {synthesis.positive.length>0&&<div><strong className="sr-positive">긍정적 관측 근거</strong>{synthesis.positive.map(t=><p key={t}>{t}</p>)}</div>}
  {synthesis.risk.length>0&&<div><strong className="sr-risk">손실 위험</strong>{synthesis.risk.map(t=><p key={t}>{t}</p>)}</div>}
  {synthesis.limits.length>0&&<div><strong>판단 제한</strong>{synthesis.limits.map(t=><p key={t}>{t}</p>)}</div>}
+ <div><strong>다음 확인 사항</strong>
+ {provisional&&<p>잠정 신호: 정규장 확정 일봉에서 같은 조건이 유지되는지 확인.</p>}
+ {retrospective&&<p>사후 연구: 발견 당시 이용 가능한 정보와 구분하며 과거 매수 판단에 소급 적용하지 않음.</p>}
+ {synthesis.opposing&&<p>서로 반대되는 연구 결과: 진입 기준·기간·표본을 분리하여 손실 분포와 후속 검증을 확인.</p>}
+ {!synthesis.opposing&&synthesis.risk.length>0&&<p>손실 관측 근거: 중앙 수익률, 하위 5% 손실과 후속 기간의 방향을 확인.</p>}
+ {synthesis.positive.length>0&&<p>긍정 관측은 투자 우위 확정이 아님: 독립 기간 재현 여부와 비용 반영 여부 확인.</p>}
+ {synthesis.positive.length===0&&synthesis.risk.length===0&&<p>방향 판단 보류: 일치 조건과 완료 표본 및 검증 범위를 확인.</p>}
+ </div>
  <small>복합 조건: {combined.length?'아래 동일 조건 연구 참조 (탐색)':'확인 가능한 일치 집계 없음 또는 미게시'} 서로 다른 연구의 표본·기간·진입 기준을 합산하지 않습니다.</small></div>
  {combined.length>0&&<small>{RECENT_ASOF} 복합 연구 · {day<=RECENT_ASOF?'최신 연구로 이전 신호 비교 (당시 알 수 있었던 정보 아님)':'과거 시장 집계 참고'}</small>}<CombinedStockEvidence matches={combined} onDetails={onCombined}/>
  {tomato&&<section><strong>종목별 토마토 연구 · 다음 시가 → 10번째 종가</strong><small>{tomato.label||'조건명 미확보'} · 상승 관측 {pct(tomato.up)} · {tomato.n}건 · 탐색적 결과</small></section>}
