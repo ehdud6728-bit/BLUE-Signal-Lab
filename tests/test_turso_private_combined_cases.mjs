@@ -1,0 +1,27 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {DatabaseSync} from 'node:sqlite';
+import {createHash} from 'node:crypto';
+import {tursoPrivateCombinedCases,InvalidPrivateCaseQuery,PrivateCaseSnapshotChanged} from '../worker/src/turso-private-combined-cases.ts';
+const hash=s=>createHash('sha256').update(s).digest('hex'),day='2026-11-24';
+test('only exact-date verified pages, no writes, reject changed snapshot and corruption',async()=>{
+ const db=new DatabaseSync(':memory:');
+ db.exec('CREATE TABLE blue_private_case_heads_v1(asof TEXT,snapshot_id TEXT,manifest_json TEXT,manifest_sha256 TEXT); CREATE TABLE blue_private_case_pages_v1(snapshot_id TEXT,base TEXT,cohort TEXT,page INT,payload_json TEXT,payload_sha256 TEXT)');
+ const payload=JSON.stringify([{day,code:'000001',indicators:{record_sha256:'a'.repeat(64)}}]),ph=hash(payload);
+ const groups=['ENV20','ENV20_LOWER_TOUCH'].flatMap(base=>['JOINT','LONG_BULL_NOT_JOINT','LONG_BULL_RSI_GC'].map(group=>{
+  const total=base==='ENV20'&&group==='JOINT'?1:0;return {base,group,total,page_hashes:total?[ph]:[],horizons:{}};
+ }));
+ const m=JSON.stringify({schema:'BLUE_PRIVATE_COMBINED_CASES_V1',asof:day,page_size:20,source_sha256:'b'.repeat(64),factors_sha256:'c'.repeat(64),groups}),id=hash(m);
+ db.prepare('INSERT INTO blue_private_case_heads_v1 VALUES(?,?,?,?)').run(day,id,m,id);
+ db.prepare('INSERT INTO blue_private_case_pages_v1 VALUES(?,?,?,?,?,?)').run(id,'ENV20','JOINT',0,payload,ph);
+ const factory=()=>({execute:async({sql,args})=>{assert.match(sql,/^SELECT/);return {rows:db.prepare(sql).all(...args)};},close(){}});
+ const env={TURSO_DATABASE_URL:'https://test.invalid',TURSO_AUTH_TOKEN:'fixture'};
+ const run=(extra={})=>tursoPrivateCombinedCases(env,new URLSearchParams({asof:day,base:'ENV20',group:'JOINT',page:'0',...extra}),factory);
+ assert.equal((await run()).rows.length,1);
+ assert.equal((await run({asof:'2026-11-23'})).status,'NOT_CAPTURED');
+ await assert.rejects(run({snapshot:'0'.repeat(64)}),PrivateCaseSnapshotChanged);
+ await assert.rejects(run({page:'1'}),InvalidPrivateCaseQuery);
+ db.prepare('UPDATE blue_private_case_pages_v1 SET payload_json=?').run('[]');
+ await assert.rejects(run(),/CASE_PAGE_HASH_MISMATCH/);
+ db.close();
+});
