@@ -323,3 +323,31 @@ test('chart daily uses exact date, raw price and actual turnover',async()=>{
  await assert.rejects(()=>getKisChartDailyQuote(env(),'cached','J','005930',day,async()=>Response.json({rt_cd:'0',output2:[{...row,stck_bsop_date:'20261118'}]})),/KIS_DAILY_EXACT_DATE_MISSING/);
  await assert.rejects(()=>getKisChartDailyQuote(env(),'cached','J','005930',day,async()=>new Response('',{status:429})),/KIS_RATE_LIMIT/);
 });
+
+test('rotating post-close collector stops after 22:00 without saving a late response',async()=>{
+ const {db,state}=mockDb();
+ const before=new Date('2026-11-19T12:59:50.000Z');
+ const late=new Date('2026-11-19T13:00:01.000Z');
+ const stamps=[before,before,before,late];let calls=0;
+ const result=await collectTursoProvisional(env({TURSO_PROVISIONAL_QUOTES_ENABLED:'true'}),before,
+   deps(db,{clock:()=>stamps.shift()||late,quoteDaily:async()=>{calls++;return quote({stck_bsop_date:'20261119'});}}));
+ assert.equal(calls,2);assert.equal(result.saved,1);assert.equal(result.rejected,1);
+ assert.equal(result.window_ended,true);assert.equal(result.reasons.RESPONSE_OUTSIDE_COLLECTION_WINDOW,1);
+ assert.equal(state.batches.length,1);
+ assert.equal(state.batches[0].statements.filter(x=>x.sql.includes('INSERT INTO blue_kis_provisional_daily_v1')).length,1);
+});
+test('no provider call if the request window already expired during setup',async()=>{
+ const {db,state}=mockDb();const before=new Date('2026-11-19T12:59:59.000Z');
+ const result=await collectTursoProvisional(env({TURSO_PROVISIONAL_QUOTES_ENABLED:'true'}),before,
+   deps(db,{clock:()=>new Date('2026-11-19T13:00:00.000Z'),quoteDaily:async()=>{throw Error('MUST_NOT_CALL_KIS');}}));
+ assert.equal(result.status,'COLLECTION_WINDOW_ENDED');assert.equal(result.attempted,0);
+ assert.equal(result.window_ended,true);assert.equal(state.batches.length,0);
+});
+test('regular phase response crossing 15:20 is not mislabeled as a regular observation',async()=>{
+ const {db,state}=mockDb();const before=new Date('2026-11-19T06:19:59.000Z');
+ const after=new Date('2026-11-19T06:20:00.000Z');const stamps=[before,after];
+ const result=await collectTursoProvisional(env({TURSO_PROVISIONAL_QUOTES_ENABLED:'true'}),before,
+   deps(db,{clock:()=>stamps.shift()||after}));
+ assert.equal(result.status,'COLLECTION_WINDOW_ENDED');assert.equal(result.rejected,1);
+ assert.equal(result.reasons.RESPONSE_OUTSIDE_COLLECTION_WINDOW,1);assert.equal(state.batches.length,0);
+});
