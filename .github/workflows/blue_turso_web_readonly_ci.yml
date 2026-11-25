@@ -26,6 +26,8 @@ on:
       - 'tests/test_turso_market_rotation.mjs'
       - 'worker/src/index.ts'
       - 'worker/src/turso-research.ts'
+      - 'worker/src/turso-private-combined-cases.ts'
+      - 'tests/test_turso_private_combined_cases.mjs'
       - 'worker/src/turso-research-request.ts'
       - 'worker/src/turso-provisional-search.ts'
       - 'worker/src/turso-research-request.ts'
@@ -76,7 +78,7 @@ jobs:
         working-directory: worker
         run: npm install --no-package-lock --no-audit --no-fund
       - name: Verify Turso-first browser API read contracts (no credentials)
-        run: node --experimental-strip-types --test tests/test_research_gold_highlight.mjs tests/test_stock_research_reference.mjs tests/test_stock_research_synthesis.mjs tests/test_turso_research_reader.mjs tests/test_turso_research_api.mjs tests/test_turso_research_request.mjs tests/test_turso_research_request_route.mjs tests/test_turso_research_progress.mjs tests/test_turso_basket_browser.mjs tests/test_turso_basket_prices.mjs tests/test_turso_provisional_search.mjs tests/test_turso_market_rotation.mjs tests/test_basket_top_basis.mjs tests/test_basket_observed_low.mjs tests/test_turso_market_ai.mjs
+        run: node --experimental-strip-types --test tests/test_research_gold_highlight.mjs tests/test_stock_research_reference.mjs tests/test_stock_research_synthesis.mjs tests/test_turso_research_reader.mjs tests/test_turso_research_api.mjs tests/test_turso_private_combined_cases.mjs tests/test_turso_research_request.mjs tests/test_turso_research_request_route.mjs tests/test_turso_research_progress.mjs tests/test_turso_basket_browser.mjs tests/test_turso_basket_prices.mjs tests/test_turso_provisional_search.mjs tests/test_turso_market_rotation.mjs tests/test_basket_top_basis.mjs tests/test_basket_observed_low.mjs tests/test_turso_market_ai.mjs
       - name: Install browser build dependencies
         working-directory: web
         run: npm install --no-package-lock --no-audit --no-fund
