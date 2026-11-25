@@ -14,6 +14,7 @@ import {tursoMarketRotation} from './turso-market-rotation';
 import {tursoMarketTrends} from './turso-market-trends';
 import {tursoRotationLeaders} from './turso-rotation-leaders';
 import {handleTursoMarketAi} from './turso-market-ai';
+import {InvalidPrivateCaseQuery,PrivateCaseSnapshotChanged,tursoPrivateCombinedCases} from './turso-private-combined-cases';
 import {InvalidResearchQuery,tursoResearchDates,tursoResearchSearch,tursoResearchChart,tursoResearchCoverage,tursoPatternPulse,tursoExitStudyReport} from './turso-research';
 import {InvalidTursoResearchRequest,requestTursoResearch,tursoResearchRequestStatus} from './turso-research-request';
 import {InvalidProvisionalQuery,tursoProvisionalSearch} from './turso-provisional-search';
@@ -170,6 +171,13 @@ export default {
       if(p==='/api/research/market-rotation'&&request.method==='GET'){
         try{return respond(await tursoMarketRotation(env));}
         catch{return respond({error:'TURSO_MARKET_ROTATION_UNAVAILABLE'},503);}
+      }
+      if(p==='/api/research/private-combined-cases'&&request.method==='GET'){
+        if(!access)return respond({error:'ACCESS_REQUIRED'},401);
+        try{return respond(await tursoPrivateCombinedCases(env,u.searchParams));}
+        catch(e){if(e instanceof InvalidPrivateCaseQuery)return respond({error:e.message},400);
+          if(e instanceof PrivateCaseSnapshotChanged)return respond({error:e.message},409);
+          return respond({error:'PRIVATE_CASES_UNAVAILABLE'},503);}
       }
       if(p==='/api/research/coverage'&&request.method==='GET'){
         try{return respond(await tursoResearchCoverage(env));}
