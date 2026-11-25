@@ -18,7 +18,7 @@ import {readSupplyAtDiscovery,supplyFromSearchExtras,validSupplyRecord,type Bask
 import {fetchResearchEvidenceTursoFirst} from './turso-research-reader';
 import {discoveryTechnicalBadges,validDiscoveryTechnicalBadges,type DiscoveryTechBadge} from './discovery-technical';
 import {appendBasketRecord,pendingBasketQuickAdds} from './basket-quick-queue';
-import {highestObservedPrice,lowestObservedPrice,basketReturn,rankBasketRecords,
+import {highestObservedPrice,lowestObservedPrice,basketReturn,rankBasketRecords,chooseBasketObservation,
  type BasketRank,type GainBasis} from './basket-rank';
 
 // R153_PERFORMANCE_MONITOR: KIS results are server-verified; never fabricate missing candles.
@@ -124,17 +124,12 @@ const hotPattern=(x:BasketItem,threshold:number|null,minSamples:number)=>thresho
  typeof x.patternN10d==='number'&&x.patternN10d>=minSamples;
 function selectedObservation(item:BasketItem,comp:PriceCompare|undefined,pr:Performance|undefined,
  q:Quote|undefined):{price:number;day:string;source:string;at:string|null}|null{
- const choices:{price:number;day:string;source:string;at:string|null;priority:number}[]=[];
- const add=(price:number|null|undefined,day:string|null|undefined,source:string,at:string|null|undefined,priority:number)=>{
-  if(price&&Number.isFinite(price)&&price>0&&day&&(day>item.day||!!item.discovery&&day===item.day&&!!at&&Number.isFinite(Date.parse(at))&&Date.parse(at)>=Date.parse(item.discovery.observedAt)))
-   choices.push({price,day,source,at:at||null,priority});
- };
- add(comp?.latest_price,comp?.latest_day,sourceName(comp?.latest_source),comp?.latest_at,4);
- add(pr?.quote_price,pr?.quote_day,'기존 KIS 수집기',pr?.quote_at,3);
- add(pr?.recent_close,pr?.recent_day,'기존 KIS 일봉',null,2);
- if(!item.discovery)add(q?.price,q?.trade_date_kst,'KIS 저장 시세',q?.received_at_utc,1);
- choices.sort((a,b)=>b.day.localeCompare(a.day)||(item.discovery&&a.day===item.day?(Date.parse(b.at||'')||0)-(Date.parse(a.at||'')||0):0)||b.priority-a.priority);
- return choices[0]||null;
+ return chooseBasketObservation(item.day,item.discovery?.observedAt,[
+  {price:comp?.latest_price,day:comp?.latest_day,source:sourceName(comp?.latest_source),at:comp?.latest_at,priority:4,confirmed:comp?.latest_source==='KRX_VERIFIED_EOD_CLOSE'},
+  {price:pr?.quote_price,day:pr?.quote_day,source:'기존 KIS 수집기',at:pr?.quote_at,priority:3},
+  {price:pr?.recent_close,day:pr?.recent_day,source:'기존 KIS 일봉',priority:2},
+  ...(!item.discovery?[{price:q?.price,day:q?.trade_date_kst,source:'KIS 저장 시세',at:q?.received_at_utc,priority:1}]:[])
+ ]);
 }
 // R151_QUICK_ADD: controlled one-tap requests from the search results list.
 export default function SmartBasket({quickAddRequests,onItemsChange,onAddFeedback,onQuickAddsHandled,active=true,refreshKey=0,patternHighlightMin=70,patternSampleMin=8}: {
@@ -427,7 +422,11 @@ export default function SmartBasket({quickAddRequests,onItemsChange,onAddFeedbac
   setItems(old=>[...restore,...old]);setLastRemoved([]);setError('');setMessage(`${restore.length}건 되돌렸습니다.`);
  }
  const latestQuote=new Map<string,Quote>();
- for(const q of quotes?.items||[]){if(q.market==='J'&&validCode(q.code)&&q.price>0)latestQuote.set(q.code,q);}
+ for(const q of quotes?.items||[]){
+  if(q.market!=='J'||!validCode(q.code)||!Number.isFinite(q.price)||q.price<=0||!validDay(q.trade_date_kst)||!Number.isFinite(Date.parse(q.received_at_utc)))continue;
+  const old=latestQuote.get(q.code);
+  if(!old||q.trade_date_kst>old.trade_date_kst||q.trade_date_kst===old.trade_date_kst&&Date.parse(q.received_at_utc)>Date.parse(old.received_at_utc))latestQuote.set(q.code,q);
+ }
  // R157_FILTER_SOURCE: keep source/date/name filtering independent of saved records.
  const availableDays=[...new Set(items.map(x=>x.day))].sort((a,b)=>b.localeCompare(a));
  const normalizedQuery=query.trim().toLocaleLowerCase('ko-KR');
