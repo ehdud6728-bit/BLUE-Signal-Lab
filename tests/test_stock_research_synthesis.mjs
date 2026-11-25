@@ -24,3 +24,29 @@ test('different market conditions with opposite returns are mixed',()=>{
  assert.equal(synthesizeStockResearch([win,loss],[],null,null,null).opposing,true);
  assert.equal(synthesizeStockResearch([win],[],null,null,null).label,'긍정적 관측 근거 있음');
 });
+
+test('negative median is not hidden by positive average or profit factor',()=>{
+ const r=synthesizeStockResearch([{...win,median_pct:-1}],[],null,null,null);
+ assert.equal(r.label,'수익성 주의');
+ assert.equal(r.positive.length,0);
+});
+test('short-term evidence needs both positive direction and positive median',()=>{
+ const recent={pattern:'ENV20',horizon_trading_days:3,positive_return_probability_pct:45,median_return_pct:-1,sample_count:40};
+ const r=synthesizeStockResearch([],[],tomato,recent,null);
+ assert.equal(r.opposing,true);
+ assert.equal(r.label,'긍정·부정 근거 혼재');
+ assert.ok(r.risk.some(t=>t.includes('45.0%')));
+ const mixed=synthesizeStockResearch([],[],null,{...recent,positive_return_probability_pct:60},null);
+ assert.equal(mixed.positive.length,0);
+ assert.equal(mixed.label,'판단 자료 부족');
+});
+test('compound downside updates label and opposing together; small sample is not direction',()=>{
+ const x={label:'ENV20',status:'DESCRIPTIVE_ONLY',n:40,mean:2,median:-1,profitFactor:1.2};
+ const r=synthesizeStockResearch([win],[],null,null,null,[x]);
+ assert.equal(r.opposing,true);
+ assert.equal(r.label,'긍정·부정 근거 혼재');
+ assert.equal(synthesizeStockResearch([],[],null,null,null,[x]).label,'수익성 주의');
+ const small=synthesizeStockResearch([],[],null,null,null,[{...x,status:'SMALL_SAMPLE',n:3}]);
+ assert.equal(small.risk.length,0);
+ assert.equal(small.label,'판단 자료 부족');
+});
