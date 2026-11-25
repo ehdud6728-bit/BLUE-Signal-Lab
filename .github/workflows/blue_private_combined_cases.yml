@@ -53,6 +53,6 @@ jobs:
           trap 'rm -rf "$work"' EXIT
           node tools/turso/pattern-exit-export.mjs --mode=study --sessions="$SESSIONS" --out="$work/source.json"
           node tools/turso/combined-pattern-factors.mjs "$work/source.json" "$work/factors.json" --details
-          python3 research/pattern_performance_private_cases.py --source "$work/source.json" --factors "$work/factors.json" --output "$work/cases.json"
+          python3 research/pattern_performance_private_cases.py --source "$work/source.json" --factors "$work/factors.json" --output "$work/cases.json" --published web/src/combined-pattern-data.ts
           node tools/turso/private-combined-cases.mjs "$work/cases.json" "$MODE"
           # No artifact uploads, public commits or raw case logging.
