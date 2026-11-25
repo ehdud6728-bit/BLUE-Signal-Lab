@@ -24,9 +24,22 @@ export async function publicationGate(db,now=new Date(),{scheduled=false}={}){
  const latest=Date.parse(String(r.latest));
  if(!Number.isFinite(latest)||latest>now.getTime()+300000)throw Error('INVALID_QUOTE_TIME');
  if(scheduled&&now.getTime()-latest>60*60000)return {ready:false,day,reason:'STALE_QUOTES',n};
+ // A recent intraday receipt is not eligible for a post-close daily scan.
+ // Check the session before downloading history; the exporter still verifies
+ // each payload, so this is only a conservative preflight.
+ let effectiveLatest=latest;
+ if(clock>='15:30'){
+  const eligible=(await q("SELECT COUNT(*) AS n,MAX(observed_at_utc) AS latest FROM blue_kis_provisional_daily_v1 WHERE trade_day=? AND reference_day=? AND market='J' AND date_basis='KIS_REPORTED_TRADE_DATE' AND source='KIS_REST_INQUIRE_DAILY_PRICE_PROVISIONAL' AND date(observed_at_utc,'+9 hours')=trade_day AND time(observed_at_utc,'+9 hours')>='15:30:00' AND julianday(observed_at_utc)<=julianday(?)",[day,String(ref.trade_day),now.toISOString()]))[0];
+  const usable=Number(eligible.n);
+  if(!Number.isSafeInteger(usable)||usable<0||usable>n)throw Error('INVALID_QUOTE_COUNT');
+  if(!usable)return {ready:false,day,reason:'NO_POST_CLOSE_QUOTES',n};
+  effectiveLatest=Date.parse(String(eligible.latest));
+  if(!Number.isFinite(effectiveLatest))throw Error('INVALID_QUOTE_TIME');
+  if(scheduled&&now.getTime()-effectiveLatest>60*60000)return {ready:false,day,reason:'STALE_POST_CLOSE_QUOTES',n};
+ }
  if(scheduled&&(await q("SELECT name FROM sqlite_master WHERE type='table' AND name='blue_provisional_pattern_head_v1'")).length){
   const head=(await q('SELECT latest_observed_utc FROM blue_provisional_pattern_head_v1 WHERE trade_day=? AND reference_day=?',[day,String(ref.trade_day)]))[0];
-  if(head&&Date.parse(String(head.latest_observed_utc))>=latest)return {ready:false,day,reason:'NO_NEW_QUOTES',n};
+  if(head&&Date.parse(String(head.latest_observed_utc))>=effectiveLatest)return {ready:false,day,reason:'NO_NEW_QUOTES',n};
  }
  return {ready:true,day,reason:'CURRENT_QUOTES_AVAILABLE',n};
 }
