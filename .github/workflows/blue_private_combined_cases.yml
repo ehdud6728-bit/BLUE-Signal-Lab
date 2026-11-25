@@ -1,0 +1,58 @@
+name: BLUE Private Combined Cases and RSI Evidence
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        type: choice
+        options: [inspect, apply]
+        default: inspect
+        required: true
+      sessions:
+        type: choice
+        options: ['60','120','250']
+        default: '60'
+        required: true
+  pull_request:
+    paths:
+      - 'research/pattern_performance_private_cases.py'
+      - 'research/test_pattern_performance_private_cases.py'
+      - 'research/pattern_performance_combined.py'
+      - 'tools/turso/private-combined-cases*'
+      - 'tools/turso/combined-pattern-factors*'
+      - '.github/workflows/blue_private_combined_cases.yml'
+permissions:
+  contents: read
+concurrency:
+  group: blue-private-case-snapshot-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  evidence:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm install --prefix tools/turso --no-audit --no-fund --ignore-scripts --no-package-lock
+      - name: Offline source and private store tests
+        run: node --test tools/turso/combined-pattern-factors.test.mjs tools/turso/private-combined-cases.test.mjs
+      - name: Offline exact case reconstruction and RSI partition
+        run: python3 research/test_pattern_performance_private_cases.py
+      - name: Reconstruct private cases, verify and optionally store
+        if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
+        env:
+          TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
+          TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
+          SESSIONS: ${{ inputs.sessions }}
+          MODE: ${{ inputs.mode }}
+        run: |
+          set -euo pipefail
+          umask 077
+          work="$(mktemp -d)"
+          trap 'rm -rf "$work"' EXIT
+          node tools/turso/pattern-exit-export.mjs --mode=study --sessions="$SESSIONS" --out="$work/source.json"
+          node tools/turso/combined-pattern-factors.mjs "$work/source.json" "$work/factors.json" --details
+          python3 research/pattern_performance_private_cases.py --source "$work/source.json" --factors "$work/factors.json" --output "$work/cases.json"
+          node tools/turso/private-combined-cases.mjs "$work/cases.json" "$MODE"
+          # No artifact uploads, public commits or raw case logging.
