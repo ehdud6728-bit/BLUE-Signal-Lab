@@ -3,8 +3,9 @@ import {RECENT_ASOF,RECENT_ROWS,RECENT_SESSIONS,RECENT_RECOMMENDATIONS} from './
 import {PROFITABILITY_DATA} from './research-profitability-data';
 import {patternLabel} from './research-pattern-label';
 import {currentHighReturn} from './HighReturnProfiles';
+import {currentCombined} from './CombinedPatternResearch';
 import './research-center.css';
-export type ResearchTab='center'|'market'|'overview'|'ranking'|'recommend'|'radar'|'profit'|'highreturn';
+export type ResearchTab='center'|'market'|'overview'|'ranking'|'recommend'|'radar'|'profit'|'highreturn'|'combined';
 type ProfitRow={calculation_audit?:string;group:string;pattern:string;horizon:number;n:number;dates:number;stocks:number;up_pct:number;mean_pct:number;median_pct:number;min_pct:number;mean_gain_pct:number|null;mean_loss_pct:number|null;payoff_ratio:number|null;profit_factor:number|null;worst_5pct_mean_pct:number;tail_count:number;target_5_pct:number;target_10_pct:number;target_20_pct:number;win_count:number;loss_count:number;flat_count:number};
 type ProfitData={asof:string;sessions:number;rows:ProfitRow[];audit?:{source_sha256:string;report_sha256:string;checked:number;unsupported:number;failed:number;scope:string}|null};
 const periods=[1,2,3,5,10,20];
@@ -72,6 +73,7 @@ export default function ResearchCenter({onNavigate}:{onNavigate:(tab:ResearchTab
  {profit?<><small>동일 기준일 수익성 자료 · 70% 미만 조건 포함</small>{[...profit.rows].filter(r=>r.horizon===h&&r.up_pct<70&&r.mean_pct>0).sort((a,b)=>b.mean_pct-a.mean_pct).slice(0,2).map(r=><div key={r.group+r.pattern} className="rc-profit-row"><strong>{patternLabel(r.pattern)}</strong><small>평균 {signed(r.mean_pct)} · 손익비 {ratio(r.payoff_ratio)} · 상승 {pct(r.up_pct)} · {r.n}건</small></div>)}</>:<p>손익비·극단 손실 연구 결과 게시 대기</p>}
  <div className="rc-heading"><small>{high?`고수익 특성 ${high.published_rows.toLocaleString()}건 게시 / 전체 ${high.source_rows.toLocaleString()}건`:"고수익 특성 집계 게시 대기"}</small><button type="button" className="rc-link" onClick={()=>onNavigate('highreturn')}>특성 비교 ›</button></div>
  </section>
+ <section className="rc-section"><div className="rc-heading"><h3>복합 조건 연구</h3><button type="button" className="rc-link" onClick={()=>onNavigate('combined')}>동시 조건 비교 ›</button></div><small>{currentCombined()?'동일 기준일 집계 연결 · 저장 지표 탐색 연구':'동일 기준일 복합 연구 집계 게시 대기'}</small></section>
  <div className="rc-nav-grid">{([['market','시황·순환매','대장주·후발주 / AI 대응'],['radar','시장 변화·이력','상승·하락 방향성 / 신규 조건'],['overview','연구 관리','데이터 확보 / 익절·손절'],['profit','수익성 연구','손익비 / 큰 손실']] as const).map(([tab,title,desc])=><button key={tab} type="button" onClick={()=>onNavigate(tab)}><strong>{title} ›</strong><small>{desc}</small></button>)}</div>
  </section>;
 }
