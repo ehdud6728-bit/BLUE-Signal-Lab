@@ -38,7 +38,8 @@ export function selectStockResearch<P extends Profit,H extends Profile>(input:{d
  const seen=new Set<string>();
  const profits=(profit?.asof===asof?profit.rows:[]).filter(r=>r.horizon===3&&r.n>=30&&r.dates>=5&&r.stocks>=10&&exactConditionMatch(r.pattern,signals,f)).sort(baseSort).filter(r=>{const k=r.pattern.split('|')[0];if(seen.has(k))return false;seen.add(k);return true;}).slice(0,3);
  const states:Record<string,number>={HOLDOUT_AGREES_EXPLORATORY:0,INSUFFICIENT_HOLDOUT:1,HOLDOUT_DISAGREES:2};
+ // Choose by matching specificity and sample counts, not favorable holdout outcome.
  const used=new Set<string>();
- const high=(profiles?.asof===asof?profiles.rows:[]).filter(r=>r.window===28&&r.horizon===3&&r.outcome==='CLOSE'&&r.target_pct===10&&Object.hasOwn(states,r.status)&&['CANDLE','BODY','CLOSE_POSITION'].includes(r.feature)&&f[r.feature]!==undefined&&f[r.feature]===r.value&&exactConditionMatch(r.pattern,signals,f)).sort((a,b)=>states[a.status]-states[b.status]||specificity(b.pattern)-specificity(a.pattern)||b.train.n-a.train.n||a.pattern.localeCompare(b.pattern)||a.feature.localeCompare(b.feature)).filter(r=>{const k=r.pattern.split('|')[0]+'|'+r.feature+'|'+r.value;if(used.has(k))return false;used.add(k);return true;}).slice(0,3);
+ const high=(profiles?.asof===asof?profiles.rows:[]).filter(r=>r.window===28&&r.horizon===3&&r.outcome==='CLOSE'&&r.target_pct===10&&Object.hasOwn(states,r.status)&&['CANDLE','BODY','CLOSE_POSITION'].includes(r.feature)&&f[r.feature]!==undefined&&f[r.feature]===r.value&&exactConditionMatch(r.pattern,signals,f)).sort((a,b)=>specificity(b.pattern)-specificity(a.pattern)||b.train.n-a.train.n||b.holdout.n-a.holdout.n||a.pattern.localeCompare(b.pattern)||a.feature.localeCompare(b.feature)).filter(r=>{const k=r.pattern.split('|')[0]+'|'+r.feature+'|'+r.value;if(used.has(k))return false;used.add(k);return true;}).slice(0,3);
  return {retrospective:day<=asof,profits,high};
 }
