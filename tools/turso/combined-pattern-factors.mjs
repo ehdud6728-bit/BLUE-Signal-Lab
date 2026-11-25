@@ -51,17 +51,19 @@ export function evidence(row,signal,bar,{details=false}={}){
  const chartR=validR(last?.r),chartS=validR(last?.rs);
  // Stored extras have five decimals; archived chart displays two decimals.
  const same=current!==null&&sig!==null&&chartR!==null&&chartS!==null?Math.abs(current-chartR)<=.0051&&Math.abs(sig-chartS)<=.0051:null;
- const at=n=>validR(chart.at(-1-n)?.r);
- const history=chart.slice(-6,-1).map(b=>validR(b.r));
+ const historyOk=chart.slice(-6).every((b,i,a)=>typeof b.t==='string'&&/^20\d{2}-\d{2}-\d{2}$/.test(b.t)&&(!i||b.t>a[i-1].t));
+ const at=n=>historyOk?validR(chart.at(-1-n)?.r):null;
+ const atDay=n=>historyOk?chart.at(-1-n)?.t??null:null;
+ const history=historyOk?chart.slice(-6,-1).map(b=>validR(b.r)):[];
  const delta=n=>current!==null&&at(n)!==null?Math.round((current-at(n))*1000)/1000:null;
- const priorR=validR(prev?.r),priorS=validR(prev?.rs);
+ const priorR=historyOk?validR(prev?.r):null,priorS=historyOk?validR(prev?.rs):null;
  const observedCross=priorR!==null&&priorS!==null&&current!==null&&sig!==null&&Math.abs(priorR-priorS)>.011&&Math.abs(current-sig)>.011?priorR<priorS&&current>sig:null;
  const sameCross=observedCross!==null&&rsi!==null?observedCross===rsi:null;
  const usable=same!==false&&sameCross!==false;
  // Do not overwrite the original cohort flag; mark detailed values ineligible
  // separately if their stored evidence conflicts.
  const val=x=>usable?x:null;
- return {...base,rsi_value:val(current),rsi_signal:val(sig),prior_rsi:val(priorR),prior_rsi_signal:val(priorS),
+ return {...base,rsi_value:val(current),rsi_signal:val(sig),prior_rsi:val(priorR),prior_rsi_signal:val(priorS),prior_day:val(atDay(1)),rsi_delta3_day:val(atDay(3)),rsi_delta5_day:val(atDay(5)),
    rsi_delta3:val(delta(3)),rsi_delta5:val(delta(5)),rsi_gap:val(current!==null&&sig!==null?Math.round((current-sig)*1000)/1000:null),
    rsi_prior5_min:val(history.length===5&&history.every(x=>x!==null)?Math.min(...history):null),
    rsi_value_chart_consistent:same,rsi_cross_value_consistent:sameCross,
@@ -85,7 +87,9 @@ export async function exportFactors(client,source,{details=false}={}){
    factors.push(evidence(r,s,b,{details}));
   }
  }
- return {format:'BLUE_COMBINED_FACTORS_V1',asof:source.asof_day,scope:'HASH_VERIFIED_STORED_FACTORS_NOT_INDEPENDENT_INDICATOR_PROOF',rows:factors};
+ const data={format:'BLUE_COMBINED_FACTORS_V1',asof:source.asof_day,scope:'HASH_VERIFIED_STORED_FACTORS_NOT_INDEPENDENT_INDICATOR_PROOF',rows:factors};
+ if(details){const keys=['day','code','rsi_gc','ma_down','ma_chart_consistent','rsi_chart_consistent','record_sha256'];data.legacy_factors_sha256=sha(JSON.stringify({...data,rows:factors.map(f=>Object.fromEntries(keys.map(k=>[k,f[k]])))})+'\n');}
+ return data;
 }
 if(process.argv[1]&&import.meta.url===pathToFileURL(process.argv[1]).href){
  let db;
