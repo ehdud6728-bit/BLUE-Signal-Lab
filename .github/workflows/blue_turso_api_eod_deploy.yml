@@ -8,11 +8,11 @@ on:
         type: choice
         options: [verify_only, deploy_api]
         required: true
-        default: verify_only
+        default: deploy_api
       confirm_worker:
-        description: 'For deploy_api, type exactly blue-signal-lab-api-v2.'
+        description: 'Fixed API Worker target (prefilled). Do not change this value.'
         type: string
-        default: ''
+        default: 'blue-signal-lab-api-v2'
         required: false
 
 permissions:
@@ -36,6 +36,9 @@ jobs:
           set -euo pipefail
           test "$GITHUB_REPOSITORY" = 'ehdud6728-bit/BLUE-Signal-Lab'
           if [[ "$MODE" != 'verify_only' && "$MODE" != 'deploy_api' ]]; then exit 1; fi
+          if [[ "$MODE" = 'deploy_api' && "$GITHUB_REF" != 'refs/heads/main' ]]; then
+            echo 'Production deployment requires main. No deployment.'; exit 1
+          fi
           if [[ "$MODE" = 'deploy_api' && "$CONFIRM_WORKER" != 'blue-signal-lab-api-v2' ]]; then
             echo 'Confirmation mismatch. No deployment.'; exit 1
           fi
