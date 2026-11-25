@@ -5,8 +5,8 @@ import {patternLabel} from './research-pattern-label';
 import {currentHighReturn} from './HighReturnProfiles';
 import './research-center.css';
 export type ResearchTab='center'|'market'|'overview'|'ranking'|'recommend'|'radar'|'profit'|'highreturn';
-type ProfitRow={group:string;pattern:string;horizon:number;n:number;dates:number;stocks:number;up_pct:number;mean_pct:number;median_pct:number;min_pct:number;mean_gain_pct:number|null;mean_loss_pct:number|null;payoff_ratio:number|null;profit_factor:number|null;worst_5pct_mean_pct:number;tail_count:number;target_5_pct:number;target_10_pct:number;target_20_pct:number;win_count:number;loss_count:number;flat_count:number};
-type ProfitData={asof:string;sessions:number;rows:ProfitRow[]};
+type ProfitRow={calculation_audit?:string;group:string;pattern:string;horizon:number;n:number;dates:number;stocks:number;up_pct:number;mean_pct:number;median_pct:number;min_pct:number;mean_gain_pct:number|null;mean_loss_pct:number|null;payoff_ratio:number|null;profit_factor:number|null;worst_5pct_mean_pct:number;tail_count:number;target_5_pct:number;target_10_pct:number;target_20_pct:number;win_count:number;loss_count:number;flat_count:number};
+type ProfitData={asof:string;sessions:number;rows:ProfitRow[];audit?:{source_sha256:string;report_sha256:string;checked:number;unsupported:number;failed:number;scope:string}|null};
 const periods=[1,2,3,5,10,20];
 const signed=(v:number|null|undefined)=>v==null||!Number.isFinite(v)?'—':(v>0?'+':'')+v.toFixed(2)+'%';
 const pct=(v:number|null|undefined)=>v==null||!Number.isFinite(v)?'—':v.toFixed(1)+'%';
@@ -32,12 +32,13 @@ export function ResearchProfitability(){
  <div className="rc-filter"><label>연구 종류<select value={scope} onChange={e=>{setScope(e.target.value);setLimit(12);}}><option value="all">전체</option>{Object.entries(groupLabels).map(([k,v])=><option value={k} key={k}>{v}</option>)}</select></label><label>정렬<select value={sort} onChange={e=>{setSort(e.target.value as typeof sort);setLimit(12);}}>{([['mean_pct','평균 수익률'],['payoff_ratio','손익비'],['profit_factor','Profit Factor'],['target_10_pct','+10% 종가 도달률'],['target_20_pct','+20% 종가 도달률'],['worst_5pct_mean_pct','하위 5% 평균 방어']] as const).map(([k,v])=><option key={k} value={k}>{v}</option>)}</select></label></div>
  <label className="rc-check"><input type="checkbox" checked={low} onChange={e=>{setLow(e.target.checked);setLimit(12);}}/> 상승 관측률 70% 미만만 보기</label>
  <small>{data.asof} 기준 · {rows.length}개 조건 · 각 표본 30건·5일·10종목 이상</small>
+ <details className="rc-note"><summary>수익성 계산 검증 범위</summary>{data.audit?<p>별도 계산 일치 {data.audit.checked}건 · 범위 외 {data.audit.unsupported}건 · 불일치 {data.audit.failed}건 (게시 전 전체 연구 행 기준)<br/>원천 SHA-256: {data.audit.source_sha256}<br/>보고서 SHA-256: {data.audit.report_sha256}</p>:<p>독립 계산 결과 미게시</p>}<small>기본·캔들·양봉 몸통 및 종가 위치만 재계산합니다. 같은 저장 자료를 이용한 검증이며 외부 원천·기업행동·거래일·체결 검증과는 별개입니다.</small></details>
  {rows.length===0&&<p>선택 조건에 해당하는 자료가 없습니다.</p>}
  {rows.slice(0,limit).map(r=><article className="rc-profit-row" key={r.group+'|'+r.pattern+'|'+r.horizon}>
  <strong>{patternLabel(r.pattern)}</strong><small>{groupLabels[r.group]} · {r.n}건 / {r.dates}일 / {r.stocks}종목</small>
  <div className="rc-metrics"><div><span>평균 수익률</span><b className={tone(r.mean_pct)}>{signed(r.mean_pct)}</b></div><div><span>상승 관측률</span><b>{pct(r.up_pct)}</b></div><div><span>손익비</span><b>{ratio(r.payoff_ratio)}</b></div></div>
  <div className="rc-metrics"><div><span>+10% 도달</span><b>{pct(r.target_10_pct)}</b></div><div><span>Profit Factor</span><b>{ratio(r.profit_factor)}</b></div><div><span>하위 5% 평균</span><b className={tone(r.worst_5pct_mean_pct)}>{signed(r.worst_5pct_mean_pct)}</b></div></div>
- <details><summary>상세 손익·위험 보기</summary><dl className="rc-detail"><dt>평균 이익 (상승 사례)</dt><dd>{signed(r.mean_gain_pct)}</dd><dt>평균 손실 (하락 사례)</dt><dd>{signed(r.mean_loss_pct)}</dd><dt>중앙 수익률</dt><dd>{signed(r.median_pct)}</dd><dt>최악의 종가 수익률</dt><dd>{signed(r.min_pct)}</dd><dt>하위 5% 표본</dt><dd>{r.tail_count}건</dd><dt>+5% / +20% 종가 도달</dt><dd>{pct(r.target_5_pct)} / {pct(r.target_20_pct)}</dd><dt>상승 / 하락 / 보합</dt><dd>{r.win_count} / {r.loss_count} / {r.flat_count}</dd></dl></details>
+ <small>계산 검증: {r.calculation_audit==='RECOMPUTED_MATCH'?'별도 재계산 일치':'독립 재계산 미확인'}</small><details><summary>상세 손익·위험 보기</summary><dl className="rc-detail"><dt>평균 이익 (상승 사례)</dt><dd>{signed(r.mean_gain_pct)}</dd><dt>평균 손실 (하락 사례)</dt><dd>{signed(r.mean_loss_pct)}</dd><dt>중앙 수익률</dt><dd>{signed(r.median_pct)}</dd><dt>최악의 종가 수익률</dt><dd>{signed(r.min_pct)}</dd><dt>하위 5% 표본</dt><dd>{r.tail_count}건</dd><dt>+5% / +20% 종가 도달</dt><dd>{pct(r.target_5_pct)} / {pct(r.target_20_pct)}</dd><dt>상승 / 하락 / 보합</dt><dd>{r.win_count} / {r.loss_count} / {r.flat_count}</dd></dl></details>
  </article>)}
  {rows.length>limit&&<button type="button" className="rc-action" onClick={()=>setLimit(v=>v+12)}>12개 더 보기</button>}
  </>}
