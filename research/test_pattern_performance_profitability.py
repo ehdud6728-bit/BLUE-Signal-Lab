@@ -24,6 +24,10 @@ class ProfitabilityTests(unittest.TestCase):
         self.assertEqual(len(convert(report,snap)["rows"]),1)
         self.assertEqual(convert(report,snap)["rows"][0]["up_pct"],40)
         with self.assertRaises(ValueError):convert(report,{**snap,"asof":"2026-11-25"})
+        proof=dict(schema="BLUE_PROFITABILITY_AUDIT_V1",asof=report["asof"],sessions=28,source_sha256="a"*64,report_sha256="b"*64,failed=0,checked=1,unsupported=0,scope="INDEPENDENT_CALCULATION_SAME_SOURCE_ONLY",checks=[["rankings",r["pattern"],3]])
+        self.assertEqual(convert(report,snap,proof)["rows"][0]["calculation_audit"],"RECOMPUTED_MATCH")
+        with self.assertRaises(ValueError):convert(report,snap,{**proof,"checks":[]})
+        with self.assertRaises(ValueError):convert(report,snap,{**proof,"failed":1})
         report["rankings"][0]["sample_count"]=29
         self.assertEqual(convert(report,snap)["rows"],[])
 if __name__=="__main__":unittest.main()
