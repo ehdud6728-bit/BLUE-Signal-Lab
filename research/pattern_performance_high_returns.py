@@ -5,6 +5,7 @@ Returns are close-to-close or maximum subsequent high, NOT executable profits.
 import argparse,json,math
 from collections import defaultdict
 from statistics import median
+from fractions import Fraction
 from pathlib import Path
 from pattern_performance_audited import candle,market_regime
 HORIZONS=(1,2,3,5,10,20)
@@ -59,7 +60,7 @@ def stats(rows,target):
     return dict(n=n,dates=len({x[0] for x in rows}),stocks=len({x[1] for x in rows}),
         hits=sum(x[2]>=target for x in rows),
         hit_pct=round(100*sum(x[2]>=target for x in rows)/n,2) if n else None,
-        median_return_pct=round(median(x[2] for x in rows),3) if n else None)
+        median_return_pct=round(float(median(x[2] for x in rows)),3) if n else None)
 def enough(s,n=30):
     return s["n"]>=n and s["dates"]>=5 and s["stocks"]>=10
 def compare(rows,key,value,target):
@@ -113,7 +114,7 @@ def analyze(source):
                                 returns[k]=None
                             else:
                                 v=path[-1]["close"] if outcome=="CLOSE" else max(b["high"] for b in path)
-                                returns[k]=100*(v/raw[days[i],c]["close"]-1)
+                                returns[k]=Fraction(100*(v-raw[days[i],c]["close"]),raw[days[i],c]["close"])
                         v=returns[k]
                         if v is not None:(train if i<split else hold).append((i,c,v,f))
                     if len(train)<60:continue
