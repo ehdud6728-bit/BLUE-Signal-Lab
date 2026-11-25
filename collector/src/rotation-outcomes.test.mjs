@@ -1,0 +1,43 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {createHash} from 'node:crypto';
+import {DatabaseSync} from 'node:sqlite';
+import {decodeSnapshot,calculateOutcomes,track} from './rotation-outcomes.mjs';
+const h=s=>createHash('sha256').update(s).digest('hex');
+const today='2026-11-25',at='2026-11-25T01:00:00.000Z';
+const snapshot={schema:'BLUE_ROTATION_LEADERS_V1',receipt_day:today,day:'2026-11-24',observed_at_utc:at,mapping_status:'PARTIAL',markets:[{market:'KOSPI',groups:[{code:'0002',name:'분류',entry:'NEW_ENTRY',leaders:[{code:'000001',name:'테스트',close:100,r5:2,r10:4,amount_ratio:1,signals:[]}],followers:[]}]},{market:'KOSDAQ',groups:[]}]};
+const row=()=>({receipt_day:today,observed_at_utc:at,payload_json:JSON.stringify(snapshot),payload_sha256:h(JSON.stringify(snapshot))});
+test('hash and original candidate scope',()=>{
+ assert.equal(decodeSnapshot(row()).candidates.length,1);
+ assert.throws(()=>decodeSnapshot({...row(),payload_sha256:'0'.repeat(64)}),/HASH_MISMATCH/);
+});
+test('strictly after recording day; no skip missing entry or target',()=>{
+ const a={...decodeSnapshot(row()),recorded_day:today,recorded_at:at};
+ const dates=[today,'2026-11-26','2026-11-27','2026-11-30','2026-12-01'];
+ const bars=new Map([[today+'/KOSPI/000001',100],['2026-11-26/KOSPI/000001',110],['2026-11-27/KOSPI/000001',121],['2026-12-01/KOSPI/000001',99]]);
+ let r=calculateOutcomes([a],dates,bars)[0];
+ assert.equal(r.entry_day,'2026-11-26');assert.equal(r.entry_close,110);
+ assert.equal(r.results[0].return_pct,10);assert.equal(r.results[1].return_pct,-10);
+ assert.equal(r.results[2].status,'WAITING_HORIZON');
+ bars.delete('2026-11-27/KOSPI/000001');
+ assert.equal(calculateOutcomes([a],dates,bars)[0].results[0].status,'MISSING_END_PRICE');
+ bars.delete('2026-11-26/KOSPI/000001');
+ assert.equal(calculateOutcomes([a],dates,bars)[0].results[0].status,'MISSING_ENTRY_PRICE');
+});
+test('inspect read-only, archive first observed candidate unchanged on rerun',async()=>{
+ const db=new DatabaseSync(':memory:');
+ db.exec('CREATE TABLE blue_rotation_leaders_v1(receipt_day TEXT PRIMARY KEY, observed_at_utc TEXT,payload_json TEXT,payload_sha256 TEXT); CREATE TABLE blue_eod_ingest_audit_v1(trade_day TEXT,row_count INTEGER,source TEXT,day_sha256 TEXT); CREATE TABLE blue_eod_daily_v1(trade_day TEXT,market TEXT,code TEXT,close INTEGER)');
+ const a=row();db.prepare('INSERT INTO blue_rotation_leaders_v1 VALUES(?,?,?,?)').run(a.receipt_day,a.observed_at_utc,a.payload_json,a.payload_sha256);
+ const factory=()=>({execute:async({sql,args})=>{const st=db.prepare(sql);return /^\s*SELECT/i.test(sql)?{rows:st.all(...args)}:{rows:[],rowsAffected:st.run(...args).changes};},close(){}});
+ const env={TURSO_DATABASE_URL:'https://test.invalid',TURSO_AUTH_TOKEN:'fixture'};
+ const inspect=await track(env,{mode:'inspect',now:new Date(at),factory});
+ assert.equal(inspect.turso_writes,0);assert.equal(inspect.archived_receipts,0);assert.equal(inspect.today_candidate_count,1);
+ const first=await track(env,{mode:'apply',now:new Date(at),factory});
+ assert.equal(first.archived_receipts,1);assert.equal(first.observations,1);assert.equal(first.results[0].observed,0);
+ const changed={...snapshot,markets:[{market:'KOSPI',groups:[]},{market:'KOSDAQ',groups:[]}]};
+ const raw=JSON.stringify(changed);db.prepare('UPDATE blue_rotation_leaders_v1 SET payload_json=?,payload_sha256=?').run(raw,h(raw));
+ const second=await track(env,{mode:'apply',now:new Date('2026-11-25T02:00:00Z'),factory});
+ assert.equal(second.today_already_archived,true);assert.equal(second.observations,1);
+ assert.equal(db.prepare('SELECT payload_sha256 FROM blue_rotation_observations_v1').get().payload_sha256,a.payload_sha256);
+ db.close();
+});
