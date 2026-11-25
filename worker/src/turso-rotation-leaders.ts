@@ -46,6 +46,12 @@ export async function tursoRotationLeaders(env:Env,factory:Factory=createClient,
     groupsTotal++;if(g.members>0&&g.matched>0)mappedTotal++;
     if(s.mapping_status!==undefined&&(!['KIS_MASTER_CODE','KIS_MASTER_FLAG','KRX_INDEX_CONSTITUENTS','UNMAPPED'].includes(g.membership_source)||
       (g.membership_source==='UNMAPPED'?(g.members!==0||typeof g.membership_reason!=='string'||!g.membership_reason):g.members===0||g.membership_reason!==null)))throw Error('LEADERS_MEMBERSHIP_INVALID');
+    if(g.krx_scope!==undefined||g.krx_code!==undefined||g.identity_basis!==undefined){
+      if(g.membership_source!=='KRX_INDEX_CONSTITUENTS'||!/^\d{4,6}$/.test(g.krx_code)||
+        !((g.krx_scope===m.market&&g.identity_basis==='LOCAL_EXACT_NAME')||
+          (['KRX','테마'].includes(g.krx_scope)&&g.identity_basis==='CROSS_EXACT_NAME_AND_RELATIVE_HISTORY')))
+        throw Error('LEADERS_KRX_IDENTITY_INVALID');
+    }
     codes.add(g.code);const stockCodes=new Set<string>();
     for(const [kind,rows] of [['leader',g.leaders],['follower',g.followers]] as const){
      for(const x of rows){
