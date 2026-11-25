@@ -1,6 +1,7 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {readFile} from 'node:fs/promises';
+import {basketReadDue,basketReadInterval} from '../web/src/basket-polling.ts';
 import {basketReturn,highestObservedPrice,lowestObservedPrice,rankBasketRecords,chooseBasketObservation,confirmedTrailingHigh}
  from '../web/src/basket-rank.ts';
 
@@ -90,4 +91,33 @@ test('Turso resolved high is not overwritten by an incompatible legacy maximum',
  assert.equal(confirmedTrailingHigh(highestObservedPrice({...input,compared:null})),null);
  assert.equal(lowestObservedPrice('2026-11-18',{period_low:1,period_low_day:'2099-01-01'}),null);
  assert.equal(highestObservedPrice({discoveryDay:'2026-11-18',recent:{price:1000,day:'2026-11-31'}}),null);
+});
+
+test('basket read cadence includes extended trading and EOD collection but slows outside the window',()=>{
+ const cases=[
+  ['2026-11-25T22:59:00Z',180,300], // Thursday 07:59 KST
+  ['2026-11-25T23:00:00Z',30,120],
+  ['2026-11-26T10:50:00Z',30,120], // 19:50 KST
+  ['2026-11-26T13:20:00Z',30,120], // 22:20 KST
+  ['2026-11-26T13:45:00Z',180,300],
+  ['2026-11-28T03:00:00Z',180,300]
+ ];
+ for(const [at,primary,legacy] of cases){
+  const now=new Date(at);
+  assert.equal(basketReadInterval('COMPARE',now),primary*1000);
+  assert.equal(basketReadInterval('LEGACY_WATCH',now),legacy*1000);
+  assert.equal(basketReadInterval('LEGACY_LIVE',now),legacy*1000);
+  assert.equal(basketReadDue('COMPARE',null,now),true);
+  assert.equal(basketReadDue('COMPARE',now.getTime()-primary*1000+1,now),false);
+  assert.equal(basketReadDue('COMPARE',now.getTime()-primary*1000,now),true);
+ }
+});
+test('basket only polls legacy live with confirmed records and preserves manual refresh dependency',async()=>{
+ const src=await readFile(new URL('../web/src/SmartBasket.tsx',import.meta.url),'utf8');
+ assert.match(src,/basketReadDue\('COMPARE',lastStarted\)/);
+ assert.match(src,/basketReadDue\('LEGACY_WATCH',lastStarted\)/);
+ assert.match(src,/if\(!active\|\|!confirmedKey\)return;\s*let mounted=true,inFlight=false,lastStarted/);
+ assert.match(src,/basketReadDue\('LEGACY_LIVE',lastStarted\)/);
+ assert.match(src,/\},\[active,idsKey,refreshKey\]\)/);
+ assert.match(src,/setCompareChecked\(new Date\(\).toISOString\(\)\)/);
 });
