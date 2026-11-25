@@ -3,6 +3,7 @@ import argparse,json,re,math
 from collections import defaultdict
 from datetime import date
 from pathlib import Path
+from pattern_performance_high_returns_audit import key as audit_key, supported
 STATES=("HOLDOUT_AGREES_EXPLORATORY","HOLDOUT_DISAGREES","INSUFFICIENT_HOLDOUT")
 FEATURES={"CANDLE","BODY","CLOSE_POSITION","MARKET","AMOUNT_ABSOLUTE","AMOUNT_5","AMOUNT_10","AMOUNT_20","RETURN_1","RETURN_5","RETURN_10","RETURN_20","PRIOR_20_HIGH_GAP"}
 CAP=30
@@ -14,7 +15,8 @@ def stat(s):
         if rate is not None or median is not None:raise ValueError("empty profile")
     elif not all(type(v) in (int,float) and math.isfinite(v) for v in (rate,median)) or not 0<=rate<=100 or abs(rate-round(100*h/n,2))>.011:raise ValueError("invalid profile rates")
     return dict(n=n,dates=d,stocks=k,hits=h,hit_pct=rate,median_return_pct=median)
-def convert(data,snapshot):
+def convert(data,snapshot,audit=None):
+    if audit is not None and (audit.get('schema')!='BLUE_HIGH_RETURN_AUDIT_V1' or audit.get('asof')!=data['asof'] or audit.get('failed')!=0 or not re.fullmatch(r'[a-f0-9]{64}',audit.get('source_sha256','')) or audit.get('checked')+audit.get('unsupported')!=len(data['rows'])):raise ValueError('audit mismatch')
     if data.get("schema")!="BLUE_HIGH_RETURN_PROFILES_V1" or data["asof"]!=snapshot["asof"] or date.fromisoformat(data["asof"]).isoformat()!=data["asof"]:raise ValueError("profile date mismatch")
     avail=data["available_sessions"]
     if type(avail) is not int or not 1<=avail<=60:raise ValueError("invalid profile coverage")
@@ -38,16 +40,26 @@ def convert(data,snapshot):
             if delta!=expected:raise ValueError("invalid lift")
             row.update({a:x,b:y,l:delta})
         if row["train_lift_pp"] is None or row["train_lift_pp"]<10:raise ValueError("invalid discovery lift")
+        if audit is not None and supported(r):
+            proof=audit['checks'].get(audit_key(r))
+            if not proof or proof['status']!='RECOMPUTED_MATCH':raise ValueError('missing recomputation proof')
+            for arm in ('train','train_control','holdout','holdout_control'):
+                for field,value in row[arm].items():
+                    other=proof['arms'][arm][field]
+                    if value!=other and (field!='median_return_pct' or value is None or other is None or abs(value-other)>.0011):raise ValueError('audit proof mismatch')
+            row['calculation_audit']='RECOMPUTED_MATCH'
+        else:row['calculation_audit']='NOT_CHECKED'
         buckets[(w,h,o,t,s)].append(row)
     rows=[];coverage=[]
     for (w,h,o,t,s),rs in sorted(buckets.items()):
         ranked=sorted(rs,key=lambda r:(-(r["holdout_lift_pp"] if s==STATES[0] and r["holdout_lift_pp"] is not None else r["train_lift_pp"]),-r["train"]["n"],r["pattern"],r["feature"],r["value"]))
         rows.extend(ranked[:CAP])
         coverage.append(dict(window=w,horizon=h,outcome=o,target_pct=t,status=s,total=len(rs),published=min(CAP,len(rs))))
-    return dict(asof=data["asof"],available_sessions=avail,windows=windows,rows=rows,coverage=coverage,source_rows=len(data["rows"]),published_rows=len(rows),cap_per_group=CAP)
+    return dict(asof=data["asof"],available_sessions=avail,windows=windows,rows=rows,coverage=coverage,source_rows=len(data["rows"]),published_rows=len(rows),cap_per_group=CAP,audit={k:audit[k] for k in ('source_sha256','checked','unsupported','failed','scope')} if audit is not None else None)
 if __name__=="__main__":
     p=argparse.ArgumentParser()
     for name in ("input","snapshot","output"):p.add_argument("--"+name,type=Path,required=True)
+    p.add_argument("--audit",type=Path,required=True)
     a=p.parse_args()
-    data=convert(json.loads(a.input.read_text()),json.loads(a.snapshot.read_text()))
+    data=convert(json.loads(a.input.read_text()),json.loads(a.snapshot.read_text()),json.loads(a.audit.read_text()))
     a.output.write_text("// Generated aggregate exploratory research; no production promotion.\nexport const HIGH_RETURN_PROFILES: unknown = "+json.dumps(data,ensure_ascii=False,allow_nan=False,separators=(",",":"))+";\n",encoding="utf-8")
