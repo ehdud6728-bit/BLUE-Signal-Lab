@@ -241,6 +241,10 @@ function App(){
   const summaryRef=useRef<HTMLDivElement>(null);
   const aiRef=useRef<HTMLDivElement>(null);
   const searchVersion=useRef(0);
+  // READY is terminal for automatic requests in this browser session. A read
+  // failure is surfaced separately; it must not restart an already stored scan.
+  const tursoReadyDays=useRef(new Set<string>());
+  const tursoRequestInFlight=useRef(false);
   const [r1594Refresh,setR1594Refresh]=useState(0);
   const [r1594TrackingRefresh,setR1594TrackingRefresh]=useState(0);
   const [r1594BasketRefresh,setR1594BasketRefresh]=useState(0);
@@ -448,6 +452,11 @@ function App(){
   },[tursoWatchDate]);
 
   async function requestTursoScan(day:string){
+    if(tursoReadyDays.current.has(day)){
+      setStatus('분석 완료 상태입니다. 저장된 결과를 다시 조회해 주세요.');return;
+    }
+    if(tursoRequestInFlight.current||tursoWatchDate===day)return;
+    tursoRequestInFlight.current=true;
     setRequestBusy(true);
     setTursoRequestDate(day);
     setTursoStage('REQUESTED');setTursoStartedAt(Date.now());setTursoFinishedAt(0);
@@ -460,11 +469,13 @@ function App(){
       });
       const result=await response.json() as {status?:string;error?:string;deduplicated?:boolean};
       if(!response.ok)throw Error(result.error||'TURSO_RESEARCH_REQUEST_UNAVAILABLE');
+      if(tursoReadyDays.current.has(day))return;
       if(result.status==='READY'){
+        tursoReadyDays.current.add(day);
         setTursoWatchDate('');setTursoCompletedDate(day);
         setTursoStage('READY');setTursoFinishedAt(Date.now());
         setTursoScanInfo(`${day} 패턴 분석이 이미 준비되어 있습니다.`);
-        if(mode==='single'&&date===day)void search(1,false,gcFields,gcLogic,day);
+        if(mode==='single'&&date===day)void search(1,false,gcFields,gcLogic,day,undefined,techFields,techLogic,undefined,true);
       }else{
         setTursoCompletedDate('');setTursoWatchDate(day);
         setTursoStage('QUEUED');
@@ -473,10 +484,11 @@ function App(){
           `${day} KRX 일봉 검증과 전체시장 패턴 분석을 시작했습니다. 완료되면 자동으로 검색합니다.`);
       }
     }catch(e){
+      if(tursoReadyDays.current.has(day))return;
       setTursoWatchDate('');setTursoCompletedDate('');setTursoStage('FAILED');
       setTursoFinishedAt(Date.now());
       setTursoScanInfo(researchRequestError(e instanceof Error?e.message:''));
-    }finally{setRequestBusy(false);}
+    }finally{tursoRequestInFlight.current=false;setRequestBusy(false);}
   }
 
   // Only single-day missing results trigger the existing server-managed scan workflow.
@@ -502,18 +514,23 @@ function App(){
     }catch(e){setError(String(e));}
     finally{setRequestBusy(false);}
   }
-  async function search(p=1,scroll=true,selectedGc:GcKey[]=gcFields,selectedGcLogic:'any'|'all'=gcLogic,requestedDay?:string,patternOverride?:{enabled?:boolean;threshold?:number|null;minSamples?:number;amountEok?:number},selectedTech:TechKey[]=techFields,selectedTechLogic:'any'|'all'=techLogic,queryOverride?:{q?:string;sort?:ResultSort;aiOnly?:boolean}){
+  async function search(p=1,scroll=true,selectedGc:GcKey[]=gcFields,selectedGcLogic:'any'|'all'=gcLogic,requestedDay?:string,patternOverride?:{enabled?:boolean;threshold?:number|null;minSamples?:number;amountEok?:number},selectedTech:TechKey[]=techFields,selectedTechLogic:'any'|'all'=techLogic,queryOverride?:{q?:string;sort?:ResultSort;aiOnly?:boolean},readOnlyAfterReady=false){
+    const selectedDay=requestedDay||date;
+    const confirmedReadOnly=readOnlyAfterReady||((!!requestedDay||mode==='single')&&tursoReadyDays.current.has(selectedDay));
     const todaySearch=storageMode==='turso'&&searchSource==='patterns'&&(requestedDay||date)===todayKST()&&(!!requestedDay||mode==='single');
-    if(storageMode==='turso'&&patternStatus!=='ready'&&!todaySearch){
+    if(storageMode==='turso'&&patternStatus!=='ready'&&!todaySearch&&!confirmedReadOnly){
       setError('기술 패턴 검색에 사용할 감사 완료 분석 데이터 연결을 먼저 확인해 주세요.');
       return;
     }
+    // Today's source is authoritative Turso, even if the cached date/backend is stale.
+    const source=todaySearch||confirmedReadOnly?'turso':patternBackend;
+    let confirmedTodayReady=confirmedReadOnly;
     const serial=++searchVersion.current;
-    const effectiveAiOnly=(patternBackend==='turso'||todaySearch)&&(queryOverride?.aiOnly??aiOnly);
+    const effectiveAiOnly=(source==='turso'||todaySearch)&&(queryOverride?.aiOnly??aiOnly);
     const queryAmountEok=patternOverride?.amountEok??amountEok;
     const queryName=(queryOverride?.q??appliedNameQuery).trim();
     const desiredSort=queryOverride?.sort??appliedSort;
-    let querySort=desiredSort==='recommended'&&patternBackend!=='turso'&&!todaySearch?'recent':desiredSort;
+    let querySort=desiredSort==='recommended'&&source!=='turso'&&!todaySearch?'recent':desiredSort;
     if(!Number.isInteger(queryAmountEok)||queryAmountEok<0||queryAmountEok>50000){
       setError('거래대금은 0~50,000억원 사이 정수로 입력하세요.');return;
     }
@@ -521,14 +538,14 @@ function App(){
     const queryMode=requestedDay?'single':mode,queryDate=requestedDay||date;
     if(requestedDay){setMode('single');setDate(requestedDay);}
     try{
-      const u=new URL(API+(patternBackend==='turso'?'/api/research/search':'/api/search'));
+      const u=new URL(API+(source==='turso'?'/api/research/search':'/api/search'));
       u.searchParams.set('mode',queryMode);
       if(queryMode==='single')u.searchParams.set('date',queryDate);
       else {u.searchParams.set('start',start);u.searchParams.set('end',end);}
       u.searchParams.set('signals',signals.join(','));u.searchParams.set('logic',logic);u.searchParams.set('page',String(p));
       if(queryName)u.searchParams.set('q',queryName);
       u.searchParams.set('sort',querySort);
-      if(patternBackend==='turso'){u.searchParams.set('ai_summary','1');if(effectiveAiOnly)u.searchParams.set('ai_only','1');}
+      if(source==='turso'){u.searchParams.set('ai_summary','1');if(effectiveAiOnly)u.searchParams.set('ai_only','1');}
       if(selectedGc.length){u.searchParams.set('gc',selectedGc.join(','));u.searchParams.set('gc_logic',selectedGcLogic);}
       if(selectedTech.length){u.searchParams.set('tech',selectedTech.join(','));u.searchParams.set('tech_logic',selectedTechLogic);}
       u.searchParams.set('min_amount_eok',String(queryAmountEok));
@@ -538,13 +555,13 @@ function App(){
       // Results-panel controls apply immediately without waiting for React state updates.
       const effectiveOnlyPattern=patternOverride?.enabled??onlyPattern;
       const effectiveHighlightMin=patternOverride?.threshold!==undefined?patternOverride.threshold:highlightMin;
-      if(patternBackend==='turso')u.searchParams.set('highlight_up',effectiveHighlightMin===null?'off':String(effectiveHighlightMin));
+      if(source==='turso')u.searchParams.set('highlight_up',effectiveHighlightMin===null?'off':String(effectiveHighlightMin));
       if(effectiveOnlyPattern&&effectiveHighlightMin!==null){
         u.searchParams.set('only_pattern','1');u.searchParams.set('min_pattern_up',String(effectiveHighlightMin));
       }
       // Today's published KIS scan is a real search source, independent of
       // the latest confirmed research date. Never feed it into EOD effects.
-      if(todaySearch&&(!latest||queryDate>latest||patternBackend!=='turso')){
+      if(todaySearch&&!confirmedReadOnly){
         const provisionalUrl=new URL(API+'/api/research/provisional-patterns');
         for(const k of ['date','q','signals','logic','gc','gc_logic','tech','tech_logic','min_amount_eok','page']){
           const value=u.searchParams.get(k);if(value!==null)provisionalUrl.searchParams.set(k,value);
@@ -583,6 +600,7 @@ function App(){
           if(scroll){setFilterOpen(false);requestAnimationFrame(()=>resultRef.current?.scrollIntoView({behavior:'smooth',block:'start'}));}
           return;
         }
+        if(live.data_status==='VERIFIED_EOD_AVAILABLE')confirmedTodayReady=true;
         if(live.data_status==='NOT_PUBLISHED'){
           setRows([]);setDays([]);setTotal(null);setAiCount(null);setAllCount(null);setPage(1);setSelected(null);
           setDataStatus('NOT_IMPORTED');setAppliedNameQuery(queryName);
@@ -595,7 +613,7 @@ function App(){
       // Fast path: a day later than the latest audited research snapshot
       // cannot already have a Turso pattern result. Do not wait for a costly
       // missing-day SQL search before showing the real collection status.
-      if(queryMode==='single'&&patternBackend==='turso'&&latest&&queryDate>latest){
+      if(!confirmedTodayReady&&queryMode==='single'&&source==='turso'&&latest&&queryDate>latest){
         setRows([]);setDays([]);setTotal(null);setAiCount(null);setAllCount(null);setPage(1);setSelected(null);
         setDataStatus('NOT_IMPORTED');setAppliedNameQuery(queryName);
         setAppliedSort(querySort);setAppliedAmountEok(queryAmountEok);
@@ -608,7 +626,7 @@ function App(){
       let r=await fetch(u.toString(),{credentials:'include',cache:'no-store'});
       // D1 is only a secondary path. An HTTP 400 means the query was invalid
       // and must not silently turn into a different source/result.
-      if(patternBackend==='turso'&&r.status>=500&&querySort!=='recommended'&&!effectiveAiOnly){
+      if(!todaySearch&&!confirmedReadOnly&&source==='turso'&&r.status>=500&&querySort!=='recommended'&&!effectiveAiOnly){
         u.pathname='/api/search';
         r=await fetch(u.toString(),{credentials:'include',cache:'no-store'});
         if(r.ok){setPatternBackend('d1');setPatternSourceError('Turso 패턴 검색 불가 · D1 보조 DB로 전환됨');}
@@ -623,6 +641,18 @@ function App(){
       // No imported daily candles is NOT a genuine zero-signal scan.
       if(effectiveAiOnly&&d.ai_only!==true)throw Error('AI 추천 필터 API 배포가 필요합니다.');
       setAiCount(d.ai_asof===RECENT_ASOF&&typeof d.ai_count==='number'?d.ai_count:null);setAllCount(d.unfiltered_total??d.total);setAiOnly(d.ai_only===true);
+      if(source==='turso'&&d.storage==='TURSO'&&queryMode==='single'&&d.data_status==='AVAILABLE'){
+        tursoReadyDays.current.add(queryDate);
+        if(tursoRequestDate===queryDate||tursoWatchDate===queryDate||tursoCompletedDate===queryDate){
+          setTursoWatchDate('');setTursoCompletedDate(queryDate);setTursoStage('READY');
+          setTursoFinishedAt(v=>v||Date.now());setTursoScanInfo(`${queryDate} 패턴 분석 완료 · 저장된 결과를 조회했습니다.`);
+        }
+      }
+      if(confirmedTodayReady&&d.data_status==='AVAILABLE'){
+        if(d.storage!=='TURSO')throw Error('확정 검색 응답 출처 불일치');
+        setPatternBackend('turso');setPatternStatus('ready');setPatternSourceError('');
+        if(!latest||queryDate>latest)setLatest(queryDate);
+      }
       setRows(d.items||[]);setDays(d.daily_counts||[]);
       setTotal(d.data_status==='NOT_IMPORTED'?null:d.total);
       setPage(p);setSelected(null);setDataStatus(d.data_status||'');
@@ -633,8 +663,9 @@ function App(){
         requestAnimationFrame(()=>resultRef.current?.scrollIntoView({behavior:'smooth',block:'start'}));
       }
       if(d.data_status==='NOT_IMPORTED'){
+        if(confirmedTodayReady){setStatus('완료 상태와 저장 결과 조회가 일치하지 않습니다. 분석을 재요청하지 않고 조회 상태를 확인해 주세요.');return;}
         if(queryMode==='single'){
-          if(patternBackend==='turso'){
+          if(source==='turso'){
             if(queryDate===todayKST()&&provisionalWindowKST())
               setStatus('KRX 확정 일봉 대기 중입니다. KIS 잠정 관찰은 아래에서 확인하세요.');
             else{
@@ -712,18 +743,19 @@ function App(){
         const result=await response.json() as {status?:string;error?:string;reason?:string;
           actions_url?:string;stage?:TursoProgressStage;requested_at_utc?:string};
         if(!response.ok)throw Error(result.error||`분석 상태 오류 ${response.status}`);
-        if(cancelled)return;
+        if(cancelled||tursoReadyDays.current.has(tursoWatchDate))return;
         if(result.actions_url)setTursoActionsUrl(result.actions_url);
         if(result.requested_at_utc){
           const started=Date.parse(result.requested_at_utc);
           if(Number.isFinite(started))setTursoStartedAt(started);
         }
         if(result.status==='READY'){
+          tursoReadyDays.current.add(tursoWatchDate);
           setTursoWatchDate('');setTursoCompletedDate(tursoWatchDate);
           setTursoStage('READY');setTursoFinishedAt(Date.now());
           setTursoScanInfo(`${tursoWatchDate} 패턴 분석 완료 · 저장된 결과를 불러옵니다.`);
           if(!latest||tursoWatchDate>latest)setLatest(tursoWatchDate);
-          if(mode==='single'&&date===tursoWatchDate)void search(1,false,gcFields,gcLogic,tursoWatchDate);
+          if(mode==='single'&&date===tursoWatchDate)void search(1,false,gcFields,gcLogic,tursoWatchDate,undefined,techFields,techLogic,undefined,true);
         }else if(result.status==='FAILED'){
           setTursoWatchDate('');
           setTursoStage('FAILED');setTursoFinishedAt(Date.now());
@@ -737,7 +769,7 @@ function App(){
           setTursoStage('FAILED');setTursoFinishedAt(Date.now());
           setTursoScanInfo(`${tursoWatchDate} 분석 요청이 없습니다. 검색 버튼으로 다시 요청할 수 있습니다.`);
         }
-      }catch(e){if(!cancelled)setTursoScanInfo('상태를 일시적으로 확인하지 못했습니다. 15초 후 다시 시도합니다. · '+
+      }catch(e){if(!cancelled&&!tursoReadyDays.current.has(tursoWatchDate))setTursoScanInfo('상태를 일시적으로 확인하지 못했습니다. 15초 후 다시 시도합니다. · '+
         researchRequestError(e instanceof Error?e.message:''));}
       finally{inFlight=false;}
     };
@@ -878,7 +910,11 @@ function App(){
   const refreshCurrentView=()=>{
     if(activeView==='research'){
       setR1594Refresh(v=>v+1);
-      if(storageMode==='turso'&&searchSource==='patterns'){if(activeProvisional)void search(1,false);else void loadPatternDates();}
+      if(storageMode==='turso'&&searchSource==='patterns'){
+        if(!busy&&mode==='single'&&date===todayKST())void search(1,false);
+        else if(!busy&&total!==null)void search(page,false);
+        else if(!busy)void loadPatternDates();
+      }
       else void loadDates().then(source=>{if(source==='d1'&&total!==null)void search(page,false);});
     }else if(activeView==='tracking')setR1594TrackingRefresh(v=>v+1);
     else if(activeView==='basket')setR1594BasketRefresh(v=>v+1);
@@ -1119,14 +1155,14 @@ function App(){
             startedAt={tursoStartedAt} finishedAt={tursoFinishedAt}
             onViewResults={()=>{
               const day=tursoCompletedDate;setActiveView('research');
-              void search(1,false,gcFields,gcLogic,day);
+              void search(1,false,gcFields,gcLogic,day,undefined,techFields,techLogic,undefined,true);
             }}/>}
         {storageMode==='turso'&&searchSource==='patterns'&&patternBackend==='turso'&&
           mode==='single'&&date===todayKST()&&!activeProvisional&&(!rows.length||dataStatus==='NOT_IMPORTED')&&
           <TursoProvisionalToday api={API} day={date} query={appliedNameQuery}/>}
         <section className="panel result" ref={resultRef} id="results-panel">
           <div className="result-heading"><h2><BarChart3 size={18}/> 검색된 종목 <small>{dataStatus==='NOT_IMPORTED'?'일봉 미수집':total===null?'검색 전':total+'건'}</small></h2><span className="eod-pill"><Clock3 size={13}/> {activeProvisional?'KIS 잠정':'EOD'}</span></div>
-          {activeProvisional&&<p className="r1599-active-filters">KIS 수집 {activeProvisional.observed_count.toLocaleString()} · 분석 {activeProvisional.eligible_count.toLocaleString()} · 검출 {activeProvisional.matched_count.toLocaleString()}종목 · 최근 수신 {observedKst(activeProvisional.latest_observed_utc||undefined)} · 미확정 일봉</p>}
+          {activeProvisional&&<p className="r1599-active-filters">KIS 수집 {activeProvisional.observed_count.toLocaleString()} · 분석 {activeProvisional.eligible_count.toLocaleString()} · 검출 {activeProvisional.matched_count.toLocaleString()}종목 · 최근 수신 {observedKst(activeProvisional.latest_observed_utc||undefined)} · 패턴 계산 {observedKst(activeProvisional.scan_asof_utc||undefined)} · 미확정 일봉</p>}
           <p className="r1599-active-filters">검색 결과 기준 · 거래대금 {(appliedAmountEok??amountEok)>0?(appliedAmountEok??amountEok).toLocaleString('ko-KR')+'억원 이상':'전체'} {activeProvisional?' · AI 조건 일치 '+(aiCount===null?'판정 대기':'적용')+' · 토마토 강조 ':' · 토마토 강조 '}{activeProvisional&&!activeProvisional.history_ready?'판정 대기':highlightMin===null?'꺼짐':highlightMin+'% 이상 · 표본 '+patternSampleMin+'건 이상'}{onlyPattern&&highlightMin!==null?' · 해당 종목만 보기':''}{appliedAmountEok!==null&&appliedAmountEok!==amountEok?' · 거래대금 변경 미적용(검색 버튼을 누르세요)':''}</p>
           <details className="ai-search-help"><summary>검색 기준 안내 ⓘ</summary><p>{activeProvisional?'KIS 잠정 시세 기준입니다. 골드 테두리는 이전 AI 연구 조건의 잠정 일치이며 독립 검증 전입니다. 토마토는 전 거래일까지 종료된 과거 사례 기준이며 장바구니는 최초 KIS 관측가를 보존합니다. ':'확정 일봉 기준이며 후속 관측 기간은 불완전할 수 있습니다. '} 골드: 연구 추천 · 토마토: 과거 10일 성과 · 대각선: 두 조건 충족. AI 추천 집계에는 최신 연구 조건의 과거 일치 사례가 포함되며 당시 추천을 뜻하지 않습니다. — 표시는 집계 불가입니다.</p></details>
           {aiOnly&&<p className="r1599-active-filters">AI 조건 일치 종목만 표시 · {activeProvisional?'잠정 신호':'과거 사례 포함'}</p>}

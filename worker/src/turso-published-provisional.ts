@@ -66,7 +66,17 @@ export async function tursoPublishedProvisional(env:Env,p:URLSearchParams,factor
   const db=factory({url,authToken,intMode:'string'});
   try{
     const run=(sql:string,args:(string|number)[]=[])=>db.execute({sql,args});
-    const eod=()=>run('SELECT trade_day FROM blue_eod_ingest_audit_v1 WHERE trade_day=? AND row_count>=1700',[day]);
+    // An EOD ingest may finish several minutes before the research snapshot.
+    // Keep the KIS snapshot readable until both audited row counts agree.
+    const proofTables=await run("SELECT name FROM sqlite_master WHERE type='table' AND name IN ('blue_eod_daily_v1','blue_eod_ingest_audit_v1','blue_research_signal_audit_v1','blue_research_signals_v1')");
+    const eod=async()=>proofTables.rows.length!==4?{rows:[]}:run(`SELECT e.trade_day
+      FROM blue_eod_ingest_audit_v1 e JOIN blue_research_signal_audit_v1 a ON a.trade_day=e.trade_day
+      WHERE e.trade_day=? AND e.row_count BETWEEN 1700 AND 10000
+      AND a.observed_stocks=e.row_count AND a.row_count BETWEEN 0 AND e.row_count
+      AND (SELECT COUNT(*) FROM blue_eod_daily_v1 d WHERE d.trade_day=e.trade_day)=e.row_count
+      AND (SELECT COUNT(*) FROM blue_research_signals_v1 s WHERE s.trade_day=a.trade_day)=a.row_count
+      AND (SELECT COUNT(*) FROM blue_research_signals_v1 s WHERE s.trade_day=a.trade_day
+           AND s.source_payload_sha256=a.source_payload_sha256)=a.row_count`,[day]);
     if((await eod()).rows.length)return {...empty,data_status:'VERIFIED_EOD_AVAILABLE'};
     const tables=await run("SELECT name FROM sqlite_master WHERE type='table' AND name IN ('blue_provisional_pattern_head_v1','blue_provisional_pattern_rows_v1')");
     if(tables.rows.length!==2)return empty;

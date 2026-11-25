@@ -67,7 +67,7 @@ test('exploratory exit study status reads Turso without legacy AI or D1',async()
 test('web date-specific search offers Turso request and persisted status polling',async()=>{
   const web=await readFile(new URL('../web/src/main.tsx',import.meta.url),'utf8');
   const progress=await readFile(new URL('../web/src/TursoResearchProgress.tsx',import.meta.url),'utf8');
-  assert.match(web,/if\(patternBackend==='turso'\)\{[\s\S]*?setStatus\(''\);[\s\S]*?await requestTursoScan\(queryDate\)/);
+  assert.match(web,/if\(source==='turso'\)\{[\s\S]*?setStatus\(''\);[\s\S]*?await requestTursoScan\(queryDate\)/);
   assert.match(web,/API\+'\/api\/research\/request\/status\?date='/);
   assert.match(web,/localStorage\.setItem\(TURSO_WATCH_KEY,tursoWatchDate\)/);
   assert.match(web,/<TursoResearchProgress/);
