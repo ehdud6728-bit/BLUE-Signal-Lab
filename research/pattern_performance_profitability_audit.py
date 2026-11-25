@@ -86,7 +86,7 @@ def verify(source,report,source_sha,report_sha):
                 if v!=o:errors.append(field)
             elif type(v) is int:
                 if type(o) is not int or v!=o:errors.append(field)
-            elif not isinstance(o,(int,float)) or not math.isfinite(o) or abs(v-o)>(.010001 if field.endswith("hit_pct") or field.endswith("probability_pct") or field.startswith("return_profile.target_") else .001001):
+            elif not isinstance(o,(int,float)) or not math.isfinite(o) or abs(v-o)>(.000001 if field.endswith("hit_pct") or field.endswith("probability_pct") or field.startswith("return_profile.target_") else .001001):
                 errors.append(field)
         for field,v in actual.items():
             if field=="return_profile":
