@@ -43,7 +43,7 @@ export async function tursoPrivateCombinedCases(env:Env,params:URLSearchParams,f
    const missing=items.filter(x=>!validName(x.name,x.code)&&['KOSPI','KOSDAQ'].includes(x.market));
    const directory=new Map<string,{name:string;asof_day:string}>();
    if(missing.length&&(await q("SELECT name FROM sqlite_master WHERE type='table' AND name='blue_symbol_directory_v1'")).rows.length){
-    const pairs=[...new Map(missing.map(x=>[x.market+'/'+x.code,x])).values()];
+    const pairs=[...new Map<string,{code:string;market:string}>(missing.map(x=>[x.market+'/'+x.code,{code:x.code,market:x.market}])).values()];
     const found=await q('SELECT code,market,name,asof_day FROM blue_symbol_directory_v1 WHERE '+pairs.map(()=>'(code=? AND market=?)').join(' OR '),pairs.flatMap(x=>[x.code,x.market]));
     const ambiguous=new Set<string>();
     for(const n of found.rows){
