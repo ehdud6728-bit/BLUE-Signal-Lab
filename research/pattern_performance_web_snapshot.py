@@ -22,7 +22,7 @@ def recommendations(report):
             if any(part == "UNKNOWN" or part.endswith("_UNKNOWN") for part in p.split("|")):
                 continue
             if rate >= 70 and mean > 0 and median > 0:
-                result.append({**r, "group":group, "tier":"SHORT_RECOMMENDATION" if n>=30 and d>=5 and stocks>=10 else "WATCH", "validation":"IN_SAMPLE_ONLY"})
+                result.append({**{k:v for k,v in r.items() if k!="return_profile"}, "group":group, "tier":"SHORT_RECOMMENDATION" if n>=30 and d>=5 and stocks>=10 else "WATCH", "validation":"IN_SAMPLE_ONLY"})
     return sorted(result, key=lambda r:(r["tier"]!="SHORT_RECOMMENDATION",-r["positive_return_probability_pct"],-r["sample_count"],r["pattern"],r["horizon_trading_days"]))
 
 def convert(report):
