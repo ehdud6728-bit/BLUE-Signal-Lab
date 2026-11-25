@@ -29,11 +29,13 @@ jobs:
         working-directory: tools/turso
         run: |
           npm install --no-audit --no-fund --ignore-scripts --no-package-lock
-          node --test provisional-audit.test.mjs
+          node --test provisional-audit.test.mjs session-evidence-audit.test.mjs
       - name: Read one KST day from Turso without any mutations
         working-directory: tools/turso
         env:
           AUDIT_DAY: ${{ inputs.day_kst }}
           TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
           TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
-        run: node provisional-audit.mjs --day="$AUDIT_DAY"
+        run: |
+          node session-evidence-audit.mjs "$AUDIT_DAY"
+          node provisional-audit.mjs --day="$AUDIT_DAY"
