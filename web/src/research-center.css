@@ -43,3 +43,12 @@
 .rc-tabs button{font-size:12px!important;padding:8px 2px!important;min-width:0}
 .rc-tabs button:first-child{grid-column:1/-1;font-size:14px!important}
 @media(min-width:700px){.rc-tabs{grid-template-columns:repeat(7,minmax(0,1fr))}.rc-tabs button:first-child{grid-column:auto;font-size:12px!important}.rc-heat{font-size:13px}.rc-heat td{padding:10px 4px}.rc-heat th{font-size:12px}}
+
+.hr-compare{border-top:1px solid #819bc044;margin-top:10px;padding-top:10px;font-size:12px}
+.hr-compare>div:not(:first-child){margin-top:8px}
+.hr-line{display:flex;justify-content:space-between;gap:8px}
+.hr-track{height:10px;border-radius:5px;background:#819bc025;overflow:hidden;margin-top:4px}
+.hr-track>div{height:100%;border-radius:5px}
+.hr-feature{margin:7px 0;font-size:14px;font-weight:600}
+.rc-filter input{width:100%;min-width:0;box-sizing:border-box;border:1px solid #aabbd2;border-radius:8px;background:transparent;color:inherit;padding:8px;font:inherit}
+@media(min-width:700px){.rc-tabs{grid-template-columns:repeat(4,minmax(0,1fr))}}

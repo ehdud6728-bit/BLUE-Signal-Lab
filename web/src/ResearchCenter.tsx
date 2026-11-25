@@ -2,8 +2,9 @@ import {useMemo,useState} from 'react';
 import {RECENT_ASOF,RECENT_ROWS,RECENT_SESSIONS,RECENT_RECOMMENDATIONS} from './recent-pattern-data';
 import {PROFITABILITY_DATA} from './research-profitability-data';
 import {patternLabel} from './research-pattern-label';
+import {currentHighReturn} from './HighReturnProfiles';
 import './research-center.css';
-export type ResearchTab='center'|'market'|'overview'|'ranking'|'recommend'|'radar'|'profit';
+export type ResearchTab='center'|'market'|'overview'|'ranking'|'recommend'|'radar'|'profit'|'highreturn';
 type ProfitRow={group:string;pattern:string;horizon:number;n:number;dates:number;stocks:number;up_pct:number;mean_pct:number;median_pct:number;min_pct:number;mean_gain_pct:number|null;mean_loss_pct:number|null;payoff_ratio:number|null;profit_factor:number|null;worst_5pct_mean_pct:number;tail_count:number;target_5_pct:number;target_10_pct:number;target_20_pct:number;win_count:number;loss_count:number;flat_count:number};
 type ProfitData={asof:string;sessions:number;rows:ProfitRow[]};
 const periods=[1,2,3,5,10,20];
@@ -49,6 +50,7 @@ export default function ResearchCenter({onNavigate}:{onNavigate:(tab:ResearchTab
  const unique=recommendations.filter((r,i)=>recommendations.findIndex(x=>x.pattern===r.pattern)===i);
  const best=unique[0];
  const profit=currentProfit();
+ const high=currentHighReturn();
  const ranked=useMemo(()=>Object.entries(RECENT_ROWS).sort((a,b)=>(b[1].find(r=>r[0]===h)?.[3]??-Infinity)-(a[1].find(r=>r[0]===h)?.[3]??-Infinity)||a[0].localeCompare(b[0])),[h]);
  const i=metric==='up'?3:metric==='mean'?4:5;
  return <section className="rc-center">
@@ -67,7 +69,7 @@ export default function ResearchCenter({onNavigate}:{onNavigate:(tab:ResearchTab
  </section>
  <section className="rc-section"><div className="rc-heading"><h3>수익성 · 고수익 특성</h3><button type="button" className="rc-link" onClick={()=>onNavigate('profit')}>손익비 연구 ›</button></div>
  {profit?<><small>동일 기준일 수익성 자료 · 70% 미만 조건 포함</small>{[...profit.rows].filter(r=>r.horizon===h&&r.up_pct<70&&r.mean_pct>0).sort((a,b)=>b.mean_pct-a.mean_pct).slice(0,2).map(r=><div key={r.group+r.pattern} className="rc-profit-row"><strong>{patternLabel(r.pattern)}</strong><small>평균 {signed(r.mean_pct)} · 손익비 {ratio(r.payoff_ratio)} · 상승 {pct(r.up_pct)} · {r.n}건</small></div>)}</>:<p>손익비·극단 손실 연구 결과 게시 대기</p>}
- <small>고수익 특성(#183)은 실제 보고서 검토 후 연결 예정입니다.</small>
+ <div className="rc-heading"><small>{high?`고수익 특성 ${high.published_rows.toLocaleString()}건 게시 / 전체 ${high.source_rows.toLocaleString()}건`:"고수익 특성 집계 게시 대기"}</small><button type="button" className="rc-link" onClick={()=>onNavigate('highreturn')}>특성 비교 ›</button></div>
  </section>
  <div className="rc-nav-grid">{([['market','시황·순환매','대장주·후발주 / AI 대응'],['radar','시장 변화·이력','상승·하락 방향성 / 신규 조건'],['overview','연구 관리','데이터 확보 / 익절·손절'],['profit','수익성 연구','손익비 / 큰 손실']] as const).map(([tab,title,desc])=><button key={tab} type="button" onClick={()=>onNavigate(tab)}><strong>{title} ›</strong><small>{desc}</small></button>)}</div>
  </section>;
