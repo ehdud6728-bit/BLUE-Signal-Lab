@@ -25,7 +25,7 @@ def thin(items):
         if i-last.get(c,-10000)>=10:
             out.append(x);last[c]=i
     return out
-def analyze(source,evidence,focus="024720"):
+def analyze(source,evidence,focus="024720",case_sink=None):
     if source.get("format")!="BLUE_TURSO_EXIT_SOURCE_V1" or source.get("audits_readback_verified") is not True or evidence.get("format")!="BLUE_COMBINED_FACTORS_V1" or evidence["asof"]!=source["asof_day"]:raise ValueError("source mismatch")
     days=[d["day"] for d in source["eod_days"]]
     if not days or days!=sorted(set(days)) or days[-1]!=source["asof_day"] or any(d["expected"]!=d["actual"] for d in source["eod_days"]):raise ValueError("invalid days")
@@ -80,6 +80,8 @@ def analyze(source,evidence,focus="024720"):
                 cohort=[(i,c) for i,c,b,g in events if b==base and group in g and (scope=="MARKET" or c==focus)]
                 for sampling in ("ALL_EVENTS","COOLDOWN_10_PER_CONDITION"):
                     selected=cohort if sampling=="ALL_EVENTS" else thin(cohort)
+                    if case_sink is not None and scope=="MARKET" and sampling=="ALL_EVENTS" and group in ("JOINT","LONG_BULL_NOT_JOINT","LONG_BULL_RSI_GC"):
+                        case_sink(base,group,tuple(selected))
                     for basis in ("SIGNAL_CLOSE","NEXT_OPEN"):
                         for h in HORIZONS:
                             completed=[];missing=0;pending=0
