@@ -24,7 +24,11 @@ const safeInt=(raw,min,max)=>{
 };
 
 export function reconstructAuditedDay(day,audit,rows){
-  assert(REPLAY_DAYS.includes(day)&&audit&&audit.trade_day===day&&
+  assert(REPLAY_DAYS.includes(day),'V2_REPLAY_BAD_AUDIT');
+  return reconstructVerifiedDay(day,audit,rows);
+}
+export function reconstructVerifiedDay(day,audit,rows){
+  assert(typeof day==='string'&&/^20\d{2}-\d{2}-\d{2}$/.test(day)&&Number.isFinite(Date.parse(day))&&new Date(day+'T00:00:00Z').toISOString().slice(0,10)===day&&audit&&audit.trade_day===day&&
     SOURCE.has(String(audit.source))&&HASH.test(String(audit.day_sha256))&&
     Array.isArray(rows),'V2_REPLAY_BAD_AUDIT');
   const expected=safeInt(audit.row_count,1700,10000);

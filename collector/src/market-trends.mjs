@@ -5,6 +5,8 @@ import {createClient} from '@libsql/client';
 import {tursoDirectCachedToken} from './turso-direct.mjs';
 import {pathToFileURL} from 'node:url';
 import {createHash} from 'node:crypto';
+import {writeFile,mkdir} from 'node:fs/promises';
+import {dirname} from 'node:path';
 import {readBenchmarkEvidence,inspectBenchmark} from './market-trends-regime.mjs';
 const HOST='https://openapi.koreainvestment.com:9443';
 const GLOBAL=[['.DJI','Dow Jones'],['.NDX','NASDAQ 100'],['.SPX','S&P 500'],['.SOX','Philadelphia Semiconductor'],['.VIX','VIX']];
@@ -80,7 +82,7 @@ export function globalSummary(series){
   return {day:last.day,close:last.close,previous_day:prev.day,change_pct:rounded(100*(last.close/prev.close-1)),
     change5_pct:older?rounded(100*(last.close/older.close-1)):null,sessions:series.length};
 }
-export async function captureTrends(env=process.env,{mode='plan',now=new Date(),factory=createClient,token=tursoDirectCachedToken,fetchFn=fetch,wait=pause}={}){
+export async function captureTrends(env=process.env,{mode='plan',now=new Date(),factory=createClient,token=tursoDirectCachedToken,fetchFn=fetch,wait=pause,stateFile=null}={}){
   if(mode==='plan')return {status:'PLAN_ONLY',kis_calls:0,turso_writes:0};
   if(!['inspect','apply','global_inspect','global_apply','benchmark_inspect'].includes(mode))throw Error('INVALID_TREND_MODE');
   const globalOnly=mode.startsWith('global_');
@@ -119,10 +121,16 @@ export async function captureTrends(env=process.env,{mode='plan',now=new Date(),
         return {series:[],reason:/^HISTORY_[A-Z_]+$/.test(e?.message||'')?e.message:'HISTORY_UNAVAILABLE'};}};
     if(mode==='benchmark_inspect'){
       const evidence=await readBenchmarkEvidence(db,start,end);
-      const results=[];
+      const results=[],daily=[];
       for(const [market,benchmarkCode] of markets){
         const r=await safe(benchmarkCode);
-        results.push({...inspectBenchmark(r.series,market,evidence,end),reason:r.reason});
+        const {daily_states,...summary}=inspectBenchmark(r.series,market,evidence,end,{includeDaily:Boolean(stateFile)});
+        results.push({...summary,reason:r.reason});
+        if(stateFile)daily.push({market,days:daily_states});
+      }
+      if(stateFile&&results.every(r=>r.observations>=25)){
+        await mkdir(dirname(stateFile),{recursive:true});
+        await writeFile(stateFile,JSON.stringify({schema:'BLUE_BENCHMARK_DAILY_STATES_V1',cutoff:end,markets:daily})+'\n');
       }
       return {status:results.every(r=>r.observations>=25)?'INSPECT_ONLY':'BENCHMARK_HISTORY_INSUFFICIENT',scope:'DOMESTIC_BENCHMARK_ONLY',kis_calls:calls,turso_writes:0,cutoff:end,markets:results,limits:['RESEARCH_RULE_NOT_VALIDATED','EXACT_DATE_ALIGNMENT_FOR_BREADTH_ONLY','NO_INDEPENDENT_KIS_INDEX_SOURCE_CHECK','NO_CALENDAR_OR_CORPORATE_ACTION_VERIFICATION','NO_PREDICTION_ACCURACY_CLAIM','NO_RAW_INDEX_PRICES_PUBLISHED']};
     }
@@ -202,6 +210,6 @@ export async function captureTrends(env=process.env,{mode='plan',now=new Date(),
   }finally{db.close();}
 }
 if(process.argv[1]&&import.meta.url===pathToFileURL(process.argv[1]).href){
-  try{const result=await captureTrends(process.env,{mode:process.argv[2]||'plan'});console.log('BLUE_MARKET_TRENDS',JSON.stringify(result));if(!['PLAN_ONLY','INSPECT_ONLY','OK'].includes(result.status))process.exitCode=1;}
+  try{const result=await captureTrends(process.env,{mode:process.argv[2]||'plan',stateFile:process.env.BLUE_BENCHMARK_STATE_FILE||null});console.log('BLUE_MARKET_TRENDS',JSON.stringify(result));if(!['PLAN_ONLY','INSPECT_ONLY','OK'].includes(result.status))process.exitCode=1;}
   catch(e){console.error('BLUE_MARKET_TRENDS_FAILED',/^[A-Z_]+$/.test(e?.message||'')?e.message:'SANITIZED_FAILURE');process.exitCode=1;}
 }
