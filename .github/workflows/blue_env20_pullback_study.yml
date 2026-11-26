@@ -4,6 +4,8 @@ on:
   pull_request:
     paths:
       - 'research/env20_pullback_study.py'
+      - 'research/env20_pullback_context.py'
+      - 'tools/turso/env20-pullback-factors.test.mjs'
       - 'research/test_env20_pullback_study.py'
       - 'tools/turso/env20-pullback-factors.mjs'
       - '.github/workflows/blue_env20_pullback_study.yml'
@@ -25,7 +27,7 @@ jobs:
       - run: npm install --prefix collector --no-audit --no-fund --ignore-scripts --no-package-lock
       - name: Offline exact entry and provenance tests
         run: |
-          node --test tools/turso/combined-pattern-factors.test.mjs tools/turso/full-universe-export.test.mjs collector/src/market-trends-regime.test.mjs
+          node --test tools/turso/env20-pullback-factors.test.mjs tools/turso/combined-pattern-factors.test.mjs tools/turso/full-universe-export.test.mjs collector/src/market-trends-regime.test.mjs
           python3 research/test_env20_pullback_study.py
       - name: Read audited source and compare fixed pullback rules
         if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.repository == 'ehdud6728-bit/BLUE-Signal-Lab'
@@ -44,7 +46,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.repository == 'ehdud6728-bit/BLUE-Signal-Lab'
         with:
-          name: BLUE_ENV20_INVERSE_PULLBACK_V1
+          name: BLUE_ENV20_INVERSE_PULLBACK_V2
           path: output/full-universe/pullback-report.json
           if-no-files-found: error
           retention-days: 14

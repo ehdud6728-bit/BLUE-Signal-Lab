@@ -25,4 +25,17 @@ class Pullback(unittest.TestCase):
         s=summary([("d","x",x),("d","y",dict(status="NO_ENTRY",ret=None))])
         self.assertEqual(s["fill_pct"],50);self.assertEqual(s["net_trade_mean_pct"],2.7);self.assertEqual(s["net_per_signal_pct"],1.35)
         self.assertFalse(s["sample_floor_met"])
+    def test_signal_only_context_and_unknown(self):
+        from env20_pullback_context import categories
+        x=dict(ma_chart_consistent=True,ma20=125,ma40=130,ma60=140,supply=dict(status="STORED_ESTIMATE",distance_pct=5,grade="강"))
+        bar=dict(open=91,high=102,low=90,close=100,amount=100)
+        c=categories(bar,x,None,F(5))
+        self.assertEqual(c["CANDLE"],"LONG_BULL")
+        self.assertEqual(c["CLOSE_LOCATION"],"HIGH")
+        self.assertEqual(c["MA20_DISCOUNT"],"20_25")
+        self.assertEqual(c["SUPPLY_DISTANCE"],"5_10")
+        self.assertEqual(c["MA20_SLOPE_5"],"UNKNOWN")
+        self.assertEqual(categories(bar,{},None,None)["SUPPLY_DISTANCE"],"UNKNOWN")
+        prior=[dict(close=100,amount=100)]*25
+        self.assertEqual(categories(bar,x,prior,F(5))["CANDLE_MA_CONTEXT"],"BULL_HIGH_CLOSE_SLOPE_NOT_FALLING")
 if __name__=="__main__":unittest.main()

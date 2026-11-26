@@ -7,6 +7,7 @@ from statistics import median
 from pathlib import Path
 from pattern_performance_forward import indexed,history
 from pattern_performance_full_universe import check
+from env20_pullback_context import categories
 DEPTHS=(1,2,3,5,7)
 HORIZONS=(5,10,20)
 TARGETS=(3,5)
@@ -80,7 +81,7 @@ def study(src,bench,factors):
     for x in factors["rows"]:
         k=x["day"],x["code"];check(k in wanted and k not in lookup and re.fullmatch(r"[a-f0-9]{64}",x["record_sha256"]),"BAD_FACTOR_ROW");lookup[k]=x
     check(set(lookup)==wanted,"FACTOR_COUNT_MISMATCH")
-    split=days[len(days)*7//10];groups=defaultdict(list);coverage=Counter();cohort_counts=Counter()
+    split=days[len(days)*7//10];groups=defaultdict(list);coverage=Counter();cohort_counts=Counter();context_counts=Counter()
     for (d,c),x in sorted(lookup.items()):
         b=bars[d,c];scope=b["market"];ds=indexes[scope]
         if x["ma_down"] is True and x["ma_chart_consistent"] is True:cohort="INVERSE_CHART_MATCH"
@@ -97,6 +98,13 @@ def study(src,bench,factors):
             atr=F(sum(max(z["high"]-z["low"],abs(z["high"]-y["close"]),abs(z["low"]-y["close"])) for y,z in zip(hist,hist[1:])),14)
             if atr<=0:atr=None
         else:atr=None
+        context_keys=["ALL",state]
+        if cohort=="INVERSE_CHART_MATCH":
+            prior=history(ds[:i+1],bars,c,scope,25)
+            if prior and [q for q in days if ds[i-24]<=q<=d]!=ds[i-24:i+1]:prior=None
+            for feature,value in categories(b,x,prior,atr).items():
+                context_counts[feature,value]+=1
+                if value!="UNKNOWN":context_keys.append(feature+":"+value)
         for h in HORIZONS:
             seq=ds[i+1:i+1+h]
             if len(seq)<h:coverage[cohort,str(h),"PENDING"]+=1;continue
@@ -114,7 +122,7 @@ def study(src,bench,factors):
                     for p in POLICIES:
                         v=simulate(path,b["close"],b["low"],atr,p,method,t)
                         for split_name in (["ALL",phase] if phase!="EMBARGO" else ["ALL"]):
-                            for context in ("ALL",state):
+                            for context in context_keys:
                                 groups[cohort,split_name,context,h,method,t,*p].append((d,c,v))
     rows=[]
     for key,events in sorted(groups.items()):
@@ -126,9 +134,10 @@ def study(src,bench,factors):
         out["paired_net_per_signal_delta_pp"]=avg([value(v)-value(b) for (_,_,v),(_,_,b) in zip(events,base)])
         # Missed immediate wins are explicitly counted; no-entry cash = 0.
         out["no_entry_missed_positive_immediate"]=sum(v["status"]=="NO_ENTRY" and b["status"]=="TRADE" and value(b)>0 for (_,_,v),(_,_,b) in zip(events,base))
-        rows.append(dict(cohort=cohort,phase=phase,market_state=context,horizon=h,stop=method,target=t,entry=mode,depth_pct=depth,wait_days=wait,**out))
-    return dict(schema="BLUE_ENV20_PULLBACK_STUDY_V1",asof=days[-1],source_days=len(days),signal_audit_days=sum(x["signal_status"]=="COUNT_AND_PAYLOAD_HASH_METADATA_MATCH" for x in meta.values()),split_day=split,cohorts=dict(cohort_counts),coverage=[dict(key=k,count=v) for k,v in sorted(coverage.items())],rows=rows,
-        assumed_roundtrip_cost_pct=float(COST),limits=["STORED_SIGNAL_AND_MA_CHART_INTERNAL_CHECK_NOT_INDEPENDENT_MA_PROOF","EXACT_ALIGNED_AUDITED_PATHS_ONLY","FIXED_SIGNAL_RELATIVE_EXIT_HORIZON","NO_ENTRY_ZERO_CASH_NOT_TRADE_WIN","INTRADAY_LIMIT_FILL_HYPOTHETICAL_NO_QUEUE_OR_TICK","STOP_FIRST_AMBIGUITY","RAW_PRICES_CORPORATE_ACTIONS_UNVERIFIED","NO_PROMOTION","DEPENDENT_EVENTS_MULTIPLE_COMPARISONS"])
+        feature,value=context.split(":",1) if ":" in context else ("MARKET_STATE",context)
+        rows.append(dict(cohort=cohort,phase=phase,market_state=context if feature=="MARKET_STATE" else "ALL",context_feature=feature,context_value=value,horizon=h,stop=method,target=t,entry=mode,depth_pct=depth,wait_days=wait,**out))
+    return dict(schema="BLUE_ENV20_PULLBACK_STUDY_V2",context_counts=[dict(feature=f,value=v,count=n) for (f,v),n in sorted(context_counts.items())],asof=days[-1],source_days=len(days),signal_audit_days=sum(x["signal_status"]=="COUNT_AND_PAYLOAD_HASH_METADATA_MATCH" for x in meta.values()),split_day=split,cohorts=dict(cohort_counts),coverage=[dict(key=k,count=v) for k,v in sorted(coverage.items())],rows=rows,
+        assumed_roundtrip_cost_pct=float(COST),limits=["STORED_SIGNAL_AND_MA_CHART_INTERNAL_CHECK_NOT_INDEPENDENT_MA_PROOF","EXACT_ALIGNED_AUDITED_PATHS_ONLY","FIXED_SIGNAL_RELATIVE_EXIT_HORIZON","NO_ENTRY_ZERO_CASH_NOT_TRADE_WIN","INTRADAY_LIMIT_FILL_HYPOTHETICAL_NO_QUEUE_OR_TICK","STOP_FIRST_AMBIGUITY","RAW_PRICES_CORPORATE_ACTIONS_UNVERIFIED","NO_PROMOTION","DEPENDENT_EVENTS_MULTIPLE_COMPARISONS","STORED_SUPPLY_ESTIMATE_NOT_INDEPENDENTLY_RECOMPUTED","UNKNOWN_CONTEXT_EXCLUDED_FROM_STRATA","CONTEXT_STRATA_NOT_MARKET_MATCHED"])
 def main():
     p=argparse.ArgumentParser()
     for k in ("source","benchmark","factors","out"):p.add_argument("--"+k,type=Path,required=True)
@@ -136,5 +145,5 @@ def main():
     r=study(read(a.source),read(a.benchmark),read(a.factors))
     a.out.write_text(json.dumps(r,ensure_ascii=False,allow_nan=False,separators=(",",":"))+"\n")
     print("BLUE_ENV20_PULLBACK",json.dumps({k:r[k] for k in ("asof","source_days","signal_audit_days","split_day","cohorts","coverage")}))
-    print("BLUE_ENV20_PULLBACK_SUMMARY",json.dumps([x for x in r["rows"] if x["cohort"]=="INVERSE_CHART_MATCH" and x["phase"]=="ALL" and x["market_state"]=="ALL" and x["horizon"]==10 and x["stop"]=="SIGNAL_LOW" and x["target"]==3 and x["wait_days"] in (0,3)],ensure_ascii=False))
+    print("BLUE_ENV20_PULLBACK_SUMMARY",json.dumps([x for x in r["rows"] if x["cohort"]=="INVERSE_CHART_MATCH" and x["phase"]=="ALL" and x["context_feature"]=="MARKET_STATE" and x["market_state"]=="ALL" and x["horizon"]==10 and x["stop"]=="SIGNAL_LOW" and x["target"]==3 and x["wait_days"] in (0,3)],ensure_ascii=False))
 if __name__=="__main__":main()
