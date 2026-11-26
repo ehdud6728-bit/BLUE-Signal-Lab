@@ -51,6 +51,22 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  schedule_status:
+    if: github.event_name == 'schedule' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Explain scheduled backfill approval status (no secrets or DB access)
+        env:
+          ENABLED: ${{ vars.BLUE_TURSO_MISSING_HISTORY_AUTO_ENABLED == 'true' }}
+          CONFIRMED: ${{ vars.BLUE_TURSO_MISSING_HISTORY_AUTO_CONFIRM == 'blue-turso-missing-history-scheduled' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "BLUE_MISSING_HISTORY_SCHEDULE enabled=$ENABLED confirmed=$CONFIRMED"
+          if [[ "$ENABLED" != true || "$CONFIRMED" != true ]]; then
+            echo '::notice::Automatic backfill not authorized; check repository Actions variables. No write authorized.'
+          fi
   missing_history:
     if: >-
       github.ref == 'refs/heads/main' &&
