@@ -28,6 +28,24 @@ class TestForward(unittest.TestCase):
         out=score(s,b,[r]);self.assertEqual(out["outcome_status"],{"OBSERVED":1,"PENDING":4})
         row=next(x for x in out["rows"] if x["feature"]=="BASELINE" and x["horizon"]==1)
         self.assertEqual(row["mean_pct"],10.0)
+        high=next(x for x in out["pooled_opportunity_rows"] if x["horizon"]==1)
+        self.assertEqual(high["peak_high_pct"]["mean"],11)
+        self.assertEqual(high["trough_low_pct"]["mean"],-10)
+        self.assertEqual(high["terminal_close_pct"]["mean"],10)
+        self.assertEqual(high["peak_to_end_giveback_pp"]["mean"],1)
+        self.assertEqual(high["target_high_reach"]["10"]["hits"],1)
+        self.assertEqual(high["target_high_reach"]["15"]["hits"],0)
+        self.assertEqual(next(x for x in out["pooled_opportunity_rows"] if x["horizon"]==3)["pending"],1)
+        self.assertIsNone(next(x for x in out["pooled_opportunity_rows"] if x["horizon"]==3)["peak_high_pct"]["mean"])
+    def test_exact_boundary_and_peak_not_terminal(self):
+        from pattern_performance_forward import observe_high,summarize_high
+        p=[dict(open=10000,high=10499,low=9500,close=9900),dict(open=9900,high=10500,low=9700,close=9800)]
+        r=observe_high(p);self.assertEqual(r["target_days"][5],2)
+        out=summarize_high([("d","x",r,"OBSERVED"),("e","x",None,"MISSING_PATH")])
+        self.assertEqual(out["sample_count"],1);self.assertEqual(out["missing_path"],1)
+        self.assertEqual(out["peak_high_pct"]["mean"],5);self.assertEqual(out["terminal_close_pct"]["mean"],-2)
+        self.assertEqual(out["peak_to_end_giveback_pp"]["mean"],7)
+        self.assertEqual(out["target_high_reach"]["5"]["mean_first_day"],2)
     def test_no_revised_source(self):
         s,b=fixture();r=candidate(s,b,"a"*40);r.update(captured_at="2026-10-30T23:00:00Z",capture_day="2026-10-31")
         s["days"][-1]["sha256"]="b"*64

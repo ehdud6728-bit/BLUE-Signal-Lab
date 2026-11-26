@@ -1,6 +1,8 @@
 """Forward-only observation candidate and outcome report; no tuning/promotion."""
 import argparse,hashlib,json,re
 from collections import Counter,defaultdict
+from fractions import Fraction
+from statistics import median
 from datetime import date,datetime,timezone,timedelta
 from pathlib import Path
 from pattern_performance_full_universe import check,direction,summarize,SCOPES,STATES
@@ -80,9 +82,38 @@ def candidate(src,bench,commit):
     check(len(rows)==meta[d]["rows"],"CANDIDATE_COUNT_MISMATCH")
     proof={x:meta[x]["sha256"] for x in days[-21:]}
     return dict(schema="BLUE_FORWARD_CANDIDATE_V1",rule_version=VERSION,rule_commit=commit,source_day=d,cutoff=src["cutoff"],source_hashes=proof,benchmark_state_sha256=hashlib.sha256(json.dumps(bench,sort_keys=True,separators=(",",":")).encode()).hexdigest(),rows=rows,coverage=dict(coverage),date_diagnostics=diagnostics)
+OPPORTUNITY_VERSION="FORWARD_HIGH_V2"
+HIGH_TARGETS=(3,5,10,15,20)
+def observe_high(path):
+    entry=path[0]["open"]
+    hi=max(b["high"] for b in path)
+    lo=min(b["low"] for b in path)
+    pct=lambda x: Fraction(100*(x-entry),entry)
+    return dict(high=pct(hi),low=pct(lo),close=pct(path[-1]["close"]),
+        giveback=Fraction(100*(hi-path[-1]["close"]),entry),
+        peak_day=next(i for i,b in enumerate(path,1) if b["high"]==hi),
+        target_days={t:next((i for i,b in enumerate(path,1) if 100*b["high"]>=(100+t)*entry),None) for t in HIGH_TARGETS})
+def summarize_high(events):
+    observed=[e for e in events if e[3]=="OBSERVED"]
+    check(all((e[2] is not None)==(e[3]=="OBSERVED") for e in events),"HIGH_STATUS_MISMATCH")
+    vals=[e[2] for e in observed];n=len(vals);dates=len({e[0] for e in observed});symbols=len({e[1] for e in observed})
+    def avg(a):return round(float(sum(a)/len(a)),3) if a else None
+    def stat(k):
+        a=[v[k] for v in vals]
+        return dict(mean=avg(a),median=round(float(median(a)),3) if a else None)
+    targets={}
+    for t in HIGH_TARGETS:
+        hits=[v["target_days"][t] for v in vals if v["target_days"][t] is not None]
+        targets[str(t)]=dict(hits=len(hits),hit_pct=round(100*len(hits)/n,2) if n else None,
+                             mean_first_day=avg(hits))
+    return dict(events=len(events),sample_count=n,signal_dates=dates,symbols=symbols,
+        pending=sum(e[3]=="PENDING" for e in events),missing_path=sum(e[3]=="MISSING_PATH" for e in events),
+        sample_floor_met=n>=30 and dates>=5 and symbols>=10,
+        peak_high_pct=stat("high"),trough_low_pct=stat("low"),terminal_close_pct=stat("close"),
+        peak_to_end_giveback_pp=stat("giveback"),first_peak_observation=stat("peak_day"),target_high_reach=targets)
 def score(src,bench,ledger):
     days,meta,bars,indexes,states,old=indexed(src,bench)
-    groups=defaultdict(list);statuses=Counter();snapshots=[]
+    groups=defaultdict(list);high_groups=defaultdict(list);pooled=defaultdict(list);by_snapshot=defaultdict(list);statuses=Counter();snapshots=[];seen=set()
     for s in ledger:
         check(s["rule_version"]==VERSION and s["schema"]=="BLUE_FORWARD_CANDIDATE_V1","BAD_SNAPSHOT")
         at=datetime.fromisoformat(s["captured_at"].replace("Z","+00:00"))
@@ -90,23 +121,32 @@ def score(src,bench,ledger):
         captured=at.astimezone(KST).date().isoformat()
         check(s["source_day"]<captured and s["capture_day"]==captured,"BAD_CAPTURE_DATE")
         check(all(meta[d]["sha256"]==h for d,h in s["source_hashes"].items() if d in meta),"SOURCE_HASH_CHANGED")
+        check(s["source_day"] not in seen,"DUPLICATE_FORWARD_SNAPSHOT");seen.add(s["source_day"])
         snapshots.append(dict(source_day=s["source_day"],captured_at=s["captured_at"],rows=len(s["rows"])))
+        seen_codes=set()
         for r in s["rows"]:
+            check(r["code"] not in seen_codes,"DUPLICATE_FORWARD_SYMBOL");seen_codes.add(r["code"])
             scope=r["market"];ds=indexes[scope];future=[d for d in ds if d>captured]
             keys=[("BASELINE","ALL"),("LEGACY",r["legacy"])]
             keys.extend((k,str(v)) for k,v in r["features"].items() if v is not None)
             keys.extend(("LEGACY_PATTERN",x) for x in r["legacy_names"])
             for n in HORIZONS:
-                ret=None
+                ret=None;opp=None
                 if not ds or ds[0]>captured:status="MISSING_PATH"
                 elif len(future)<n:status="PENDING"
                 else:
                     wanted=future[:n];path=[bars.get((d,r["code"])) for d in wanted]
                     if any(b is None or b["market"]!=scope for b in path):status="MISSING_PATH"
-                    else:status="OBSERVED";ret=100*(path[-1]["close"]/path[0]["open"]-1)
+                    else:status="OBSERVED";ret=100*(path[-1]["close"]/path[0]["open"]-1);opp=observe_high(path)
                 statuses[status]+=1
-                for k,v in keys:groups[scope,r["state"],r["prior"],n,k,v].append((s["source_day"],r["code"],ret,status))
-    return dict(schema="BLUE_FORWARD_REPORT_V1",asof=days[-1],snapshot_count=len(snapshots),snapshots=snapshots,outcome_status=dict(statuses),rows=[dict(market=m,market_state=s,prior_direction=d,horizon=h,feature=f,value=v,**summarize(es)) for (m,s,d,h,f,v),es in sorted(groups.items())],limits=["FIRST_KIS_OBSERVED_SESSION_STRICTLY_AFTER_KST_CAPTURE_DAY","CLOSE_KNOWN_NO_SAME_DAY_ENTRY","NO_INDEPENDENT_CALENDAR_OR_CORPORATE_ACTION_PROOF","NO_EXECUTION_OR_COSTS","NO_STRATEGY_PROMOTION","LATEST_30_STORED_SNAPSHOTS_ONLY","DEPENDENT_EVENTS"])
+                evt=(s["source_day"],r["code"],opp,status)
+                pooled[n].append(evt)
+                by_snapshot[s["source_day"],n].append(evt)
+                for k,v in keys:
+                    group=scope,r["state"],r["prior"],n,k,v
+                    groups[group].append((s["source_day"],r["code"],ret,status))
+                    high_groups[group].append(evt)
+    return dict(schema="BLUE_FORWARD_REPORT_V2",outcome_version=OPPORTUNITY_VERSION,opportunity_basis="First open strictly after KST capture day; max HIGH and min LOW over full benchmark observation window. Fixed high target touches, not actual fills or returns. Existing rows retain V1 terminal CLOSE basis.",pooled_opportunity_rows=[dict(horizon=n,**summarize_high(es)) for n,es in sorted(pooled.items())],snapshot_opportunity_rows=[dict(source_day=d,horizon=n,**summarize_high(es)) for (d,n),es in sorted(by_snapshot.items())],opportunity_rows=[dict(market=m,market_state=s,prior_direction=d,horizon=h,feature=f,value=v,**summarize_high(es)) for (m,s,d,h,f,v),es in sorted(high_groups.items())],asof=days[-1],snapshot_count=len(snapshots),snapshots=snapshots,outcome_status=dict(statuses),rows=[dict(market=m,market_state=s,prior_direction=d,horizon=h,feature=f,value=v,**summarize(es)) for (m,s,d,h,f,v),es in sorted(groups.items())],limits=["FIRST_KIS_OBSERVED_SESSION_STRICTLY_AFTER_KST_CAPTURE_DAY","CLOSE_KNOWN_NO_SAME_DAY_ENTRY","NO_INDEPENDENT_CALENDAR_OR_CORPORATE_ACTION_PROOF","NO_EXECUTION_OR_COSTS","NO_STRATEGY_PROMOTION","LATEST_30_STORED_SNAPSHOTS_ONLY","DEPENDENT_EVENTS"])
 def main():
     p=argparse.ArgumentParser();p.add_argument("--phase",choices=["candidate","score"],required=True);p.add_argument("--commit",default="");p.add_argument("--source",type=Path,required=True);p.add_argument("--benchmark",type=Path,required=True);p.add_argument("--ledger",type=Path);p.add_argument("--out",type=Path,required=True);a=p.parse_args()
     src=json.loads(a.source.read_text());bench=json.loads(a.benchmark.read_text())
