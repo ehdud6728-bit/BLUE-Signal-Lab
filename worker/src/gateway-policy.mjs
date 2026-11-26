@@ -1,7 +1,7 @@
 import {validAccessConfig,verifyWebAccessDetailed} from './web-access-jwt.mjs';
 export const WEB_ORIGIN='https://blue-signal-lab.ehdud6728.workers.dev';
 // Deny by default, including new admin routes.
-const READ=new Set(['research/dates','research/provisional-detail','research/provisional-patterns','research/provisional','research/market-ai','research/rotation-leaders','research/market-trends','research/market-rotation','research/private-combined-cases','research/coverage','research/pulse','research/exit-study','research/search','research/chart','research/request/status','eod/dates','eod/search','eod/prices/compare','analysis/live','analysis/symbols','analysis/symbol','ai/status','ai/report','chart','basket/ai','basket/watch','prices/compare','live/quotes','health','runs','dates','search','symbol','scan/status']);
+const READ=new Set(['research/dates','research/provisional-detail','research/provisional-patterns','research/provisional','research/market-ai','research/forward-view','research/rotation-leaders','research/market-trends','research/market-rotation','research/private-combined-cases','research/coverage','research/pulse','research/exit-study','research/search','research/chart','research/request/status','eod/dates','eod/search','eod/prices/compare','analysis/live','analysis/symbols','analysis/symbol','ai/status','ai/report','chart','basket/ai','basket/watch','prices/compare','live/quotes','health','runs','dates','search','symbol','scan/status']);
 const WRITE=new Set(['research/market-ai','research/request','eod/quotes/refresh','analysis/live/request','analysis/live/refresh','analysis/request','ai/market','ai/stock','basket/ai','basket/watch','prices/request','scan']);
 export function allowedGatewayRequest(req){
  const url=new URL(req.url);

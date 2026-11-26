@@ -1,0 +1,25 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {DatabaseSync} from 'node:sqlite';
+import {createHash} from 'node:crypto';
+import {gzipSync} from 'node:zlib';
+import {tursoForwardView,InvalidForwardView} from '../worker/src/turso-forward-view.ts';
+import {allowedGatewayRequest} from '../worker/src/gateway-policy.mjs';
+const h=s=>createHash('sha256').update(s).digest('hex');
+test('private exact-date select only, hash failure, no match or wrong date',async()=>{
+ const db=new DatabaseSync(':memory:');const factory=()=>({execute:async({sql,args})=>{assert.match(sql,/^SELECT/);return {rows:db.prepare(sql).all(...args)}},close(){}});
+ const env={TURSO_DATABASE_URL:'https://test.invalid',TURSO_AUTH_TOKEN:'fixture'},d='2026-11-25';
+ const run=p=>tursoForwardView(env,new URLSearchParams(p),factory);
+ assert.equal((await run({})).status,'NOT_AVAILABLE');
+ await assert.rejects(run({code:'000001'}),InvalidForwardView);
+ db.exec('CREATE TABLE blue_forward_ui_report_v1(asof TEXT,generated_at TEXT,payload_json TEXT,payload_sha256 TEXT); CREATE TABLE blue_forward_symbol_settlement_v1(source_day TEXT,rule_version TEXT,outcome_version TEXT,horizon INT,maturity_day TEXT,payload TEXT,payload_sha256 TEXT)');
+ const raw=JSON.stringify({schema:'BLUE_FORWARD_UI_V1',asof:d,market:[],opportunity:[]});
+ db.prepare('INSERT INTO blue_forward_ui_report_v1 VALUES(?,?,?,?)').run(d,d,raw,h(raw));assert.equal((await run({})).status,'OK');
+ const x=JSON.stringify({schema:'BLUE_FORWARD_SYMBOL_SETTLEMENT_V1',rule_version:'FORWARD_V1',outcome_version:'FORWARD_SYMBOL_EXIT_V1',source_day:d,horizon:1,maturity_day:'2026-11-27',entry_day:'2026-11-27',snapshot_rows:2,symbol_rows:[{code:'000001',market:'KOSPI',status:'OBSERVED',opportunity:{high:5},exits:{}},{code:'000002',market:'KOSPI',status:'MISSING_PATH',opportunity:null,exits:{}}]});
+ db.prepare('INSERT INTO blue_forward_symbol_settlement_v1 VALUES(?,?,?,?,?,?,?)').run(d,'FORWARD_V1','FORWARD_SYMBOL_EXIT_V1',1,'2026-11-27',gzipSync(x).toString('base64'),h(x));
+ const got=await run({code:'000001',day:d});assert.equal(got.rows.length,1);assert.equal(got.rows[0].opportunity.high,5);assert.ok(!JSON.stringify(got).includes('000002'));
+ assert.equal((await run({code:'000001',day:'2026-11-24'})).status,'NO_SEALED_MATCH');
+ db.exec("UPDATE blue_forward_symbol_settlement_v1 SET payload_sha256='bad'");await assert.rejects(run({code:'000001',day:d}),/HASH/);
+ db.close();
+});
+test('gateway GET allowed, POST denied',()=>{const u='https://blue-signal-lab.ehdud6728.workers.dev/api/research/forward-view';assert.equal(allowedGatewayRequest(new Request(u)),true);assert.equal(allowedGatewayRequest(new Request(u,{method:'POST',headers:{Origin:'https://blue-signal-lab.ehdud6728.workers.dev'}})),false)});

@@ -2,6 +2,7 @@
  * No brokerage orders, no synthetic entries or invented real-time prices.
  * Stored in this browser only until user exports/imports a backup.
  */
+import {ForwardSymbolResearch} from './ForwardResearch';
 import {useEffect,useRef,useState} from 'react';
 import {basketReadDue} from './basket-polling';
 import {Bot,Download,Upload,Trash2,RefreshCw,AlertCircle,ShoppingBasket,Bookmark,BookmarkCheck,ChevronDown} from 'lucide-react';
@@ -623,6 +624,7 @@ export default function SmartBasket({quickAddRequests,onItemsChange,onAddFeedbac
        note={it.supplyMemo||''} loading={supplyBusy.includes(it.id)}
        onFetch={()=>{if(!it.discovery)void captureSupply(it.id,it.code,it.day,it.baseline);else setMessage('잠정 발견 시점의 매물대 기록을 보존합니다.');}}
        onNoteChange={value=>setItems(old=>old.map(x=>x.id===it.id?{...x,supplyMemo:value}:x))}/>}
+     <ForwardSymbolResearch key={it.code+":"+it.day} code={it.code} day={it.day}/>
      <div className="r153-row-state" title={pr?.checked_at||''}>{state}{pr?.checked_at&&` · 최종 확인 ${new Date(pr.checked_at).toLocaleString('ko-KR')}`}</div>
      <details className="r152-record-more"><summary>메모 · 관찰 근거</summary>
        {it.source==='AI'&&<p className="basket-insight">AI 관찰 근거: {it.reason||'미기재'} · 위험: {it.risk||'미기재'}</p>}
