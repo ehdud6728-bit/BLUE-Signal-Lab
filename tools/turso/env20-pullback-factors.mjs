@@ -13,7 +13,7 @@ export function storedContext(raw,close){
  if(method==='DAILY_HL_UNIFORM_120_V2'){
   if(status==='NO_UPPER_CONCENTRATION')supply={...supply,status:'NO_UPPER_CONCENTRATION'};
   else if(status==='READY'&&Number.isFinite(ref)&&ref>close&&Number.isFinite(rel)&&rel>=25&&rel<=100&&grade===(rel>=75?'강':rel>=50?'중':'약')){
-   supply={status:'STORED_ESTIMATE',distance_pct:100*(ref/close-1),grade};
+   supply={status:'STORED_ESTIMATE',distance_pct:100*(ref/close-1),reference_price:ref,grade};
   }
  }
  return {supply};
