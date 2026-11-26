@@ -6,6 +6,7 @@ import {createSharedQuoteFetcher} from './quote-cache.mjs';
 import {mirrorQuotesToTurso,tursoMirrorEnabled} from './turso-mirror.mjs';
 import {collectTursoDirect,tursoDirectMode} from './turso-direct.mjs';
 import {collectTursoProvisional,tursoProvisionalMode} from './turso-provisional.mjs';
+import {runProvisionalWatchdog} from './provisional-watchdog.mjs';
 
 // The public HTTP surface stays health-only. An on-demand KIS quote is exposed
 // through a named, non-HTTP WorkerEntrypoint in index.mjs, not here.
@@ -14,6 +15,10 @@ export default {
     // A separate waitUntil chain: D1 quota failures in the legacy collector
     // cannot block the independently authenticated Turso-only KIS path.
     const directNow=new Date();
+    if(env.BLUE_PROVISIONAL_WATCHDOG_ENABLED==='true'){
+      const tick=Number.isFinite(_event?.scheduledTime)?new Date(_event.scheduledTime):directNow;
+      ctx.waitUntil(runProvisionalWatchdog(env,directNow,{tick}).then(r=>console.log('BLUE_PROVISIONAL_WATCHDOG '+JSON.stringify(r))).catch(()=>console.warn('BLUE_PROVISIONAL_WATCHDOG_UNAVAILABLE')));
+    }
     // The full-market provisional pass has priority over the older research
     // candidates collector: never run two independent KIS polling loops.
     if(tursoProvisionalMode(env,directNow)!=='OFF'){

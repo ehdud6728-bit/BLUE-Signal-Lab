@@ -13,11 +13,12 @@ on:
   workflow_dispatch:
     inputs:
       mode:
-        description: 'dry_run validates only; apply writes isolated provisional pattern tables'
+        description: 'dry_run validates; apply writes; recovery uses scheduled freshness and duplicate gates'
         type: choice
         options:
           - dry_run
           - apply
+          - recovery
         default: dry_run
         required: true
 concurrency:
@@ -41,6 +42,7 @@ jobs:
         env:
           TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
           TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
+          PUBLISH_RECOVERY: ${{ inputs.mode == 'recovery' }}
         run: node tools/turso/provisional-publication-gate.mjs
       - name: Export saved quotes (read only)
         if: steps.gate.outputs.ready == 'true'
@@ -56,6 +58,8 @@ jobs:
       - name: Ensure usable current-session evidence
         id: evidence
         if: steps.gate.outputs.ready == 'true'
+        env:
+          PUBLISH_RECOVERY: ${{ inputs.mode == 'recovery' }}
         run: |
           python3 - <<'PY'
           import json, os
@@ -67,7 +71,7 @@ jobs:
           print("BLUE_PROVISIONAL_EXPORT_GATE",json.dumps({"ready":ready,"eligible":n,"reason":"USABLE_QUOTES" if ready else "NO_VALID_CURRENT_SESSION_QUOTES"}))
           with open(os.environ["GITHUB_OUTPUT"],"a") as f:
               f.write("ready="+str(ready).lower()+"\n")
-          if not ready and os.environ["GITHUB_EVENT_NAME"]!="schedule":
+          if not ready and os.environ["GITHUB_EVENT_NAME"]!="schedule" and os.environ.get("PUBLISH_RECOVERY")!="true":
               raise ValueError("NO_VALID_CURRENT_SESSION_QUOTES")
           PY
       - uses: actions/setup-python@v5
@@ -127,12 +131,12 @@ jobs:
         env:
           TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
           TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
-          PUBLISH_MODE: ${{ github.event_name == 'schedule' && 'apply' || inputs.mode }}
+          PUBLISH_MODE: ${{ (github.event_name == 'schedule' || inputs.mode == 'recovery') && 'apply' || inputs.mode }}
         run: |
           set -o pipefail
           node tools/turso/provisional-pattern-publish.mjs output/provisional/result.json output/provisional/quotes.quotes.json "$PUBLISH_MODE" 2>&1 | tee output/provisional/publish.log
       - uses: actions/upload-artifact@v4
-        if: always() && github.event_name == 'workflow_dispatch' && steps.gate.outputs.ready == 'true'
+        if: always() && github.event_name == 'workflow_dispatch' && inputs.mode != 'recovery' && steps.gate.outputs.ready == 'true'
         with:
           name: provisional-publication
           path: |
