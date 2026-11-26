@@ -109,6 +109,32 @@ def probe(opener,url):
     finally:
         response.close()
 
+def cert_probe(opener, bindings):
+    # Derive the public endpoint only from the existing trusted Worker setting.
+    # No API token, JWT, key material, team domain or response body is logged.
+    team=next((b.get("text") for b in bindings if isinstance(b,dict) and b.get("type")=="plain_text" and b.get("name")=="BLUE_WEB_ACCESS_TEAM"),None) if isinstance(bindings,list) else None
+    if not isinstance(team,str) or not re.fullmatch(r"[a-z0-9-]+\.cloudflareaccess\.com",team):
+        return {"status":"NOT_CONFIGURED","keys":"UNVERIFIED"}
+    try:
+        req=urllib.request.Request(f"https://{team}/cdn-cgi/access/certs",headers={"Accept":"application/json"},method="GET")
+        with opener.open(req,timeout=10) as res:
+            code=res.code
+            raw=res.read(65537)
+            if len(raw)>65536:
+                return {"status":code,"keys":"OVERSIZE"}
+            try:
+                data=json.loads(raw)
+            except Exception:
+                return {"status":code,"keys":"INVALID_JSON"}
+            keys=data.get("keys") if isinstance(data,dict) else None
+            valid=isinstance(keys,list) and 0<len(keys)<=20
+            return {"status":code,"keys":"VALID_SET" if valid else "INVALID_SET","key_count":len(keys) if valid else 0}
+    except urllib.error.HTTPError as e:
+        e.close()
+        return {"status":e.code,"keys":"UNAVAILABLE"}
+    except Exception:
+        return {"status":"UNREACHABLE","keys":"UNAVAILABLE"}
+
 def main():
     token=os.environ.get("CLOUDFLARE_API_TOKEN","")
     account=os.environ.get("CLOUDFLARE_ACCOUNT_ID","")
@@ -135,6 +161,10 @@ def main():
             records=history(get(worker,"deployments"))
             print("BLUE_LIVE_HISTORY",worker,json.dumps(records))
             print("BLUE_LIVE_SETTINGS",worker,json.dumps(summary_bindings(worker,settings.get("bindings"))))
+            if worker==API:
+                certs=cert_probe(opener,settings.get("bindings"))
+                print("BLUE_LIVE_PUBLIC_KEY_PROBE",json.dumps(certs))
+                if certs["keys"]!="VALID_SET": errors.append(worker)
             for v in records[0]["versions"]:
                 report=version_summary(worker,get(worker,"versions/"+v["id"]),v["id"])
                 print("BLUE_LIVE_ACTIVE_VERSION",worker,json.dumps(report))

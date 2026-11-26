@@ -14,7 +14,7 @@ export async function handleVerifiedGateway(req,env,invoke,options={}){
  if(!allowedGatewayRequest(req))return errorResponse('GATEWAY_REQUEST_DENIED',403);
  if(!validAccessConfig(env.BLUE_WEB_ACCESS_TEAM,env.BLUE_WEB_ACCESS_AUD))return errorResponse('GATEWAY_ACCESS_NOT_CONFIGURED',503);
  const result=await verifyWebAccessDetailed(req.headers.get('X-Blue-Gateway-Token')??req.headers.get('Cf-Access-Jwt-Assertion'),env.BLUE_WEB_ACCESS_TEAM,env.BLUE_WEB_ACCESS_AUD,options);
- if(result!=='OK')return errorResponse('ACCESS_REQUIRED_API_'+result,401);
+ if(result!=='OK')return errorResponse('ACCESS_REQUIRED_API_'+result,result.startsWith('KEYS_')?503:401);
  const headers=new Headers();
  for(const name of ['Origin','Content-Type','Accept']){const v=req.headers.get(name);if(v!==null)headers.set(name,v);}
  return await invoke(new Request(req,{headers,redirect:'manual'}));
