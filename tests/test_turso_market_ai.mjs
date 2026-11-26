@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {DatabaseSync} from 'node:sqlite';
 import {officialMacroCalendar} from '../worker/src/official-macro-calendar.ts';
-import {buildMarketEvidence,marketPrompt,validateMarketReport,handleTursoMarketAi} from '../worker/src/turso-market-ai.ts';
+import {buildMarketEvidence,marketPrompt,validateMarketReport,handleTursoMarketAi,readMarketEodBreadth} from '../worker/src/turso-market-ai.ts';
 const now=new Date('2026-11-25T00:30:00Z'),day='2026-11-24',at='2026-11-24T16:09:00Z',proof='a'.repeat(64);
 const flow=[{day,foreign:'BUY',institution:'SELL'},{day:'2026-11-23',foreign:'BUY',institution:null}];
 function fixture(){
@@ -114,4 +114,41 @@ test('duplicate flow dates do not satisfy three-observation evidence quality',()
  assert.equal(buildMarketEvidence(input,now).facts.quality.flow_3_observations,'PARTIAL_OR_MISSING');
  for(const m of input.rotation.markets)m.flows[1]={day:'2026-11-20',foreign:'BUY',institution:'BUY'};
  assert.equal(buildMarketEvidence(input,now).facts.quality.flow_3_observations,'BOTH_MARKETS');
+});
+
+test('count-audited KRX breadth uses matched positive closes, rejects mismatched audit and reads only',async()=>{
+ const db=new DatabaseSync(':memory:');
+ db.exec('CREATE TABLE blue_eod_ingest_audit_v1(trade_day TEXT PRIMARY KEY,row_count INTEGER,source TEXT,day_sha256 TEXT); CREATE TABLE blue_eod_daily_v1(trade_day TEXT,code TEXT,market TEXT,close INTEGER,PRIMARY KEY(trade_day,code));');
+ const prior='2026-11-23';
+ for(const d of [prior,day])db.prepare('INSERT INTO blue_eod_ingest_audit_v1 VALUES(?,?,?,?)').run(d,1700,'KRX_TEST',proof);
+ const insert=db.prepare('INSERT INTO blue_eod_daily_v1 VALUES(?,?,?,?)');
+ db.exec('BEGIN');
+ for(let i=0;i<1700;i++){
+  const code=String(i).padStart(6,'0'),market=i<850?'KOSPI':'KOSDAQ';
+  insert.run(prior,code,market,100);
+  insert.run(day,code,market,i%2===0?110:90);
+ }
+ db.exec('COMMIT');
+ // Replace one prior symbol: current still has 1700 rows, but one is unmatched.
+ db.prepare('UPDATE blue_eod_daily_v1 SET code=? WHERE trade_day=? AND code=?').run('999999',prior,'000000');
+ const factory=()=>({async execute(q){assert.match(q.sql,/^WITH recent AS/);return {rows:db.prepare(q.sql).all(...q.args)};},close(){}});
+ const env={TURSO_DATABASE_URL:'libsql://test.invalid',TURSO_AUTH_TOKEN:'dummy'};
+ try{
+  const result=await readMarketEodBreadth(env,{factory,now});
+  assert.equal(result.status,'COUNT_AUDITED_EOD');
+  assert.equal(result.day,day);assert.equal(result.prior_day,prior);
+  const kospi=result.markets.find(m=>m.market==='KOSPI');
+  assert.deepEqual(kospi,{market:'KOSPI',universe:850,matched:849,up:424,down:425,flat:0,unmatched:1});
+  const e=buildMarketEvidence({...fixture(),eodBreadth:result},now);
+  assert.equal(e.facts.quality.eod_breadth,'COUNT_AUDITED_EOD');
+  assert.equal(e.facts.quality.domestic_quote_day,'UNVERIFIED');
+  assert.ok(e.refs.some(r=>r.id==='B_KOSPI'));
+  assert.equal(e.facts.eod_breadth.find(m=>m.market==='KOSPI').up_pct,49.94);
+  assert.ok(!marketPrompt(e.facts).includes('999999'));
+  db.prepare('UPDATE blue_eod_ingest_audit_v1 SET row_count=1701 WHERE trade_day=?').run(day);
+  assert.equal((await readMarketEodBreadth(env,{factory,now})).status,'UNAVAILABLE');
+  db.prepare('UPDATE blue_eod_ingest_audit_v1 SET row_count=1700 WHERE trade_day=?').run(day);
+  db.prepare('UPDATE blue_eod_daily_v1 SET close=0 WHERE trade_day=? AND code=?').run(prior,'000001');
+  assert.equal((await readMarketEodBreadth(env,{factory,now})).status,'UNAVAILABLE');
+ }finally{db.close();}
 });
