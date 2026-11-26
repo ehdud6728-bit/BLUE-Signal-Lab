@@ -1,6 +1,6 @@
 import json
 import unittest
-from tools.gateway_live_inspection import history,version_summary,summary_bindings,probe
+from tools.gateway_live_inspection import history,version_summary,summary_bindings,probe,cert_probe
 V="12345678-1234-1234-1234-123456789abc"
 GOOD={"type":"service","name":"BLUE_API","service":"blue-signal-lab-api-v2","entrypoint":"BlueWebGateway"}
 class LiveInspectionTests(unittest.TestCase):
@@ -38,4 +38,20 @@ class LiveInspectionTests(unittest.TestCase):
             out=probe(Opener(Response(code,loc)),"https://example.com/api")
             self.assertEqual(out["access"],expect)
             self.assertNotIn("secret",json.dumps(out))
+    def test_certificate_probe_sends_no_credentials_and_redacts_keys(self):
+        class Response:
+            code=200
+            def __enter__(self): return self
+            def __exit__(self,*args): pass
+            def read(self,n): return b'{"keys":[{"kid":"private-material"}]}'
+        class Opener:
+            def open(self,req,timeout):
+                assert req.get_method()=="GET"
+                assert req.get_header("Authorization") is None
+                assert req.full_url=="https://team.cloudflareaccess.com/cdn-cgi/access/certs"
+                return Response()
+        result=cert_probe(Opener(),[{"type":"plain_text","name":"BLUE_WEB_ACCESS_TEAM","text":"team.cloudflareaccess.com"}])
+        self.assertEqual(result,{"status":200,"keys":"VALID_SET","key_count":1})
+        self.assertNotIn("private-material",json.dumps(result))
+        self.assertEqual(cert_probe(Opener(),[])["status"],"NOT_CONFIGURED")
 if __name__=="__main__": unittest.main()

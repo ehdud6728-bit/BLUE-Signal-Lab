@@ -20,7 +20,7 @@ test('wrong audience, issuer, expired, future, missing and service token denied'
 });
 test('forged payload or signature denied',async()=>{const [h,p,s]=(await sign()).split('.');assert.equal((await handler(request(h+'.'+encode({...claims,sub:'attacker'})+'.'+s))).status,401);assert.equal((await handler(request(h+'.'+p+'.'+Buffer.alloc(256).toString('base64url')))).status,401);});
 test('unknown routes, cross-site writes and absent configuration fail closed',async()=>{
- const t=await sign();assert.equal((await handler(request(t,'/api/admin'))).status,403);assert.equal((await handler(request(t,'/api/research/request','POST','https://attacker.invalid'))).status,403);assert.equal((await handler(request(t),{})).status,503);assert.equal((await handler(request(t),env,{now,fetcher:async()=>new Response('',{status:503})})).status,401);
+ const t=await sign();assert.equal((await handler(request(t,'/api/admin'))).status,403);assert.equal((await handler(request(t,'/api/research/request','POST','https://attacker.invalid'))).status,403);assert.equal((await handler(request(t),{})).status,503);assert.equal((await handler(request(t),env,{now,fetcher:async()=>new Response('',{status:503})})).status,503);
 });
 test('same-origin POST forwards body only after verified token',async()=>{const r=await handler(request(await sign(),'/api/research/request','POST'),env,{now,fetcher},async req=>{assert.equal(await req.text(),'{"date":"2026-11-25"}');assert.equal(req.headers.get('Origin'),WEB_ORIGIN);return Response.json({status:'PENDING'},{status:202});});assert.equal(r.status,202);});
 test('frontend assets and API separated; no cookies, redirect or cache',async()=>{
@@ -45,5 +45,46 @@ test('first-party application cookie is verified if Access assertion is absent',
 test('diagnostic codes never include the token or its claims',async()=>{
  const missing=await handler(request(null));assert.equal((await missing.json()).error,'ACCESS_REQUIRED_API_TOKEN_MISSING');
  const wrong=await handler(request(await sign({aud:['b'.repeat(64)]})));assert.equal((await wrong.json()).error,'ACCESS_REQUIRED_API_AUDIENCE_MISMATCH');
- const keys=await handler(request(await sign()),env,{now,fetcher:async()=>new Response('',{status:503})});assert.equal((await keys.json()).error,'ACCESS_REQUIRED_API_KEYS_UNAVAILABLE');
+ const keys=await handler(request(await sign()),env,{now,fetcher:async()=>new Response('',{status:503})});assert.equal(keys.status,503);assert.equal((await keys.json()).error,'ACCESS_REQUIRED_API_KEYS_HTTP_503');
+});
+
+test('transient key service failure retries and succeeds only after signature verification',async()=>{
+ let calls=0;
+ const fetcher=async()=>++calls===1?new Response('',{status:503}):Response.json({keys:[key]});
+ assert.equal((await handler(request(await sign()),env,{now,fetcher})).status,200);
+ assert.equal(calls,2);
+});
+test('public key cache is issuer scoped, expires, and never accepts expired cache on outage',async()=>{
+ let calls=0,clockNow=now,available=true;
+ const cache=new Map(),clock=()=>clockNow,fetcher=async()=>{calls++;return available?Response.json({keys:[key]}):new Response('',{status:503});};
+ const options={now,fetcher,cache,clock};const t=await sign();
+ assert.equal((await handler(request(t),env,options)).status,200);
+ assert.equal((await handler(request(t),env,options)).status,200);
+ assert.equal(calls,1);
+ const wrongTeam='other.cloudflareaccess.com',otherEnv={...env,BLUE_WEB_ACCESS_TEAM:wrongTeam};
+ assert.equal((await handler(request(await sign({iss:'https://'+wrongTeam})),otherEnv,options)).status,200);
+ assert.equal(calls,2);
+ clockNow+=120001;available=false;
+ const failed=await handler(request(t),env,options);
+ assert.equal(failed.status,503);assert.equal((await failed.json()).error,'ACCESS_REQUIRED_API_KEYS_HTTP_503');
+ assert.equal(calls,4);
+});
+test('unknown signing kid refreshes the public key set; no signature bypass',async()=>{
+ let calls=0;
+ const cache=new Map(),fetcher=async()=>{calls++;return Response.json({keys:[calls===1?key:{...key,kid:'key2'}]});};
+ const options={now,fetcher,cache};
+ assert.equal((await handler(request(await sign()),env,options)).status,200);
+ assert.equal((await handler(request(await sign({}, {kid:'key2'})),env,options)).status,200);
+ assert.equal(calls,2);
+ const [h,p]= (await sign({}, {kid:'key2'})).split('.');
+ assert.equal((await handler(request(h+'.'+p+'.'+Buffer.alloc(256).toString('base64url')),env,options)).status,401);
+});
+test('permanent key service failures are distinguished and cannot authenticate',async()=>{
+ const t=await sign();
+ for(const [response,code] of [[()=>new Response('',{status:403}),'KEYS_HTTP_403'],[()=>new Response(null,{status:302,headers:{Location:'https://other.invalid'}}),'KEYS_HTTP_302'],[()=>new Response('not JSON'),'KEYS_INVALID_JSON'],[()=>Response.json({keys:[]}),'KEYS_INVALID_SET']]){
+  let calls=0;const r=await handler(request(t),env,{now,fetcher:async()=>{calls++;return response();}});
+  assert.equal(r.status,503);assert.equal((await r.json()).error,'ACCESS_REQUIRED_API_'+code);assert.equal(calls,1);
+ }
+ const r=await handler(request(t),env,{now,fetcher:async()=>{throw Object.assign(new Error('private'),{name:'TimeoutError'});}});
+ assert.equal(r.status,503);assert.equal((await r.json()).error,'ACCESS_REQUIRED_API_KEYS_TIMEOUT');
 });
