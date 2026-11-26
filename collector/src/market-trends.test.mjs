@@ -38,3 +38,12 @@ test('global-only inspect retries at most ten overseas calls without domestic re
  return new Response(JSON.stringify({rt_cd:'0',output1:s.startsWith('.')?{}:{stck_shrn_iscd:s},output2:[{stck_bsop_date:'20261120',ovrs_nmix_prpr:'100'},{stck_bsop_date:'20261123',ovrs_nmix_prpr:'102'}]}));}});
  assert.equal(r.scope,'GLOBAL_ONLY');assert.equal(r.kis_calls,10);assert.equal(requests.length,10);assert.ok(r.global.every(x=>x.status==='AVAILABLE'));
 });
+
+test('benchmark inspect fetches only two domestic benchmarks, no writes or token issuance',async()=>{
+ const calls=[],queries=[];
+ const r=await captureTrends({TURSO_DATABASE_URL:'libsql://test.invalid',TURSO_AUTH_TOKEN:'fake'},{mode:'benchmark_inspect',now:new Date('2026-11-26T04:00:00Z'),
+ factory:()=>({execute(q){queries.push(q.sql);assert.match(q.sql,/^WITH audits/);return {rows:[]};},close(){}}),token:async()=>({token:'fake'}),wait:async()=>{},
+ fetchFn:async u=>{assert.match(u.pathname,/domestic-stock/);const s=u.searchParams.get('FID_INPUT_ISCD');calls.push(s);
+ return new Response(JSON.stringify({rt_cd:'0',output1:{bstp_cls_code:s},output2:base.map(x=>({stck_bsop_date:x.day.replaceAll('-',''),bstp_nmix_prpr:String(x.close)}))}));}});
+ assert.deepEqual(calls,['0001','1001']);assert.equal(queries.length,1);assert.equal(r.status,'INSPECT_ONLY');assert.equal(r.turso_writes,0);assert.equal(r.markets[0].latest.state,'UNKNOWN');assert.equal(r.markets[0].latest.index_trend,'UP');
+});

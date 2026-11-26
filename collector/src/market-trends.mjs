@@ -5,6 +5,7 @@ import {createClient} from '@libsql/client';
 import {tursoDirectCachedToken} from './turso-direct.mjs';
 import {pathToFileURL} from 'node:url';
 import {createHash} from 'node:crypto';
+import {readBenchmarkEvidence,inspectBenchmark} from './market-trends-regime.mjs';
 const HOST='https://openapi.koreainvestment.com:9443';
 const GLOBAL=[['.DJI','Dow Jones'],['.NDX','NASDAQ 100'],['.SPX','S&P 500'],['.SOX','Philadelphia Semiconductor'],['.VIX','VIX']];
 const markets=[['KOSPI','0001'],['KOSDAQ','1001']];
@@ -81,7 +82,7 @@ export function globalSummary(series){
 }
 export async function captureTrends(env=process.env,{mode='plan',now=new Date(),factory=createClient,token=tursoDirectCachedToken,fetchFn=fetch,wait=pause}={}){
   if(mode==='plan')return {status:'PLAN_ONLY',kis_calls:0,turso_writes:0};
-  if(!['inspect','apply','global_inspect','global_apply'].includes(mode))throw Error('INVALID_TREND_MODE');
+  if(!['inspect','apply','global_inspect','global_apply','benchmark_inspect'].includes(mode))throw Error('INVALID_TREND_MODE');
   const globalOnly=mode.startsWith('global_');
   const url=String(env.TURSO_DATABASE_URL||''),authToken=String(env.TURSO_AUTH_TOKEN||'');
   if(!/^(libsql|https):\/\//.test(url)||!authToken)throw Error('TREND_DB_NOT_CONFIGURED');
@@ -116,6 +117,15 @@ export async function captureTrends(env=process.env,{mode='plan',now=new Date(),
     const safe=async(expected,overseas=false)=>{try{return {series:await get(expected,overseas),reason:null};}
       catch(e){if(['TREND_PROVIDER_STOP','TREND_CALL_CAP'].includes(e?.message))throw e;
         return {series:[],reason:/^HISTORY_[A-Z_]+$/.test(e?.message||'')?e.message:'HISTORY_UNAVAILABLE'};}};
+    if(mode==='benchmark_inspect'){
+      const evidence=await readBenchmarkEvidence(db,start,end);
+      const results=[];
+      for(const [market,benchmarkCode] of markets){
+        const r=await safe(benchmarkCode);
+        results.push({...inspectBenchmark(r.series,market,evidence,end),reason:r.reason});
+      }
+      return {status:results.every(r=>r.observations>=25)?'INSPECT_ONLY':'BENCHMARK_HISTORY_INSUFFICIENT',scope:'DOMESTIC_BENCHMARK_ONLY',kis_calls:calls,turso_writes:0,cutoff:end,markets:results,limits:['RESEARCH_RULE_NOT_VALIDATED','EXACT_DATE_ALIGNMENT_FOR_BREADTH_ONLY','NO_INDEPENDENT_KIS_INDEX_SOURCE_CHECK','NO_CALENDAR_OR_CORPORATE_ACTION_VERIFICATION','NO_PREDICTION_ACCURACY_CLAIM','NO_RAW_INDEX_PRICES_PUBLISHED']};
+    }
     const global=[];
     for(const [symbol,name] of GLOBAL){
       // Official examples include a leading dot, whereas HTS uses bare symbols.
