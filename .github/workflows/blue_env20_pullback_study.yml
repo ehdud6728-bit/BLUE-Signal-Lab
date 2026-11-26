@@ -5,6 +5,8 @@ on:
     paths:
       - 'research/env20_pullback_study.py'
       - 'research/env20_structural_entry.py'
+      - 'research/env20_confluence_entry.py'
+      - 'research/test_env20_confluence_entry.py'
       - 'research/test_env20_structural_entry.py'
       - 'research/env20_pullback_context.py'
       - 'tools/turso/env20-pullback-factors.test.mjs'
@@ -32,6 +34,7 @@ jobs:
           node --test tools/turso/env20-pullback-factors.test.mjs tools/turso/combined-pattern-factors.test.mjs tools/turso/full-universe-export.test.mjs collector/src/market-trends-regime.test.mjs
           python3 research/test_env20_pullback_study.py
           python3 research/test_env20_structural_entry.py
+          python3 research/test_env20_confluence_entry.py
       - name: Read audited source and compare fixed pullback rules
         if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.repository == 'ehdud6728-bit/BLUE-Signal-Lab'
         env:
@@ -45,11 +48,11 @@ jobs:
           node tools/turso/full-universe-export.mjs
           node collector/src/market-trends.mjs benchmark_inspect
           node tools/turso/env20-pullback-factors.mjs
-          python3 research/env20_structural_entry.py --source output/full-universe/source.json --benchmark output/full-universe/benchmark.json --factors output/full-universe/pullback-factors.json --out output/full-universe/pullback-report.json
+          python3 research/env20_confluence_entry.py --source output/full-universe/source.json --benchmark output/full-universe/benchmark.json --factors output/full-universe/pullback-factors.json --out output/full-universe/pullback-report.json
       - uses: actions/upload-artifact@v4
         if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.repository == 'ehdud6728-bit/BLUE-Signal-Lab'
         with:
-          name: BLUE_ENV20_STRUCTURAL_HIGH_V3
+          name: BLUE_ENV20_CONFLUENCE_HIGH_V4
           path: output/full-universe/pullback-report.json
           if-no-files-found: error
           retention-days: 14
