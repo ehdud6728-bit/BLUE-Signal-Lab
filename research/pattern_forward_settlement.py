@@ -7,8 +7,9 @@ from pathlib import Path
 from datetime import datetime
 from pattern_performance_forward import indexed,observe_high,summarize_high,VERSION,HORIZONS,KST,OPPORTUNITY_VERSION
 from pattern_performance_full_universe import check
+import pattern_forward_symbol_exit as sx
 SCHEMA="BLUE_FORWARD_SETTLEMENT_V1"
-def settlements(src,bench,ledger):
+def settlements(src,bench,ledger,*,symbol_records=None):
     days,meta,bars,indexes,states,old=indexed(src,bench)
     records=[];reasons=Counter();seen=set()
     for s in ledger:
@@ -34,7 +35,7 @@ def settlements(src,bench,ledger):
             span=[x for x in days if d<x<=end]
             if a!=b or any([x for x in ds if d<x<=end]!=span for ds in indexes.values()) or any(x not in meta for x in a):
                 reasons["DATE_ALIGNMENT_BLOCKED"]+=1;continue
-            groups=defaultdict(list);events=[];counts=Counter()
+            groups=defaultdict(list);events=[];counts=Counter();detail=[];exit_groups=defaultdict(list)
             for r in s["rows"]:
                 c=r["code"];scope=r["market"]
                 check(scope in indexes,"BAD_MARKET")
@@ -45,6 +46,9 @@ def settlements(src,bench,ledger):
                 evt=(d,c,opp,status);events.append(evt);counts[status]+=1
                 keys=set([("BASELINE","ALL"),("LEGACY",r["legacy"]),*((k,str(v)) for k,v in r["features"].items() if v is not None),*(("LEGACY_PATTERN",x) for x in r["legacy_names"])])
                 for k,v in keys:groups[scope,r["state"],r["prior"],k,v].append(evt)
+                if symbol_records is not None:
+                    item=sx.evaluate(s,r,bars,indexes,path,opp);detail.append(item)
+                    for k,v in keys:exit_groups[scope,r["state"],r["prior"],k,v].append(item)
             if not counts["OBSERVED"]:
                 reasons["NO_OBSERVED_SYMBOLS"]+=1;continue
             # Sealed payload stable across repeated reads; no run time/asof inside.
@@ -55,13 +59,21 @@ def settlements(src,bench,ledger):
                 coverage="COMPLETE_SYMBOL_PATHS" if not counts["MISSING_PATH"] else "PARTIAL_SYMBOL_PATHS",
                 pooled=summarize_high(events),
                 groups=[dict(market=m,market_state=st,prior_direction=p,feature=k,value=v,**summarize_high(es)) for (m,st,p,k,v),es in sorted(groups.items())])
+            if symbol_records is not None:
+                symbol_records.append({**rec,"schema":sx.SCHEMA,"outcome_version":sx.VERSION,
+                    "symbol_rows":[sx.serialize(x) for x in detail],
+                    "exit_summary":sx.summarize(detail),
+                    "exit_groups":[dict(market=m,market_state=st,prior_direction=p,feature=k,value=v,**sx.summarize(es)) for (m,st,p,k,v),es in sorted(exit_groups.items())]})
             records.append(rec);reasons["ELIGIBLE_COMPLETE" if not counts["MISSING_PATH"] else "ELIGIBLE_PARTIAL"]+=1
     return dict(schema="BLUE_FORWARD_SETTLEMENT_BATCH_V1",asof=days[-1],records=records,diagnostics=dict(reasons))
 def main():
     p=argparse.ArgumentParser()
     for k in ("source","benchmark","ledger","out"):p.add_argument("--"+k,type=Path,required=True)
+    p.add_argument("--symbol-out",type=Path)
     a=p.parse_args();read=lambda p:json.loads(p.read_text())
-    r=settlements(read(a.source),read(a.benchmark),read(a.ledger))
+    detail=[] if a.symbol_out else None
+    r=settlements(read(a.source),read(a.benchmark),read(a.ledger),symbol_records=detail)
+    if a.symbol_out:a.symbol_out.write_text(json.dumps(dict(schema="BLUE_FORWARD_SYMBOL_SETTLEMENT_BATCH_V1",asof=r["asof"],records=detail,diagnostics=r["diagnostics"]),ensure_ascii=False,allow_nan=False,sort_keys=True,separators=(",",":"))+"\n")
     a.out.write_text(json.dumps(r,ensure_ascii=False,allow_nan=False,sort_keys=True,separators=(",",":"))+"\n")
     print("BLUE_FORWARD_SETTLEMENT_PLAN",json.dumps(dict(asof=r["asof"],eligible=len(r["records"]),diagnostics=r["diagnostics"])))
 if __name__=="__main__":main()
