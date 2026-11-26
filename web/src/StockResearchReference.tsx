@@ -22,15 +22,17 @@ export default function StockResearchReference({day,signals,features,provisional
  const {profits,high,retrospective}=selectStockResearch({day,asof:RECENT_ASOF,signals,features,profit,profiles,allowRetrospective:!provisional});
  const combined=selectCombinedRows(signals,features,extras,provisional);
  const synthesis=synthesizeStockResearch(profits,high,tomato,recent,validated,combined.flatMap(x=>x.joint?[{
-  label:patternLabel(x.base),status:x.joint.research_status,n:x.joint.all.n,
+  label:patternLabel(x.base),status:x.joint.research_status,n:x.joint.all.n,dates:x.joint.all.dates,stocks:x.joint.all.stocks,
   mean:x.joint.all.mean_pct,median:x.joint.all.median_pct,profitFactor:x.joint.all.profile?.profit_factor??null
  }]:[]));
- if(!profits.length&&!high.length&&!tomato&&!recent&&!validated&&!combined.length)return null;
  const context=stockObservationContext(extras,referencePrice);
  return <div className="sr-context-wrap">
  <div className="sr-context" aria-label="신호일 관측 요약">
  <strong>신호일 종합 관찰 · {provisional?'잠정':'확정'}</strong>
- <small>{day} · {synthesis.label}{retrospective?' · 사후 연구 참고':''}</small>
+ <small>{day} · {retrospective?'사후 연구 참고 · ':''}신호 시점 자료</small>
+ <h4 className="sr-headline">{context.headline}</h4>
+ <p>{context.explanation}</p>
+ <div className="sr-verdict"><strong>{synthesis.label}</strong><p>{synthesis.opposing?'서로 다른 과거 연구의 성과가 상충합니다.':synthesis.risk.length?'과거 손실 관측과 분포를 확인하세요.':synthesis.positive.length?'과거 관측이며 현재 상승 예측은 아닙니다.':'충분한 일치·검증 자료가 없습니다.'}</p></div>
  <div className="sr-context-grid">
  <span>이평 배열 <b>{context.trend}</b></span>
  <span>거래대금/20일 평균 <b>{context.turnover}</b></span>
@@ -40,7 +42,8 @@ export default function StockResearchReference({day,signals,features,provisional
  <small>{context.momentum}</small>
  {context.supply?.distancePct!=null&&<small>신호일 기준가격 대비 매물대 기준가 {fmt(context.supply.distancePct)} · 실제 매도잔량 아님</small>}
  <p>{[...(provisional?['확정 일봉에서 조건 유지 확인']:[]),...context.checks].join(' · ')||'추가 확인: 신호 유지와 손실 위험'}.</p>
- <small>과거 연구와 당시 관측의 요약 · 현재가 예측이나 매수 추천 아님</small>
+ <div className="sr-scenarios"><strong>상황별 확인 관점</strong>{context.scenarios.map(t=><p key={t}>{t}</p>)}</div>
+ <small>과거 연구와 당시 관측의 요약 · 현재가 예측이나 매수 추천 아님 · 실시간 시세·시장 국면 미연동</small>
  </div>
  <details className="sr-reference" open={open} onToggle={e=>setOpen(e.currentTarget.open)} onClick={e=>e.stopPropagation()}>
  <summary><span>연구 종합 해석</span><small>{synthesis.label} · 상세 보기</small></summary>

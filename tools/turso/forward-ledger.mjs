@@ -21,10 +21,15 @@ export function unpack(r){
  check(s.source_day===r.source_day&&s.rule_version===r.rule_version&&s.captured_at===r.captured_at&&s.schema==='BLUE_FORWARD_CANDIDATE_V1'&&Array.isArray(s.rows),'FORWARD_METADATA_MISMATCH');
  return s;
 }
-export async function runLedger(db,candidate,{mode='inspect',confirm='',now=new Date()}={}){
+export async function runLedger(db,candidate,{mode='inspect',confirm='',now=new Date(),scheduled=false}={}){
  check(['inspect','apply'].includes(mode),'FORWARD_BAD_MODE');
  check(mode!=='apply'||confirm==='blue-forward-capture-v1','FORWARD_CONFIRM_REQUIRED');
  check(candidate.schema==='BLUE_FORWARD_CANDIDATE_V1'&&candidate.rule_version===VERSION&&candidate.cutoff===previous(now)&&candidate.source_day<day(now)&&/^[a-f0-9]{40}$/.test(candidate.rule_commit)&&Array.isArray(candidate.rows)&&candidate.rows.length>=1700&&candidate.rows.length<=10000&&new Set(candidate.rows.map(r=>r.code)).size===candidate.rows.length,'FORWARD_BAD_CANDIDATE');
+ // Scheduled capture may not silently backfill an older observation or mislabel a holiday.
+ if(scheduled){
+  check(mode==='apply'&&confirm==='blue-forward-capture-v1','FORWARD_SCHEDULE_NOT_AUTHORIZED');
+  if(candidate.source_day!==previous(now))return {status:'SCHEDULE_NO_EXACT_PRIOR_DAY',ledger:[]};
+ }
  let exists=(await db.execute({sql:"SELECT name FROM sqlite_master WHERE type='table' AND name=?",args:[TABLE]})).rows.length>0;
  let status='INSPECT_ONLY';
  if(mode==='apply'){
@@ -51,7 +56,8 @@ async function main(){
  const db=createClient({url,authToken,intMode:'string'});
  try{
   const candidate=JSON.parse(await readFile('output/forward/candidate.json','utf8'));
-  const r=await runLedger(db,candidate,{mode,confirm});
+  const r=await runLedger(db,candidate,{mode,confirm,scheduled:process.env.FORWARD_SCHEDULED==='true'});
+  if(r.status==='SCHEDULE_NO_EXACT_PRIOR_DAY')throw Error('FORWARD_SCHEDULE_NO_EXACT_PRIOR_DAY');
   await writeFile('output/forward/ledger.json',JSON.stringify(r.ledger)+'\n');
   console.log('BLUE_FORWARD_LEDGER',JSON.stringify({status:r.status,snapshots:r.ledger.length,source_day:candidate.source_day,rule_version:VERSION}));
  }finally{db.close();}
