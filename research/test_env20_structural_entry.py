@@ -35,5 +35,7 @@ class Structural(unittest.TestCase):
         self.assertEqual(len(a),3);self.assertTrue(all(x["eligible_signals"]==1 for x in a))
         self.assertEqual(next(x for x in a if x["entry"]=="LIMIT")["entered"],0)
         self.assertEqual(next(x for x in a if x["entry"]=="IMMEDIATE")["entered"],1)
-        self.assertTrue(any(x["key"]==["ENTRY_WINDOW","20","PENDING"] for x in r["coverage"]))
+        self.assertTrue(all(isinstance(x["key"],list) for x in r["coverage"]))
+        self.assertEqual([x for x in r["coverage"] if x["key"]==["ENTRY_WINDOW","20","PENDING"]],[{"key":["ENTRY_WINDOW","20","PENDING"],"count":1}])
+        self.assertFalse(any(x["basis"]=="ENTRY_WINDOW" and x["horizon"]==20 for x in r["rows"]))
 if __name__=="__main__":unittest.main()

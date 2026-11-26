@@ -148,7 +148,7 @@ def study(src,bench,factors):
         rows.append(dict(basis=basis,horizon=h,phase=part,context_feature=f,context_value=v,level=name,entry=mode,**summarize(events)))
     return dict(schema="BLUE_ENV20_STRUCTURAL_HIGH_V3",asof=days[-1],source_days=len(days),inverse_chart_match_signals=cohort,split_day=split,wait_sessions=WAIT,
         level_coverage=[dict(level=k,status=s,count=n) for (k,s),n in sorted(level_counts.items())],
-        coverage=[dict(key=k if isinstance(k,tuple) else [k],count=n) for k,n in sorted(coverage.items(),key=lambda x:str(x[0]))],
+        coverage=[dict(key=list(k) if isinstance(k,tuple) else [k],count=n) for k,n in sorted(coverage.items(),key=lambda x:str(x[0]))],
         rows=rows,limits=["HIGH_OPPORTUNITY_NOT_REALIZED_RETURN","LEVELS_FROZEN_AT_SIGNAL_CLOSE","ENTRY_WINDOW_REQUIRES_COMMON_H_PLUS_5_FULL_PATH","INTRADAY_ENTRY_HIGH_BOUNDED","NO_STOP_OR_COST_IN_OPPORTUNITY","STORED_MA_CHART_NOT_INDEPENDENT_PROOF","NO_VERIFIED_LOWER_VOLUME_PROFILE","STORED_OVERHEAD_ESTIMATE_CONTEXT_ONLY","NO_CORPORATE_ACTION_OR_INDEPENDENT_CALENDAR_PROOF","DEPENDENT_EVENTS_MULTIPLE_COMPARISONS","NO_PROMOTION"])
 def main():
     p=argparse.ArgumentParser()
