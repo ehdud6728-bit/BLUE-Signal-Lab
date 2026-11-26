@@ -47,7 +47,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
         with:
-          name: BLUE_TOMATO_CONTEXT_HIGH_V5
+          name: BLUE_TOMATO_CONTEXT_HIGH_V6
           path: output/tomato/report.json
           if-no-files-found: error
           retention-days: 14

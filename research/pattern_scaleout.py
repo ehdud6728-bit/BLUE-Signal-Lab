@@ -13,7 +13,18 @@ POLICIES={
     "40_30_30_ATR_TRAIL":(((1,40),(2,30)),"ATR"),
     "30_30_40_ATR_TRAIL":(((1,30),(2,30)),"ATR"),
 }
-METHODS=("ATR14_SMA_1_5","SIGNAL_LOW")
+# Predeclared simple profit controls independent of initial technical risk.
+POLICIES.update({
+    "FULL_2P":(((2,100),),"NONE"),
+    "FULL_3P":(((3,100),),"NONE"),
+    "FULL_4P":(((4,100),),"NONE"),
+    "FULL_5P":(((5,100),),"NONE"),
+    "FULL_7P":(((7,100),),"NONE"),
+    "70_30_3P_5P":(((3,70),(5,30)),"NONE"),
+    "HALF_3P_ATR_TRAIL":(((3,50),),"ATR"),
+})
+PERCENT_POLICIES=("FULL_2P","FULL_3P","FULL_4P","FULL_5P","FULL_7P","70_30_3P_5P","HALF_3P_ATR_TRAIL")
+METHODS=("ATR14_SMA_1_5","SIGNAL_LOW","CONFIRMED_SWING_LOW_10")
 
 def simulate(path,initial_stop,atr,policy):
     """Known opening first; inside-open dual touch uses stop-first, flagged.
@@ -24,7 +35,8 @@ def simulate(path,initial_stop,atr,policy):
     entry=F(path[0]["open"]);stop=F(initial_stop);atr=F(atr)
     if not 0<stop<entry or atr<=0:raise ValueError("INVALID_LEVELS")
     orders,trail=POLICIES[policy];risk=entry-stop
-    targets=[(entry+r*risk,w) for r,w in orders]
+    unit=entry/100 if policy in PERCENT_POLICIES else risk
+    targets=[(entry+r*unit,w) for r,w in orders]
     remaining=100;idx=0;proceeds=F(0);fills=[];ambiguous=0;peak=entry
     def sell(day,qty,price,reason):
         nonlocal remaining,proceeds
@@ -86,11 +98,22 @@ def summarize(events,method):
         deltas=[v[k]["ret"]-v["FULL_1R"]["ret"] for _,_,v in ready]
         gain=sum(x for x in a if x>0);loss=-sum(x for x in a if x<0)
         tails=sorted(a)[:max(1,(n+19)//20)] if n else []
-        captures=[v["capture"] for v in results if v["capture"] is not None]
+        captures=[v["capture"] for v in results if v["capture"] is not None] # legacy diagnostic only
+        # Ratio of sums on positive-opportunity cases; unlike mean individual ratios,
+        # one near-zero peak cannot dominate. Negative returns are not clipped.
+        positive_peak=[v for v in results if v["peak"]>0]
+        peak_sum=sum(v["peak"] for v in positive_peak)
+        delta3=[v[k]["ret"]-v["FULL_3P"]["ret"] for _,_,v in ready]
+        delta5=[v[k]["ret"]-v["FULL_5P"]["ret"] for _,_,v in ready]
         policies[k]=dict(mean_pct=avg(a),median_pct=rnd(median(a)) if n else None,
             positive_count=sum(x>0 for x in a),profit_factor=rnd(gain/loss) if loss else None,
             tail5_mean_pct=avg(tails),mean_peak_capture_pct=avg(captures),peak_capture_n=len(captures),
+            aggregate_positive_peak_capture_pct=rnd(100*sum(v["ret"] for v in positive_peak)/peak_sum) if peak_sum else None,
+            mean_peak_minus_exit_pp=avg([v["peak"]-v["ret"] for v in results]),
             first_target_count=sum(v["first_target"] for v in results),
+            complete_target_exit_count=sum(v["reason"]=="TARGET" for v in results),
+            paired_delta_vs_full_3p_pp=avg(delta3),paired_better_vs_full_3p_count=sum(x>0 for x in delta3),paired_worse_vs_full_3p_count=sum(x<0 for x in delta3),
+            paired_delta_vs_full_5p_pp=avg(delta5),paired_better_vs_full_5p_count=sum(x>0 for x in delta5),paired_worse_vs_full_5p_count=sum(x<0 for x in delta5),
             ambiguous_count=sum(v["ambiguous"]>0 for v in results),
             gap_stop_count=sum(v["gap_stop"] for v in results),
             mean_exit_day=avg([v["exit_day"] for v in results]),
