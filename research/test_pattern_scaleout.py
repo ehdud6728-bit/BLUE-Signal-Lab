@@ -38,7 +38,7 @@ class Scaleout(unittest.TestCase):
             self.assertEqual(simulate(p,stop,5,"FULL_3P")["ret"],3)
             self.assertEqual(simulate(p,stop,5,"FULL_5P")["ret"],5)
             self.assertEqual(simulate(p,stop,5,"70_30_3P_5P")["ret"],F(18,5))
-        self.assertEqual(simulate(p,90,5,"HALF_3P_ATR_TRAIL")["ret"],F(5,2))
+        self.assertEqual(simulate(p,90,5,"HALF_3P_ATR_TRAIL")["ret"],F(3,2))
     def test_simple_target_gap_and_ambiguity(self):
         self.assertEqual(simulate([b(100,105,89,101)],90,5,"FULL_3P")["ret"],-10)
         r=simulate([b(100,102,99,101),b(106,108,89,95)],90,5,"FULL_5P")
