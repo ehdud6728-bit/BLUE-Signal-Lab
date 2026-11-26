@@ -1,0 +1,64 @@
+name: BLUE Forward Observation (INSPECT / EXPLICIT CAPTURE)
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        type: choice
+        options: [inspect, apply]
+        default: inspect
+        required: true
+      confirm:
+        description: 'Only for apply: blue-forward-capture-v1'
+        type: string
+        default: ''
+  pull_request:
+    paths:
+      - 'research/pattern_performance_forward.py'
+      - 'research/test_pattern_performance_forward.py'
+      - 'tools/turso/forward-ledger*'
+      - '.github/workflows/blue_forward_observation.yml'
+permissions:
+  contents: read
+concurrency:
+  group: blue-forward-observation
+  cancel-in-progress: false
+jobs:
+  study:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm install --prefix tools/turso --no-audit --no-fund --ignore-scripts --no-package-lock
+      - run: npm install --prefix collector --no-audit --no-fund --ignore-scripts --no-package-lock
+      - name: Offline tests
+        run: |
+          node --test tools/turso/forward-ledger.test.mjs tools/turso/full-universe-export.test.mjs collector/src/market-trends-regime.test.mjs
+          python3 research/test_pattern_performance_forward.py
+      - name: Guard and read audited universe
+        if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.repository == 'ehdud6728-bit/BLUE-Signal-Lab'
+        env:
+          MODE: ${{ inputs.mode }}
+          CONFIRM: ${{ inputs.confirm }}
+          TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
+          TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
+          KIS_APP_KEY: ${{ secrets.KIS_APP_KEY }}
+          KIS_APP_SECRET: ${{ secrets.KIS_APP_SECRET }}
+          BLUE_BENCHMARK_STATE_FILE: output/full-universe/benchmark.json
+        run: |
+          set -euo pipefail
+          if [ "$MODE" = apply ]; then test "$CONFIRM" = blue-forward-capture-v1; else test "$MODE" = inspect; fi
+          node tools/turso/full-universe-export.mjs
+          node collector/src/market-trends.mjs benchmark_inspect
+          python3 research/pattern_performance_forward.py --phase candidate --commit "$GITHUB_SHA" --source output/full-universe/source.json --benchmark output/full-universe/benchmark.json --out output/forward/candidate.json
+          node tools/turso/forward-ledger.mjs
+          python3 research/pattern_performance_forward.py --phase score --source output/full-universe/source.json --benchmark output/full-universe/benchmark.json --ledger output/forward/ledger.json --out output/forward/report.json
+      - uses: actions/upload-artifact@v4
+        if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.repository == 'ehdud6728-bit/BLUE-Signal-Lab'
+        with:
+          name: BLUE_FORWARD_OBSERVATION
+          path: output/forward/report.json
+          if-no-files-found: error
+          retention-days: 14
