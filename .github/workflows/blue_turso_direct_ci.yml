@@ -22,6 +22,9 @@ on:
       - '.github/workflows/blue_turso_primary_readiness.yml'
       - 'docs/TURSO_PRIMARY_DEPENDENCY_INVENTORY.md'
       - 'collector/src/handler.mjs'
+      - 'collector/src/provisional-watchdog.mjs'
+      - 'collector/src/provisional-publication-gate.mjs'
+      - 'collector/provisional-watchdog.test.mjs'
       - 'collector/turso-direct.test.mjs'
       - 'worker/src/index.ts'
       - 'web/src/main.tsx'
@@ -87,6 +90,8 @@ jobs:
         run: npm install --no-audit --no-fund --ignore-scripts --no-package-lock
       - name: Test shared token vault, D1 fallback and collector safety
         run: node --test collector/turso-direct.test.mjs collector/turso-provisional.test.mjs collector/test/turso-instant.test.mjs collector/test/turso-mirror.test.mjs tools/turso/kis-token-steward.test.mjs tools/turso/d1-token-backup.test.mjs tools/turso/quote-parity-audit.test.mjs tools/turso/primary-readiness-audit.test.mjs tools/turso/provisional-fallback-gate.test.mjs
+      - name: Test independent provisional publisher recovery (synthetic only)
+        run: node --test collector/provisional-watchdog.test.mjs tools/turso/provisional-publication-gate.test.mjs
       - name: Test Cloudflare read-only settings sanitizer
         run: node --test tools/turso/collector-runtime-settings-audit.test.mjs
       - name: Test browser Turso-only manual refresh without D1 fallback
