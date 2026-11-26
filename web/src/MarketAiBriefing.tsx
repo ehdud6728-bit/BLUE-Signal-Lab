@@ -1,3 +1,4 @@
+import {ForwardMarketResearch} from './ForwardResearch';
 import {useEffect,useRef,useState} from 'react';
 type Ref={id:string;label:string;detail:string};
 type Part={text:string;refs:string[]};
@@ -32,6 +33,7 @@ export default function MarketAiBriefing({api,revision=0}:{api:string;revision?:
  const part=(label:string,p:Part)=><div className="blue-research-card"><strong>{label}</strong><p style={{whiteSpace:'pre-wrap'}}>{replaceIds(p.text)}</p><Evidence ids={p.refs} refs={refs}/></div>;
  return <section className="blue-research-card">
  <div className="blue-pattern-heading"><strong>BLUE AI 종합 시황 · 대응 전망</strong><button type="button" disabled={busy} onClick={()=>void load('GET')}>저장 분석 확인</button></div>
+ <ForwardMarketResearch compact/>
  <small>Gemini 생성형 분석 · Turso 자료 기반 · 하루 최대 {data?.daily_limit??5}회 신규 분석 · 같은 근거는 재사용</small>
  <p>시장 방향, 외국인·기관 수급, VIX 및 해외 일봉, 개선 업종과 대장주·후발주 후보를 연결해 설명합니다. 생성 버튼을 누르면 가공된 시장·기술신호 요약을 Gemini에 전송합니다. 종목명과 코드는 보내지 않고 화면에서만 연결합니다.</p>
  {data?.quality&&<div className="blue-research-card">

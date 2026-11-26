@@ -1,3 +1,4 @@
+import {ForwardSymbolResearch} from './ForwardResearch';
 import {useState} from 'react';
 import {RECENT_ASOF} from './recent-pattern-data';
 import {PROFITABILITY_DATA} from './research-profitability-data';
@@ -17,7 +18,7 @@ const fmt=(v:number|null)=>v==null||!Number.isFinite(v)?'—':(v>0?'+':'')+v.toF
 const pct=(v:number|null)=>v==null||!Number.isFinite(v)?'—':v.toFixed(1)+'%';
 const ratio=(v:number|null)=>v==null||!Number.isFinite(v)?'—':v.toFixed(2);
 const status:Record<string,string>={HOLDOUT_AGREES_EXPLORATORY:'후속 방향 일치 · 탐색',INSUFFICIENT_HOLDOUT:'후속 표본 부족',HOLDOUT_DISAGREES:'후속 불일치'};
-export default function StockResearchReference({day,signals,features,provisional,tomato,recent,validated,extras,referencePrice,onCombined,onProfit,onHigh}:{day:string;signals:string[];features:unknown;provisional?:boolean;tomato:{label:string;up:number;n:number}|null;recent:{pattern:string;horizon_trading_days:number;positive_return_probability_pct:number;median_return_pct:number;sample_count:number}|null;validated:string|null;extras?:Record<string,unknown>;referencePrice?:number|null;onCombined:()=>void;onProfit:()=>void;onHigh:()=>void}){
+export default function StockResearchReference({code,day,signals,features,provisional,tomato,recent,validated,extras,referencePrice,onCombined,onProfit,onHigh}:{code:string;day:string;signals:string[];features:unknown;provisional?:boolean;tomato:{label:string;up:number;n:number}|null;recent:{pattern:string;horizon_trading_days:number;positive_return_probability_pct:number;median_return_pct:number;sample_count:number}|null;validated:string|null;extras?:Record<string,unknown>;referencePrice?:number|null;onCombined:()=>void;onProfit:()=>void;onHigh:()=>void}){
  const [open,setOpen]=useState(false);
  const {profits,high,retrospective}=selectStockResearch({day,asof:RECENT_ASOF,signals,features,profit,profiles,allowRetrospective:!provisional});
  const combined=selectCombinedRows(signals,features,extras,provisional);
@@ -73,5 +74,6 @@ export default function StockResearchReference({day,signals,features,provisional
  <p className="sr-note">표시 가능한 캔들 형태·몸통·종가 위치만 비교합니다. 기타 특징은 미확인입니다. 패턴별 대표 조건은 세부 일치·표본 수 기준이며, 일치 건수는 확률이나 점수가 아닙니다. 거래비용·실제 체결·기업행동 검증 전.</p>
  </>}
  </details>
+ {!provisional&&<ForwardSymbolResearch key={code+':'+day} code={code} day={day}/>}
  </div>;
 }

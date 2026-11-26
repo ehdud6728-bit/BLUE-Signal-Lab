@@ -23,12 +23,18 @@ on:
         description: 'Only for archive apply: blue-forward-settlement-v1'
         type: string
         default: ''
+      publish_ui:
+        description: 'Publish private aggregate report for authenticated UI (no trade/settlement writes by itself)'
+        type: boolean
+        default: false
+        required: true
   pull_request:
     paths:
       - 'research/pattern_performance_forward.py'
       - 'research/test_pattern_performance_forward.py'
       - 'tools/turso/forward-ledger*'
       - 'tools/turso/forward-settlement*'
+      - 'tools/turso/forward-ui-publish*'
       - 'research/pattern_forward_settlement.py'
       - 'research/test_pattern_forward_settlement.py'
       - 'research/pattern_forward_symbol_exit.py'
@@ -73,7 +79,7 @@ jobs:
           python3 research/test_pattern_performance_forward.py
           python3 research/test_pattern_forward_settlement.py
           python3 research/test_pattern_forward_symbol_exit.py
-          node --test tools/turso/forward-settlement.test.mjs
+          node --test tools/turso/forward-settlement.test.mjs tools/turso/forward-ui-publish.test.mjs
           python3 research/test_pattern_adaptive_market.py
           node --test collector/src/rotation-forward-export.test.mjs collector/src/rotation-outcomes.test.mjs
       - name: Guard and read audited universe
@@ -83,6 +89,7 @@ jobs:
           CONFIRM: ${{ github.event_name == 'schedule' && vars.BLUE_FORWARD_AUTO_CONFIRM || inputs.confirm }}
           SETTLEMENT_MODE: ${{ github.event_name == 'schedule' && (vars.BLUE_FORWARD_SETTLEMENT_AUTO_ENABLED == 'true' && vars.BLUE_FORWARD_SETTLEMENT_AUTO_CONFIRM == 'blue-forward-settlement-v1' && 'apply' || 'inspect') || inputs.settlement_mode || 'inspect' }}
           SETTLEMENT_CONFIRM: ${{ github.event_name == 'schedule' && vars.BLUE_FORWARD_SETTLEMENT_AUTO_CONFIRM || inputs.settlement_confirm }}
+          PUBLISH_FORWARD_UI: ${{ github.event_name == 'schedule' && vars.BLUE_FORWARD_UI_AUTO_PUBLISH == 'true' || github.event_name == 'workflow_dispatch' && inputs.publish_ui }}
           FORWARD_SCHEDULED: ${{ github.event_name == 'schedule' }}
           TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
           TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
@@ -103,6 +110,7 @@ jobs:
           node tools/turso/forward-settlement.mjs --symbols
           node collector/src/rotation-forward-export.mjs
           python3 research/pattern_adaptive_market.py --source output/full-universe/source.json --benchmark output/full-universe/benchmark.json --batch output/forward/symbol-candidates.json --archive output/forward/symbol-report.json --rotation output/forward/rotation-source.json --out output/forward/adaptive-market-report.json
+          node tools/turso/forward-ui-publish.mjs
       - uses: actions/upload-artifact@v4
         if: (github.event_name == 'workflow_dispatch' || github.event_name == 'schedule') && github.ref == 'refs/heads/main' && github.repository == 'ehdud6728-bit/BLUE-Signal-Lab'
         with:

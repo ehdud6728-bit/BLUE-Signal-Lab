@@ -13,6 +13,7 @@ import {InvalidEodQuery,tursoEodDates,tursoEodSearch,tursoEodCompare} from './tu
 import {tursoMarketRotation} from './turso-market-rotation';
 import {tursoMarketTrends} from './turso-market-trends';
 import {tursoRotationLeaders} from './turso-rotation-leaders';
+import {tursoForwardView,InvalidForwardView} from './turso-forward-view';
 import {handleTursoMarketAi,readMarketEodBreadth} from './turso-market-ai';
 import {InvalidPrivateCaseQuery,PrivateCaseSnapshotChanged,tursoPrivateCombinedCases} from './turso-private-combined-cases';
 import {InvalidResearchQuery,tursoResearchDates,tursoResearchSearch,tursoResearchChart,tursoResearchCoverage,tursoPatternPulse,tursoExitStudyReport} from './turso-research';
@@ -148,6 +149,11 @@ export default {
         try{return respond(await tursoProvisionalSearch(env,u.searchParams));}
         catch(e){if(e instanceof InvalidProvisionalQuery)return respond({error:e.message},400);
           return respond({error:'TURSO_PROVISIONAL_UNAVAILABLE'},503);}
+      }
+      if(p==='/api/research/forward-view'&&request.method==='GET'){
+        if(!access)return respond({error:'ACCESS_REQUIRED'},401);
+        try{return respond(await tursoForwardView(env,u.searchParams));}
+        catch(e){return respond({error:e instanceof InvalidForwardView?e.message:'FORWARD_VIEW_UNAVAILABLE'},e instanceof InvalidForwardView?400:503);}
       }
       // Independent Turso market AI. Never accept client-supplied facts or use D1.
       if(p==='/api/research/market-ai'&&['GET','POST'].includes(request.method)){
