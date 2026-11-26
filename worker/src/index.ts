@@ -13,7 +13,7 @@ import {InvalidEodQuery,tursoEodDates,tursoEodSearch,tursoEodCompare} from './tu
 import {tursoMarketRotation} from './turso-market-rotation';
 import {tursoMarketTrends} from './turso-market-trends';
 import {tursoRotationLeaders} from './turso-rotation-leaders';
-import {handleTursoMarketAi} from './turso-market-ai';
+import {handleTursoMarketAi,readMarketEodBreadth} from './turso-market-ai';
 import {InvalidPrivateCaseQuery,PrivateCaseSnapshotChanged,tursoPrivateCombinedCases} from './turso-private-combined-cases';
 import {InvalidResearchQuery,tursoResearchDates,tursoResearchSearch,tursoResearchChart,tursoResearchCoverage,tursoPatternPulse,tursoExitStudyReport} from './turso-research';
 import {InvalidTursoResearchRequest,requestTursoResearch,tursoResearchRequestStatus} from './turso-research-request';
@@ -157,7 +157,8 @@ export default {
         const rotation=await safe(()=>tursoMarketRotation(env));
         const trends=await safe(()=>tursoMarketTrends(env));
         const leaders=await safe(()=>tursoRotationLeaders(env));
-        const upstream=await handleTursoMarketAi(request,env,{rotation,trends,leaders});
+        const eodBreadth=await safe(()=>readMarketEodBreadth(env));
+        const upstream=await handleTursoMarketAi(request,env,{rotation,trends,leaders,eodBreadth});
         return new Response(upstream.body,{status:upstream.status,headers:{...cors,'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store','X-Content-Type-Options':'nosniff'}});
       }
       if(p==='/api/research/rotation-leaders'&&request.method==='GET'){

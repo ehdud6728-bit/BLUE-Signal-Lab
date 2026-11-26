@@ -5,7 +5,8 @@ type Scenario={condition:string;response:string;invalidation:string;refs:string[
 type Report={summary:Part;risks:Part;rotation:Part;watch:Part;scenarios:{rise:Scenario;range:Scenario;fall:Scenario}};
 type MacroEvent={id:string;name:string;kind:string;reference_period:string;scheduled_et:string;scheduled_utc:string;source_url:string;meeting_et?:string;status:string};
 type Macro={status:string;reviewed_day:string;review_required_after:string;update_mode:string;events:MacroEvent[];vix_futures:{status:string;source_url:string;terms_url:string}};
-type Snapshot={quality?:{domestic_quote_day:string;domestic_receipt:string;breadth:string;flow_3_observations:string;us_core:string;us_core_day:string|null;domestic_trends:string;trend_day:string|null;candidates:string;decision_basis:string};macro?:Macro;status?:string;error?:string;model?:string;cached?:boolean;generated_at?:string;dates?:Record<string,string|null>;refs?:Ref[];limitations?:string[];report?:Report;daily_limit?:number;gemini_key_configured?:boolean};
+type EodBreadth={id:string;market:string;universe:number;matched:number;up:number;down:number;flat:number;unmatched:number;up_pct:number};
+type Snapshot={eod_breadth?:EodBreadth[];quality?:{domestic_quote_day:string;eod_breadth?:string;domestic_receipt:string;breadth:string;flow_3_observations:string;us_core:string;us_core_day:string|null;domestic_trends:string;trend_day:string|null;candidates:string;decision_basis:string};macro?:Macro;status?:string;error?:string;model?:string;cached?:boolean;generated_at?:string;dates?:Record<string,string|null>;refs?:Ref[];limitations?:string[];report?:Report;daily_limit?:number;gemini_key_configured?:boolean};
 const messages:Record<string,string>={ACCESS_REQUIRED:'Cloudflare Access 로그인 필요',ORIGIN_DENIED:'허용된 웹앱 주소에서 실행해 주세요.',GEMINI_KEY_MISSING:'Gemini API 키가 Worker에 등록되지 않았습니다.',GEMINI_AUTH:'Gemini API 권한을 확인해 주세요.',MODEL_NOT_AVAILABLE:'등록된 Gemini 모델의 사용 가능 여부를 확인해 주세요.',GEMINI_BAD_REQUEST:'Gemini 요청 형식 또는 모델 설정을 확인해 주세요.',QUOTA:'Gemini 제공사 호출 한도에 도달했습니다.',DAILY_LIMIT:'오늘 종합 시황 AI 호출 한도에 도달했습니다.',AI_REPORT_INVALID:'AI 답변 형식이나 근거 ID 검증 실패. 미검증 답변은 표시하지 않습니다.',AI_STORAGE_UNAVAILABLE:'Turso AI 저장소 조회 또는 쓰기 실패.',MARKET_EVIDENCE_MISSING:'검증된 시장 자료가 없어 분석할 수 없습니다.',REQUEST_FAILED:'AI 요청 실패. 잠시 뒤 다시 시도해 주세요.',GEMINI_UNAVAILABLE:'Gemini 응답 실패'};
 const fmt=(s:string)=>{try{return new Intl.DateTimeFormat('ko-KR',{timeZone:'Asia/Seoul',dateStyle:'short',timeStyle:'short'}).format(new Date(s));}catch{return s;}};
 function Evidence({ids,refs}:{ids:string[];refs:Ref[]}){
@@ -27,7 +28,7 @@ export default function MarketAiBriefing({api,revision=0}:{api:string;revision?:
  }
  useEffect(()=>{void load('GET');return()=>current.current?.abort();},[api,revision]);
  const refs=data?.refs||[],report=data?.report,dates=data?.dates,macro=data?.macro;
- const replaceIds=(v:string)=>v.replace(/\b(?:[MFTS]_(?:KOSPI|KOSDAQ)(?:_\d+)?|G_(?:DJI|NDX|SPX|SOX|VIX)|E_[A-Z_]+|C_(?:KOSPI|KOSDAQ)(?:_\d+(?:_[LF]\d+)?)?)\b/g,id=>refs.find(r=>r.id===id)?.label??id);
+ const replaceIds=(v:string)=>v.replace(/\b(?:[BMFTS]_(?:KOSPI|KOSDAQ)(?:_\d+)?|G_(?:DJI|NDX|SPX|SOX|VIX)|E_[A-Z_]+|C_(?:KOSPI|KOSDAQ)(?:_\d+(?:_[LF]\d+)?)?)\b/g,id=>refs.find(r=>r.id===id)?.label??id);
  const part=(label:string,p:Part)=><div className="blue-research-card"><strong>{label}</strong><p style={{whiteSpace:'pre-wrap'}}>{replaceIds(p.text)}</p><Evidence ids={p.refs} refs={refs}/></div>;
  return <section className="blue-research-card">
  <div className="blue-pattern-heading"><strong>BLUE AI 종합 시황 · 대응 전망</strong><button type="button" disabled={busy} onClick={()=>void load('GET')}>저장 분석 확인</button></div>
@@ -43,6 +44,9 @@ export default function MarketAiBriefing({api,revision=0}:{api:string;revision?:
  후보 자료: {data.quality.candidates==='ALIGNED'?'현재 추세 세대와 일치':'누락 또는 이전 세대'}</p>
  <small>자료 확보 여부는 상승 확률 또는 투자 신뢰도 점수가 아닙니다.</small>
  </div>}
+ {data?.eod_breadth&&<div className="blue-research-card"><strong>KRX 확정 일봉 시장 폭</strong>
+ {data.eod_breadth.length===0?<p>검증된 비교 자료 없음</p>:<><p>기준일 {dates?.eod_breadth_day} · 비교일 {dates?.eod_breadth_prior_day}</p>{data.eod_breadth.map(m=><p key={m.market}><strong>{m.market} 상승 {m.up_pct.toFixed(2)}%</strong><br/>상승 {m.up} · 하락 {m.down} · 보합 {m.flat}<br/><small>비교 가능 {m.matched}/{m.universe}종목 · 미비교 {m.unmatched}종목</small></p>)}</>}
+ <small>확정 종가 기준 · 종목 수 감사 확인 · 연속 거래일·기업행동·해시 독립 재검산 미확인 · 실시간 시세 및 공식 지수 아님</small></div>}
  {macro&&<div className="blue-research-card">
  <strong>주요 경제 일정 · 한국시간</strong>
  <p><small>공식 일정 확인일 {macro.reviewed_day} · 자동 갱신 아님 · 발표 예정이며 변경될 수 있습니다.</small></p>

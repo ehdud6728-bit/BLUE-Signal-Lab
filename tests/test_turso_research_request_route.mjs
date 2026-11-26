@@ -15,6 +15,7 @@ const tursoResearchRequestStatus=async (_env,day)=>({status:'READY',day});
 const tursoMarketRotation=async()=>({status:'READY',source:'ROTATION'});
 const tursoMarketTrends=async()=>({status:'READY',source:'TRENDS'});
 const tursoRotationLeaders=async()=>({status:'READY',source:'LEADERS'});
+const readMarketEodBreadth=async()=>({status:'COUNT_AUDITED_EOD'});
 const handleTursoMarketAi=async (request,env,facts)=>new Response(JSON.stringify({status:'READY',method:request.method,facts}),{status:200});
 const tursoResearchCoverage=async ()=>({storage:'TURSO',status:'AUDIT_COUNTS_ONLY'});
 const tursoPatternPulse=async ()=>({storage:'TURSO',status:'AUDITED_PATTERN_ACTIVITY'});
@@ -94,7 +95,7 @@ test('market AI requires Access and same-origin POST before collecting Turso evi
  assert.equal((await api.fetch(request(path,'POST'),env,{})).status,401);
  const response=await api.fetch(request(path,'POST'),env,{access:true});
  assert.equal(response.status,200);
- assert.deepEqual((await response.json()).facts,{rotation:{status:'READY',source:'ROTATION'},trends:{status:'READY',source:'TRENDS'},leaders:{status:'READY',source:'LEADERS'}});
+ assert.deepEqual((await response.json()).facts,{rotation:{status:'READY',source:'ROTATION'},trends:{status:'READY',source:'TRENDS'},leaders:{status:'READY',source:'LEADERS'},eodBreadth:{status:'COUNT_AUDITED_EOD'}});
 });
 
 test('private research cases require Access and forbid caching',async()=>{
