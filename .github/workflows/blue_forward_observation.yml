@@ -33,6 +33,10 @@ on:
       - 'research/test_pattern_forward_settlement.py'
       - 'research/pattern_forward_symbol_exit.py'
       - 'research/test_pattern_forward_symbol_exit.py'
+      - 'research/pattern_adaptive_market.py'
+      - 'research/test_pattern_adaptive_market.py'
+      - 'collector/src/rotation-forward-export*'
+      - 'collector/src/rotation-outcomes*'
       - '.github/workflows/blue_forward_observation.yml'
 permissions:
   contents: read
@@ -70,6 +74,8 @@ jobs:
           python3 research/test_pattern_forward_settlement.py
           python3 research/test_pattern_forward_symbol_exit.py
           node --test tools/turso/forward-settlement.test.mjs
+          python3 research/test_pattern_adaptive_market.py
+          node --test collector/src/rotation-forward-export.test.mjs collector/src/rotation-outcomes.test.mjs
       - name: Guard and read audited universe
         if: (github.event_name == 'workflow_dispatch' || github.event_name == 'schedule') && github.ref == 'refs/heads/main' && github.repository == 'ehdud6728-bit/BLUE-Signal-Lab'
         env:
@@ -95,6 +101,8 @@ jobs:
           python3 research/pattern_forward_settlement.py --source output/full-universe/source.json --benchmark output/full-universe/benchmark.json --ledger output/forward/ledger.json --out output/forward/settlement-candidates.json --symbol-out output/forward/symbol-candidates.json
           node tools/turso/forward-settlement.mjs
           node tools/turso/forward-settlement.mjs --symbols
+          node collector/src/rotation-forward-export.mjs
+          python3 research/pattern_adaptive_market.py --source output/full-universe/source.json --benchmark output/full-universe/benchmark.json --batch output/forward/symbol-candidates.json --archive output/forward/symbol-report.json --rotation output/forward/rotation-source.json --out output/forward/adaptive-market-report.json
       - uses: actions/upload-artifact@v4
         if: (github.event_name == 'workflow_dispatch' || github.event_name == 'schedule') && github.ref == 'refs/heads/main' && github.repository == 'ehdud6728-bit/BLUE-Signal-Lab'
         with:
@@ -103,5 +111,6 @@ jobs:
             output/forward/report.json
             output/forward/settlement-report.json
             output/forward/symbol-report.json
+            output/forward/adaptive-market-report.json
           if-no-files-found: error
           retention-days: 14
