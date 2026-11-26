@@ -14,11 +14,23 @@ on:
         description: 'Only for apply: blue-forward-capture-v1'
         type: string
         default: ''
+      settlement_mode:
+        type: choice
+        options: [inspect, apply]
+        default: inspect
+        required: true
+      settlement_confirm:
+        description: 'Only for archive apply: blue-forward-settlement-v1'
+        type: string
+        default: ''
   pull_request:
     paths:
       - 'research/pattern_performance_forward.py'
       - 'research/test_pattern_performance_forward.py'
       - 'tools/turso/forward-ledger*'
+      - 'tools/turso/forward-settlement*'
+      - 'research/pattern_forward_settlement.py'
+      - 'research/test_pattern_forward_settlement.py'
       - '.github/workflows/blue_forward_observation.yml'
 permissions:
   contents: read
@@ -35,7 +47,9 @@ jobs:
         env:
           ENABLED: ${{ vars.BLUE_FORWARD_AUTO_ENABLED == 'true' }}
           CONFIRMED: ${{ vars.BLUE_FORWARD_AUTO_CONFIRM == 'blue-forward-capture-v1' }}
-        run: echo "BLUE_FORWARD_SCHEDULE enabled=$ENABLED confirmed=$CONFIRMED"
+          ARCHIVE_ENABLED: ${{ vars.BLUE_FORWARD_SETTLEMENT_AUTO_ENABLED == 'true' }}
+          ARCHIVE_CONFIRMED: ${{ vars.BLUE_FORWARD_SETTLEMENT_AUTO_CONFIRM == 'blue-forward-settlement-v1' }}
+        run: echo "BLUE_FORWARD_SCHEDULE enabled=$ENABLED confirmed=$CONFIRMED archive_enabled=$ARCHIVE_ENABLED archive_confirmed=$ARCHIVE_CONFIRMED"
   study:
     if: github.event_name == 'pull_request' || (github.ref == 'refs/heads/main' && (github.event_name == 'workflow_dispatch' || (github.event_name == 'schedule' && vars.BLUE_FORWARD_AUTO_ENABLED == 'true' && vars.BLUE_FORWARD_AUTO_CONFIRM == 'blue-forward-capture-v1')))
     runs-on: ubuntu-latest
@@ -51,11 +65,15 @@ jobs:
         run: |
           node --test tools/turso/forward-ledger.test.mjs tools/turso/full-universe-export.test.mjs collector/src/market-trends-regime.test.mjs
           python3 research/test_pattern_performance_forward.py
+          python3 research/test_pattern_forward_settlement.py
+          node --test tools/turso/forward-settlement.test.mjs
       - name: Guard and read audited universe
         if: (github.event_name == 'workflow_dispatch' || github.event_name == 'schedule') && github.ref == 'refs/heads/main' && github.repository == 'ehdud6728-bit/BLUE-Signal-Lab'
         env:
           MODE: ${{ github.event_name == 'schedule' && 'apply' || inputs.mode }}
           CONFIRM: ${{ github.event_name == 'schedule' && vars.BLUE_FORWARD_AUTO_CONFIRM || inputs.confirm }}
+          SETTLEMENT_MODE: ${{ github.event_name == 'schedule' && (vars.BLUE_FORWARD_SETTLEMENT_AUTO_ENABLED == 'true' && vars.BLUE_FORWARD_SETTLEMENT_AUTO_CONFIRM == 'blue-forward-settlement-v1' && 'apply' || 'inspect') || inputs.settlement_mode || 'inspect' }}
+          SETTLEMENT_CONFIRM: ${{ github.event_name == 'schedule' && vars.BLUE_FORWARD_SETTLEMENT_AUTO_CONFIRM || inputs.settlement_confirm }}
           FORWARD_SCHEDULED: ${{ github.event_name == 'schedule' }}
           TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
           TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
@@ -65,15 +83,20 @@ jobs:
         run: |
           set -euo pipefail
           if [ "$MODE" = apply ]; then test "$CONFIRM" = blue-forward-capture-v1; else test "$MODE" = inspect; fi
+          if [ "$SETTLEMENT_MODE" = apply ]; then test "$SETTLEMENT_CONFIRM" = blue-forward-settlement-v1; else test "$SETTLEMENT_MODE" = inspect; fi
           node tools/turso/full-universe-export.mjs
           node collector/src/market-trends.mjs benchmark_inspect
           python3 research/pattern_performance_forward.py --phase candidate --commit "$GITHUB_SHA" --source output/full-universe/source.json --benchmark output/full-universe/benchmark.json --out output/forward/candidate.json
           node tools/turso/forward-ledger.mjs
           python3 research/pattern_performance_forward.py --phase score --source output/full-universe/source.json --benchmark output/full-universe/benchmark.json --ledger output/forward/ledger.json --out output/forward/report.json
+          python3 research/pattern_forward_settlement.py --source output/full-universe/source.json --benchmark output/full-universe/benchmark.json --ledger output/forward/ledger.json --out output/forward/settlement-candidates.json
+          node tools/turso/forward-settlement.mjs
       - uses: actions/upload-artifact@v4
         if: (github.event_name == 'workflow_dispatch' || github.event_name == 'schedule') && github.ref == 'refs/heads/main' && github.repository == 'ehdud6728-bit/BLUE-Signal-Lab'
         with:
           name: BLUE_FORWARD_OBSERVATION_V2
-          path: output/forward/report.json
+          path: |
+            output/forward/report.json
+            output/forward/settlement-report.json
           if-no-files-found: error
           retention-days: 14
