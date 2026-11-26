@@ -29,3 +29,13 @@ test('empty batch does not create table; corrupt payload blocked',async()=>{cons
  const a=await runSettlement(db,{...batch,records:[]},[],apply);assert.equal(a.total,0);assert.ok(db.sqls.every(x=>x.startsWith('SELECT')));
  const {payload}=pack(r);assert.throws(()=>unpack({payload,payload_sha256:'c'.repeat(64)}),/HASH_MISMATCH/);
 }finally{db.close()}});
+
+test('symbol archive separate from aggregate, no symbol rows in report, capture match',async()=>{const db=fake();try{
+ const symbol={...r,schema:'BLUE_FORWARD_SYMBOL_SETTLEMENT_V1',outcome_version:'FORWARD_SYMBOL_EXIT_V1',symbol_rows:[{code:'000001',market:'KOSPI',status:'OBSERVED',opportunity:{high:5,low:-1,close:2,giveback:3,peak_day:1},exits:Object.fromEntries(['SIGNAL_LOW','ATR14_SMA_1_5'].map(m=>[m,{status:'READY',risk_pct:2,targets:{'3':{return_pct:3,exit_day:1,reason:'TARGET',ambiguous:false},'5':{return_pct:5,exit_day:1,reason:'TARGET',ambiguous:false}}}]))}],exit_summary:{events:1,observed:1,missing_path:0},exit_groups:[]};
+ const ss={...s,rows:[{code:'000001',market:'KOSPI'}]},sb={...batch,schema:'BLUE_FORWARD_SYMBOL_SETTLEMENT_BATCH_V1',records:[symbol]};
+ await runSettlement(db,batch,[s],apply);
+ const x=await runSettlement(db,sb,[ss],{...apply,symbols:true});assert.equal(x.written,1);assert.equal(x.total,1);assert.equal(x.recent_rows[0].symbol_rows,undefined);
+ assert.equal((await runSettlement(db,sb,[ss],{...apply,symbols:true})).unchanged,1);
+ await assert.rejects(runSettlement(db,sb,[{...ss,rows:[{code:'000002',market:'KOSPI'}]}],{symbols:true}),/SYMBOL_CAPTURE_MISMATCH/);
+ assert.equal((await runSettlement(db,{...batch,records:[]},[])).total,1);
+}finally{db.close()}});
