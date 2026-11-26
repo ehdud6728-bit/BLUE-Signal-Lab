@@ -8,6 +8,7 @@ from pattern_performance_forward import indexed,history
 from pattern_performance_full_universe import check,direction
 from pattern_performance_audited import candle
 from pattern_performance_structure import structure
+import pattern_scaleout as scaleout
 TARGETS=(3,5,10,15,20)
 # Fixed research definitions, not fixed percentage stops or trade advice.
 ORDER_TARGETS=(3,5,10)
@@ -143,7 +144,7 @@ def summarize_opportunity(events):
 def study(src,bench,tom):
     days,meta,bars,indexes,states,old=indexed(src,bench)
     check(tom.get("schema")=="BLUE_TOMATO_CONTEXT_SOURCE_V1" and tom["cutoff"]==src["cutoff"] and tom["floor"]==8 and tom["threshold"]==70,"TOMATO_SOURCE_REQUIRED")
-    counts=Counter();groups=defaultdict(list);pooled=defaultdict(list);seen=set();dates=[]
+    counts=Counter();groups=defaultdict(list);pooled=defaultdict(list);exit_groups=defaultdict(list);seen=set();dates=[]
     for a in tom["days"]:
         d=a["day"];check(d in meta and d not in seen,"BAD_TOMATO_DAY");seen.add(d)
         dates.append(dict(day=d,status=a["status"],records=len(a["rows"])))
@@ -169,19 +170,26 @@ def study(src,bench,tom):
             candidates=technical_candidates(past,bars,c,scope)
             # All candidates include baseline; evaluate positive/negative cases, no ranking.
             for horizon in (1,3,5,10,20):
-                wanted=ds[p+1:p+horizon+1];ret=None
+                wanted=ds[p+1:p+horizon+1];ret=None;exit_case=None
                 if cohort=="LATEST_UNFROZEN_CANDIDATE" or len(wanted)<horizon:out="PENDING"
                 else:
                     path=[bars.get((x,c)) for x in wanted]
                     if any(x is None or x["market"]!=scope for x in path):out="MISSING_PATH"
-                    else:out="OBSERVED";ret=outcome(path,candidates)
+                    else:
+                        out="OBSERVED";ret=outcome(path,candidates)
+                        if horizon in (3,5,10,20):exit_case=scaleout.case(path,candidates,stop_at_entry)
+                if horizon in (3,5,10,20):
+                    # Exact setup and first stored factor are separate views, not independent evidence.
+                    for kind,value in (("ALL","ALL"),("EXACT_SETUP",s["setup"]),("FIRST_STORED_FACTOR",s["setup"].split("+")[0])):
+                        exit_groups[cohort,status,horizon,kind,value].append((d,c,exit_case,out))
+                    exit_groups[cohort,status,horizon,"FIRST_FACTOR_MARKET_STATE",s["setup"].split("+")[0]+"|"+state].append((d,c,exit_case,out))
                 event=(d,c,ret,out)
                 # One event per selected symbol/date/horizon.
                 pooled[cohort,status,horizon].append(event)
                 for f,v in [("BASELINE","ALL"),*context.items()]:
                     groups[cohort,scope,state,s["setup"],status,horizon,f,v].append(event)
     rows=[dict(cohort=g,market=m,market_state=s,setup=p,tomato_status=t,horizon=h,context=f,value=v,**summarize_opportunity(es)) for (g,m,s,p,t,h,f,v),es in sorted(groups.items())]
-    return dict(schema="BLUE_TOMATO_CONTEXT_PILOT_V4",pooled_rows=[dict(cohort=g,tomato_status=t,horizon=h,**summarize_opportunity(es)) for (g,t,h),es in sorted(pooled.items())],first_touch_basis="Exploratory +3/+5/+10 targets vs technical price levels. ATR14 simple mean true range through signal close, entry minus 1.5/2 ATR. Other levels fixed at signal close: signal low, latest strict 2-left/2-right pivot in 11-bar window, qualified prior box low, MA20 below signal close. Missing levels and entries at/below stop excluded with reasons. First daily OPEN crossing resolves gap direction; otherwise same-day dual touch UNKNOWN. Bounds over available full-window cases only; denominators differ. Peak R is unconstrained and not realized. Lower volume profile not verified; never substitute overhead. No fills, tick rounding, fees, or ranking.",status="EXPLORATORY_NO_PROMOTION",asof=days[-1],days=dates,selection_counts=[dict(cohort=g,status=s,rows=n) for (g,s),n in sorted(counts.items())],rows=rows,limits=["FIXED_RESEARCH_FLOOR_8_THRESHOLD_70_NOT_USER_UI_SETTING","SAVED_SELECTED_TOP12_ONLY_NOT_ALL_ATTEMPTED_COMBINATIONS","RETROSPECTIVE_NOT_FORWARD_CAPTURE","LATEST_UNFROZEN_CANDIDATE_NOT_PERSISTED","AT_MOST_3_MATURE_DATES_PLUS_LATEST","NO_FULL_UNIVERSE_NEGATIVE_CONTROL_FOR_ABSENT_SIGNAL_ROWS","STORED_MA_NOT_INDEPENDENTLY_RECALCULATED","NO_INDEPENDENT_CALENDAR_OR_CORPORATE_ACTION_PROOF","NO_COSTS_OR_EXECUTION","NO_AUTOMATIC_HIGHLIGHT_OR_STRATEGY_CHANGE"],return_basis="PRIMARY: highest daily HIGH within full N subsequent index observations / first OPEN - 1. Lowest LOW and Nth CLOSE separately; latest candidate never scored.", target_basis="High reaches 3/5/10/15/20% above first OPEN, exact integer comparison. Full window required; prior full sessions adverse low excludes hit day; intraday order and fills unknown.", selection_basis="Existing saved tomato selection unchanged: historical tenth CLOSE based up rate, fixed floor 8 and threshold 70. V4 evaluates this same cohort by HIGH; not a new high-selected tomato definition.", giveback_basis="Peak HIGH minus terminal CLOSE in percentage points of entry; not realized profit or maximum drawdown.")
+    return dict(schema="BLUE_TOMATO_CONTEXT_PILOT_V5",scaleout_basis="Gross hypothetical matched full-path scenarios, 3/5/10/20 observations. Initial technical stop ATR1.5 or signal low separately, ATR14 required for all policies in each comparison. 1R/2R targets from entry to initial stop, fixed original-position fractions. After first partial, breakeven or lagged high minus 2ATR applies next observation only; ATR trail never below entry. Opening gaps known; intraday dual touch stop-first and flagged. Targets at limit, stops at level or adverse opening gap, remainder at final close. No execution proof, costs, tick/lot rounding, independence, selection or ranking. First stored factor is not a validated pattern family.",scaleout_rows=[dict(cohort=g,tomato_status=t,horizon=h,group=k,value=v,initial_stop=m,**scaleout.summarize(es,m)) for (g,t,h,k,v),es in sorted(exit_groups.items()) for m in scaleout.METHODS],pooled_rows=[dict(cohort=g,tomato_status=t,horizon=h,**summarize_opportunity(es)) for (g,t,h),es in sorted(pooled.items())],first_touch_basis="Exploratory +3/+5/+10 targets vs technical price levels. ATR14 simple mean true range through signal close, entry minus 1.5/2 ATR. Other levels fixed at signal close: signal low, latest strict 2-left/2-right pivot in 11-bar window, qualified prior box low, MA20 below signal close. Missing levels and entries at/below stop excluded with reasons. First daily OPEN crossing resolves gap direction; otherwise same-day dual touch UNKNOWN. Bounds over available full-window cases only; denominators differ. Peak R is unconstrained and not realized. Lower volume profile not verified; never substitute overhead. No fills, tick rounding, fees, or ranking.",status="EXPLORATORY_NO_PROMOTION",asof=days[-1],days=dates,selection_counts=[dict(cohort=g,status=s,rows=n) for (g,s),n in sorted(counts.items())],rows=rows,limits=["FIXED_RESEARCH_FLOOR_8_THRESHOLD_70_NOT_USER_UI_SETTING","SAVED_SELECTED_TOP12_ONLY_NOT_ALL_ATTEMPTED_COMBINATIONS","RETROSPECTIVE_NOT_FORWARD_CAPTURE","LATEST_UNFROZEN_CANDIDATE_NOT_PERSISTED","AT_MOST_3_MATURE_DATES_PLUS_LATEST","NO_FULL_UNIVERSE_NEGATIVE_CONTROL_FOR_ABSENT_SIGNAL_ROWS","STORED_MA_NOT_INDEPENDENTLY_RECALCULATED","NO_INDEPENDENT_CALENDAR_OR_CORPORATE_ACTION_PROOF","NO_COSTS_OR_EXECUTION","NO_AUTOMATIC_HIGHLIGHT_OR_STRATEGY_CHANGE"],return_basis="PRIMARY: highest daily HIGH within full N subsequent index observations / first OPEN - 1. Lowest LOW and Nth CLOSE separately; latest candidate never scored.", target_basis="High reaches 3/5/10/15/20% above first OPEN, exact integer comparison. Full window required; prior full sessions adverse low excludes hit day; intraday order and fills unknown.", selection_basis="Existing saved tomato selection unchanged: historical tenth CLOSE based up rate, fixed floor 8 and threshold 70. V4 evaluates this same cohort by HIGH; not a new high-selected tomato definition.", giveback_basis="Peak HIGH minus terminal CLOSE in percentage points of entry; not realized profit or maximum drawdown.")
 if __name__=="__main__":
     p=argparse.ArgumentParser();p.add_argument("--out",type=Path,required=True);a=p.parse_args()
     read=lambda x:json.loads(Path(x).read_text())

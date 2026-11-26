@@ -6,6 +6,8 @@ on:
       - 'tools/turso/tomato-context-export*'
       - 'research/pattern_performance_tomato_context.py'
       - 'research/test_pattern_performance_tomato_context.py'
+      - 'research/pattern_scaleout.py'
+      - 'research/test_pattern_scaleout.py'
       - '.github/workflows/blue_tomato_context.yml'
 permissions:
   contents: read
@@ -27,6 +29,7 @@ jobs:
         run: |
           node --test tools/turso/tomato-context-export.test.mjs tools/turso/full-universe-export.test.mjs
           python3 research/test_pattern_performance_tomato_context.py
+          python3 research/test_pattern_scaleout.py
       - name: Verify actual bounded original source and compare exact selected setups
         if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.repository == 'ehdud6728-bit/BLUE-Signal-Lab'
         env:
@@ -44,7 +47,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
         with:
-          name: BLUE_TOMATO_CONTEXT_HIGH_V4
+          name: BLUE_TOMATO_CONTEXT_HIGH_V5
           path: output/tomato/report.json
           if-no-files-found: error
           retention-days: 14
