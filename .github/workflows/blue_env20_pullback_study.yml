@@ -1,0 +1,50 @@
+name: BLUE ENV20 Inverse Pullback Timing (READ ONLY)
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'research/env20_pullback_study.py'
+      - 'research/test_env20_pullback_study.py'
+      - 'tools/turso/env20-pullback-factors.mjs'
+      - '.github/workflows/blue_env20_pullback_study.yml'
+permissions:
+  contents: read
+concurrency:
+  group: blue-env20-pullback
+  cancel-in-progress: false
+jobs:
+  study:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm install --prefix tools/turso --no-audit --no-fund --ignore-scripts --no-package-lock
+      - run: npm install --prefix collector --no-audit --no-fund --ignore-scripts --no-package-lock
+      - name: Offline exact entry and provenance tests
+        run: |
+          node --test tools/turso/combined-pattern-factors.test.mjs tools/turso/full-universe-export.test.mjs collector/src/market-trends-regime.test.mjs
+          python3 research/test_env20_pullback_study.py
+      - name: Read audited source and compare fixed pullback rules
+        if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.repository == 'ehdud6728-bit/BLUE-Signal-Lab'
+        env:
+          TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
+          TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
+          KIS_APP_KEY: ${{ secrets.KIS_APP_KEY }}
+          KIS_APP_SECRET: ${{ secrets.KIS_APP_SECRET }}
+          BLUE_BENCHMARK_STATE_FILE: output/full-universe/benchmark.json
+        run: |
+          set -euo pipefail
+          node tools/turso/full-universe-export.mjs
+          node collector/src/market-trends.mjs benchmark_inspect
+          node tools/turso/env20-pullback-factors.mjs
+          python3 research/env20_pullback_study.py --source output/full-universe/source.json --benchmark output/full-universe/benchmark.json --factors output/full-universe/pullback-factors.json --out output/full-universe/pullback-report.json
+      - uses: actions/upload-artifact@v4
+        if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.repository == 'ehdud6728-bit/BLUE-Signal-Lab'
+        with:
+          name: BLUE_ENV20_INVERSE_PULLBACK_V1
+          path: output/full-universe/pullback-report.json
+          if-no-files-found: error
+          retention-days: 14
