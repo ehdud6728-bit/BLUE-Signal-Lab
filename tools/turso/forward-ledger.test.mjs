@@ -26,3 +26,5 @@ test('digest detects corruption; stale cutoff rejected',async()=>{
  assert.throws(()=>unpack({payload,payload_sha256:'b'.repeat(64)}),/HASH_MISMATCH/);
  const db=fake();try{await assert.rejects(runLedger(db,candidate,{now:new Date('2026-11-27T06:00:00Z')}),/BAD_CANDIDATE/);assert.equal(db.sqls.length,0);}finally{db.close();}
 });
+
+test('scheduled capture rejects stale source without touching database',async()=>{const db=fake();try{const stale={...candidate,source_day:'2026-11-24'};const r=await runLedger(db,stale,{now,scheduled:true,mode:'apply',confirm:'blue-forward-capture-v1'});assert.equal(r.status,'SCHEDULE_NO_EXACT_PRIOR_DAY');assert.equal(db.sqls.length,0);await assert.rejects(runLedger(db,candidate,{now,scheduled:true}),/SCHEDULE_NOT_AUTHORIZED/);assert.equal(db.sqls.length,0);}finally{db.close();}});

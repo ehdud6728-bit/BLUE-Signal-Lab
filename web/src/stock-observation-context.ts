@@ -34,5 +34,12 @@ export function stockObservationContext(extras:Fields,referencePrice:number|null
  else if(amountRatio<1)checks.push('거래대금 회복 여부');
  if(!occurred.length)checks.push('골든크로스 추가 확인');
  if(supply)checks.push('추정 매물대 기준가 주변의 종가·거래대금 확인');
- return {trend,turnover,amountRatio,rsi,momentum,supply,checks};
+ const headline=trend==='역배열'?(occurred.length?'역배열 속 단기 모멘텀 개선 관측':'역배열 · 추세 회복 미확인'):trend==='정배열'?(occurred.length?'정배열 · 단기 GC 동반':'정배열 · 추가 움직임 확인'):trend==='혼재'?'이평 배열 혼재 · 방향 확인 필요':'이평 자료 부족 · 추세 판단 보류';
+ const explanation=trend==='역배열'&&occurred.length?'골든크로스가 발생했지만 이동평균 배열 전환이나 반등 지속을 확인한 것은 아닙니다.':trend==='정배열'?'이평 정배열은 신호일의 관측이며 추가 상승을 보장하지 않습니다.':'확정된 배열 및 지표만 설명하며 현재 시세 방향을 추정하지 않습니다.';
+ const scenarios=supply&&reference!==null?[
+  '상승 시: 추정 매물대 '+Math.round(supply.price).toLocaleString('ko-KR')+'원 주변 종가 유지 및 거래대금 확인.',
+  '눌림 시: 신호 기준가 '+Math.round(reference).toLocaleString('ko-KR')+'원 및 추정 매물대 주변 반응 관찰.',
+  '이탈 시: 기존 가격대 회복 여부 확인. 검증된 손절가 아님.'
+ ]:['가격 기준 확인 후 지지·저항 유지 여부 관찰.'];
+ return {trend,turnover,amountRatio,rsi,momentum,supply,checks,headline,explanation,scenarios};
 }
