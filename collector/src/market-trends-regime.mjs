@@ -58,15 +58,16 @@ export function stateOf(index,breadth){
  if(index.trend==='UP'&&index.short==='DOWN'&&breadth==='BROAD_WEAK')return 'WEAKENING_WATCH';
  return 'MIXED_OR_DIVERGENT';
 }
-export function inspectBenchmark(series,scope,all,cutoff){
+export function inspectBenchmark(series,scope,all,cutoff,{includeDaily=false}={}){
  if(!SCOPES.includes(scope)||!Array.isArray(series)||series.length>150||series.some((v,i)=>!day(v.day)||v.day>cutoff||!Number.isFinite(v.close)||v.close<=0||(i>0&&v.day<=series[i-1].day)))throw Error('BENCHMARK_SERIES_INVALID');
  const auditDays=[...all.keys()].sort(),counts={},trends={},breadths={};let latest=null;
- const pairs=[];
+ const pairs=[],daily=[];
  for(let i=0;i<series.length;i++){
   const index=classifyIndex(series,i),breadth=breadthAt(series,i,scope,all,auditDays),state=stateOf(index,breadth);
   counts[state]=(counts[state]||0)+1;trends[index.trend]=(trends[index.trend]||0)+1;breadths[breadth]=(breadths[breadth]||0)+1;
   latest={day:series[i].day,index_trend:index.trend,short_direction:index.short,breadth,state};
   pairs.push({i,state});
+  if(includeDaily)daily.push({...latest});
  }
  // Descriptive forward direction counts only; not an accuracy estimate.
  const outcomes={};
@@ -78,7 +79,7 @@ export function inspectBenchmark(series,scope,all,cutoff){
   else if(series[i+5].close<series[i].close)x.down++;
   else x.flat++;
  }
- return {market:scope,observations:series.length,first_day:series[0]?.day??null,latest,trend_days:trends,breadth_days:breadths,state_days:counts,subsequent_5_index_observations:outcomes};
+ return {market:scope,observations:series.length,first_day:series[0]?.day??null,latest,trend_days:trends,breadth_days:breadths,state_days:counts,subsequent_5_index_observations:outcomes,...(includeDaily?{daily_states:daily}:{})};
 }
 export async function readBenchmarkEvidence(db,start,end){
  const r=await db.execute({sql:BREADTH_SQL,args:[start,end]});
