@@ -9,6 +9,26 @@ from pattern_performance_full_universe import check,direction
 from pattern_performance_audited import candle
 from pattern_performance_structure import structure
 TARGETS=(3,5,10,15,20)
+# Fixed exploratory grid, not optimized exit recommendations.
+ORDER_TARGETS=(3,5,10)
+ORDER_STOPS=(3,5)
+ORDER_STATES=("TARGET_FIRST","STOP_FIRST","SAME_DAY_UNKNOWN","NEITHER")
+def first_touch_order(path,target,stop):
+    """First barrier reached, not a fill model."""
+    check(bool(path) and target>0 and 0<stop<100,"BAD_FIRST_TOUCH_INPUT")
+    entry=path[0]["open"]
+    upper=(100+target)*entry
+    lower=(100-stop)*entry
+    for i,b in enumerate(path,1):
+        op=100*b["open"]
+        if op>=upper:return ("TARGET_FIRST",i)
+        if op<=lower:return ("STOP_FIRST",i)
+        hit=100*b["high"]>=upper
+        cut=100*b["low"]<=lower
+        if hit and cut:return ("SAME_DAY_UNKNOWN",i)
+        if hit:return ("TARGET_FIRST",i)
+        if cut:return ("STOP_FIRST",i)
+    return ("NEITHER",None)
 def outcome(path):
     """Next observation open; exact daily high/low, not assumed fills."""
     check(bool(path),"EMPTY_OUTCOME_PATH")
@@ -23,7 +43,7 @@ def outcome(path):
         i=next((i for i,x in enumerate(path,1) if 100*x["high"]>=(100+t)*entry),None)
         # Prior full sessions only. Within-hit-day low/high order is not known.
         targets[t]=None if i is None else dict(day=i,prior_full_days_low_pct=pct(min([entry]+[x["low"] for x in path[:i-1]])),hit_day_low_below_entry=path[i-1]["low"]<entry)
-    return dict(peak=pct(peak),trough=pct(trough),close=pct(close),peak_day=peak_i,giveback=Fraction(100*(peak-close),entry),targets=targets)
+    return dict(peak=pct(peak),trough=pct(trough),close=pct(close),peak_day=peak_i,giveback=Fraction(100*(peak-close),entry),targets=targets,first_touch={f'{t}/{s}':first_touch_order(path,t,s) for t in ORDER_TARGETS for s in ORDER_STOPS})
 def summarize_opportunity(events):
     observed=[e for e in events if e[3]=="OBSERVED"]
     check(all((e[2] is not None)==(e[3]=="OBSERVED") for e in events),"OUTCOME_STATUS_CONFLICT")
@@ -41,7 +61,19 @@ def summarize_opportunity(events):
             median_first_day=median(x["day"] for x in hits) if k else None,
             mean_prior_full_days_low_pct=round(float(sum(x["prior_full_days_low_pct"] for x in hits)/k),3) if k else None,
             hit_day_low_below_entry_count=sum(x["hit_day_low_below_entry"] for x in hits))
-    return dict(events=len(events),sample_count=n,signal_dates=nd,symbols=ns,
+    order={}
+    for t in ORDER_TARGETS:
+        for s in ORDER_STOPS:
+            k=f"{t}/{s}"
+            pairs=[v["first_touch"][k] for v in vals]
+            c=Counter(x[0] for x in pairs)
+            check(sum(c.values())==n and set(c)<=set(ORDER_STATES),"FIRST_TOUCH_COUNT_MISMATCH")
+            touched=[x[1] for x in pairs if x[1] is not None]
+            order[k]=dict(counts={st:c[st] for st in ORDER_STATES},
+                target_first_lower_pct=round(100*c["TARGET_FIRST"]/n,2) if n else None,
+                target_first_upper_pct=round(100*(c["TARGET_FIRST"]+c["SAME_DAY_UNKNOWN"])/n,2) if n else None,
+                mean_first_touch_day=round(sum(touched)/len(touched),3) if touched else None)
+    return dict(events=len(events),sample_count=n,signal_dates=nd,symbols=ns,first_touch_order=order,
         pending=sum(e[3]=="PENDING" for e in events),missing_path=sum(e[3]=="MISSING_PATH" for e in events),
         sample_floor_met=n>=30 and nd>=5 and ns>=10,
         peak_high_pct={**stats("peak"),"above_entry_count":sum(v["peak"]>0 for v in vals),"above_entry_pct":round(100*sum(v["peak"]>0 for v in vals)/n,2) if n else None},
@@ -52,7 +84,7 @@ def summarize_opportunity(events):
 def study(src,bench,tom):
     days,meta,bars,indexes,states,old=indexed(src,bench)
     check(tom.get("schema")=="BLUE_TOMATO_CONTEXT_SOURCE_V1" and tom["cutoff"]==src["cutoff"] and tom["floor"]==8 and tom["threshold"]==70,"TOMATO_SOURCE_REQUIRED")
-    counts=Counter();groups=defaultdict(list);seen=set();dates=[]
+    counts=Counter();groups=defaultdict(list);pooled=defaultdict(list);seen=set();dates=[]
     for a in tom["days"]:
         d=a["day"];check(d in meta and d not in seen,"BAD_TOMATO_DAY");seen.add(d)
         dates.append(dict(day=d,status=a["status"],records=len(a["rows"])))
@@ -84,10 +116,12 @@ def study(src,bench,tom):
                     if any(x is None or x["market"]!=scope for x in path):out="MISSING_PATH"
                     else:out="OBSERVED";ret=outcome(path)
                 event=(d,c,ret,out)
+                # One event per selected symbol/date/horizon.
+                pooled[cohort,status,horizon].append(event)
                 for f,v in [("BASELINE","ALL"),*context.items()]:
                     groups[cohort,scope,state,s["setup"],status,horizon,f,v].append(event)
     rows=[dict(cohort=g,market=m,market_state=s,setup=p,tomato_status=t,horizon=h,context=f,value=v,**summarize_opportunity(es)) for (g,m,s,p,t,h,f,v),es in sorted(groups.items())]
-    return dict(schema="BLUE_TOMATO_CONTEXT_PILOT_V2",status="EXPLORATORY_NO_PROMOTION",asof=days[-1],days=dates,selection_counts=[dict(cohort=g,status=s,rows=n) for (g,s),n in sorted(counts.items())],rows=rows,limits=["FIXED_RESEARCH_FLOOR_8_THRESHOLD_70_NOT_USER_UI_SETTING","SAVED_SELECTED_TOP12_ONLY_NOT_ALL_ATTEMPTED_COMBINATIONS","RETROSPECTIVE_NOT_FORWARD_CAPTURE","LATEST_UNFROZEN_CANDIDATE_NOT_PERSISTED","AT_MOST_3_MATURE_DATES_PLUS_LATEST","NO_FULL_UNIVERSE_NEGATIVE_CONTROL_FOR_ABSENT_SIGNAL_ROWS","STORED_MA_NOT_INDEPENDENTLY_RECALCULATED","NO_INDEPENDENT_CALENDAR_OR_CORPORATE_ACTION_PROOF","NO_COSTS_OR_EXECUTION","NO_AUTOMATIC_HIGHLIGHT_OR_STRATEGY_CHANGE"],return_basis="PRIMARY: highest daily HIGH within full N subsequent index observations / first OPEN - 1. Lowest LOW and Nth CLOSE separately; latest candidate never scored.", target_basis="High reaches 3/5/10/15/20% above first OPEN, exact integer comparison. Full window required; prior full sessions adverse low excludes hit day; intraday order and fills unknown.", selection_basis="Existing saved tomato selection unchanged: historical tenth CLOSE based up rate, fixed floor 8 and threshold 70. V2 evaluates this same cohort by HIGH; not a new high-selected tomato definition.", giveback_basis="Peak HIGH minus terminal CLOSE in percentage points of entry; not realized profit or maximum drawdown.")
+    return dict(schema="BLUE_TOMATO_CONTEXT_PILOT_V3",pooled_rows=[dict(cohort=g,tomato_status=t,horizon=h,**summarize_opportunity(es)) for (g,t,h),es in sorted(pooled.items())],first_touch_basis="Exploratory +3/+5/+10 vs -3/-5 percent from first OPEN. First daily OPEN crossing resolves gap direction; otherwise same-day dual touch is UNKNOWN. Bounds count unknown as no/all target-first over all full-window observations. Not fills, returns or optimized strategy.",status="EXPLORATORY_NO_PROMOTION",asof=days[-1],days=dates,selection_counts=[dict(cohort=g,status=s,rows=n) for (g,s),n in sorted(counts.items())],rows=rows,limits=["FIXED_RESEARCH_FLOOR_8_THRESHOLD_70_NOT_USER_UI_SETTING","SAVED_SELECTED_TOP12_ONLY_NOT_ALL_ATTEMPTED_COMBINATIONS","RETROSPECTIVE_NOT_FORWARD_CAPTURE","LATEST_UNFROZEN_CANDIDATE_NOT_PERSISTED","AT_MOST_3_MATURE_DATES_PLUS_LATEST","NO_FULL_UNIVERSE_NEGATIVE_CONTROL_FOR_ABSENT_SIGNAL_ROWS","STORED_MA_NOT_INDEPENDENTLY_RECALCULATED","NO_INDEPENDENT_CALENDAR_OR_CORPORATE_ACTION_PROOF","NO_COSTS_OR_EXECUTION","NO_AUTOMATIC_HIGHLIGHT_OR_STRATEGY_CHANGE"],return_basis="PRIMARY: highest daily HIGH within full N subsequent index observations / first OPEN - 1. Lowest LOW and Nth CLOSE separately; latest candidate never scored.", target_basis="High reaches 3/5/10/15/20% above first OPEN, exact integer comparison. Full window required; prior full sessions adverse low excludes hit day; intraday order and fills unknown.", selection_basis="Existing saved tomato selection unchanged: historical tenth CLOSE based up rate, fixed floor 8 and threshold 70. V2 evaluates this same cohort by HIGH; not a new high-selected tomato definition.", giveback_basis="Peak HIGH minus terminal CLOSE in percentage points of entry; not realized profit or maximum drawdown.")
 if __name__=="__main__":
     p=argparse.ArgumentParser();p.add_argument("--out",type=Path,required=True);a=p.parse_args()
     read=lambda x:json.loads(Path(x).read_text())
