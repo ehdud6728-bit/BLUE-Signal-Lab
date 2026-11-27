@@ -88,3 +88,5 @@ test('permanent key service failures are distinguished and cannot authenticate',
  const r=await handler(request(t),env,{now,fetcher:async()=>{throw Object.assign(new Error('private'),{name:'TimeoutError'});}});
  assert.equal(r.status,503);assert.equal((await r.json()).error,'ACCESS_REQUIRED_API_KEYS_TIMEOUT');
 });
+
+test('tracking registry owner derived from authenticated subject, spoofed header stripped',async()=>{const a=await sign(),b=await sign({sub:'user2'});const owners=[];for(const t of [a,b,a]){const r=await handler(request(t,'/api/basket/tracking'),env,{now,fetcher},async(req,owner)=>{assert.match(owner,/^[a-f0-9]{64}$/);assert.equal(req.headers.get('X-Blue-Gateway-Token'),null);owners.push(owner);return Response.json({ok:true})});assert.equal(r.status,200)}assert.notEqual(owners[0],owners[1]);assert.equal(owners[0],owners[2]);assert.equal((await handler(request(a,'/api/basket/tracking','POST','https://evil.invalid'))).status,403)});

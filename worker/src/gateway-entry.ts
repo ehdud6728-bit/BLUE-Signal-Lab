@@ -6,6 +6,6 @@ export default api;
 // This named service binding entrypoint is not a public HTTP route.
 export class BlueWebGateway extends WorkerEntrypoint<GatewayEnv>{
  async fetch(request:Request):Promise<Response>{
-  return handleVerifiedGateway(request,this.env,(verified:Request)=>api.fetch(verified,this.env,this.ctx,true));
+  return handleVerifiedGateway(request,this.env,(verified:Request,owner?:string)=>api.fetch(verified,this.env,this.ctx,true,owner));
  }
 }

@@ -8,6 +8,8 @@ on:
       - 'research/env20_confluence_entry.py'
       - 'research/env20_technical_room.py'
       - 'research/env20_case_features.py'
+      - 'research/env20_landmark.py'
+      - 'research/test_env20_landmark.py'
       - 'research/test_env20_case_features.py'
       - 'tools/turso/full-universe-export.mjs'
       - 'tools/turso/full-universe-export.test.mjs'
@@ -43,6 +45,7 @@ jobs:
           python3 research/test_env20_confluence_entry.py
           python3 research/test_env20_technical_room.py
           python3 research/test_env20_case_features.py
+          python3 research/test_env20_landmark.py
       - name: Read audited source and compare fixed pullback rules
         if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.repository == 'ehdud6728-bit/BLUE-Signal-Lab'
         env:
@@ -57,6 +60,7 @@ jobs:
           node collector/src/market-trends.mjs benchmark_inspect
           node tools/turso/env20-pullback-factors.mjs
           python3 research/env20_case_features.py --source output/full-universe/source.json --benchmark output/full-universe/benchmark.json --factors output/full-universe/pullback-factors.json --out output/full-universe/pullback-report.json
+          python3 research/env20_landmark.py --report output/full-universe/pullback-report.json --cases output/full-universe/case-signals.json --outcomes output/full-universe/case-outcomes.json --out output/full-universe/landmark-report.json
       - uses: actions/upload-artifact@v4
         if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.repository == 'ehdud6728-bit/BLUE-Signal-Lab'
         with:
@@ -65,5 +69,6 @@ jobs:
             output/full-universe/pullback-report.json
             output/full-universe/case-signals.json
             output/full-universe/case-outcomes.json
+            output/full-universe/landmark-report.json
           if-no-files-found: error
           retention-days: 14

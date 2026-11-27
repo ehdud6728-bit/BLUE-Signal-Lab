@@ -14,6 +14,7 @@ import {tursoMarketRotation} from './turso-market-rotation';
 import {tursoMarketTrends} from './turso-market-trends';
 import {tursoRotationLeaders} from './turso-rotation-leaders';
 import {tursoForwardView,InvalidForwardView} from './turso-forward-view';
+import {trackingRegistry} from './turso-tracking-registry';
 import {handleTursoMarketAi,readMarketEodBreadth} from './turso-market-ai';
 import {InvalidPrivateCaseQuery,PrivateCaseSnapshotChanged,tursoPrivateCombinedCases} from './turso-private-combined-cases';
 import {InvalidResearchQuery,tursoResearchDates,tursoResearchSearch,tursoResearchChart,tursoResearchCoverage,tursoPatternPulse,tursoExitStudyReport} from './turso-research';
@@ -107,7 +108,7 @@ function scanDateOK(day: string): boolean {
 }
 
 export default {
-  async fetch(request: Request, env: Env, ctx: ExecutionContext, verifiedWebGateway=false): Promise<Response> {
+  async fetch(request: Request, env: Env, ctx: ExecutionContext, verifiedWebGateway=false,trackingOwner?:string): Promise<Response> {
     const origin = env.CORS_ORIGIN || 'http://localhost:5173';
     const cors: HeadersInit = {
       'Access-Control-Allow-Origin': origin,
@@ -154,6 +155,13 @@ export default {
         if(!access)return respond({error:'ACCESS_REQUIRED'},401);
         try{return respond(await tursoForwardView(env,u.searchParams));}
         catch(e){return respond({error:e instanceof InvalidForwardView?e.message:'FORWARD_VIEW_UNAVAILABLE'},e instanceof InvalidForwardView?400:503);}
+      }
+      // Only the verified private gateway can supply an authenticated owner.
+      if(p==='/api/basket/tracking'&&['GET','POST'].includes(request.method)){
+        if(!verifiedWebGateway||!trackingOwner)return respond({error:'ACCESS_REQUIRED'},401);
+        if(request.method==='POST'&&request.headers.get('Origin')!==origin)return respond({error:'ORIGIN_DENIED'},403);
+        try{const result=await trackingRegistry(request,env,trackingOwner);return respond(result.body,result.status);}
+        catch{return respond({error:'TRACKING_REGISTRY_UNAVAILABLE'},503);}
       }
       // Independent Turso market AI. Never accept client-supplied facts or use D1.
       if(p==='/api/research/market-ai'&&['GET','POST'].includes(request.method)){
