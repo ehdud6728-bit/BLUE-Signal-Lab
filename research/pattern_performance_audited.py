@@ -42,7 +42,7 @@ def recent_source(source, limit):
             "research_window_sessions":len(selected),
             "research_window_start":min(selected) if selected else None}
 
-def analyze(source):
+def analyze(source,cohort_sink=None):
     if source.get("format") != "BLUE_TURSO_EXIT_SOURCE_V1" or source.get("audits_readback_verified") is not True:
         raise ValueError("audited source required")
     days = [d["day"] for d in source["eod_days"]]
@@ -122,6 +122,8 @@ def analyze(source):
                     details.append((c,date.fromisoformat(d),p+"|"+shape+"|"+band,bars[d,c],future))
             for n in HORIZONS:
                 missing[n] += future[n] is None
+    if cohort_sink is not None:
+        cohort_sink({"rankings":rows,"candle_rankings":candles,"detail_rankings":details,"turnover_rankings":turnover,"market_rankings":markets})
     return {"schema":"BLUE_PATTERN_PERFORMANCE_AUDITED_V1",
             "status":"RESEARCH_ONLY_NO_PRODUCTION_PROMOTION",
             "asof":source["asof_day"],"audited_sessions":len(days),
