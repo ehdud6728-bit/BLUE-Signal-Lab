@@ -240,3 +240,11 @@
 - 실제 전달 완료: 기존 V6 실제539사례 검색형 HTML 및 대표6건 PNG를 사용자에게 제공. ZIP/입력해시·1840 OBSERVED 산술 일치, PNG 육안검토 및 HTML JS모의DOM 검사. 전체패턴 차트/외부가격 독립검증 완료로 주장하지 않음. 통합브랜치에서 tracking과공통차트 회귀를 함께 재검증한다.
 
 - 통합 작업본 회귀: Python72개 및 Node12개 총84개 통과, 두 workflow YAML 파싱과 diff 검사 통과. 최신통합 커밋의 원격CI는 별도 확인.
+
+
+## 2026-11-27 — 전체 패턴 차트 보관 실검증 및 암호화 회수 경로
+- [45968172007](https://github.com/ehdud6728-bit/BLUE-Signal-Lab/actions/runs/45968172007) main ad267e30a90673afb371e2de4bdce0ca2af28484, PRIVATE_CHARTS_MODE apply, PRIVATE_EVIDENCE_STORED 확인. asof2026-11-26, 31cohort/102고유사례, snapshot a7c6ac3c1e6744394fb5991cd4f292ef29eb0a917d7722c903d3c94334df7cfc. 기존inspect와 동일ID, 실제 private저장/readback 성공. 운영 자동추적과 별개.
+- 기존 read CLI가 있어도 이 대화 환경의 DB자격증명/Access조회 경로가 없어 파일 회수가 미완료였음. 재연구 없이 기존 snapshot을 SELECT→해시/내용검증→RSA-OAEP-SHA256+AES256-GCM envelope로 암호화하는 별도 수동 workflow 추가. 공개 artifact는 charts.sealed.json 하나,3일보관. 원시종목·HTML·비밀키·DB토큰 게시/로그출력 없음. 수신 공개키만소스보관,비밀키는대화작업공간에별도보관. 비밀키유실시새수신키로기존DB저장본다시회수가능,원본자료손실없음.
+- 기본 snapshot은 위의 검증저장ID, main/repository guard, PR에서는자격증명없이암호화테스트만 실행. 운영DB SELECT1회, 새테이블/행쓰기/자동스케줄/가격수집/앱권한 변경없음.
+- 로컬 Node 관련5개 통과(암호화roundtrip·무작위성·평문필드비노출·변조AAD/잘못된수신키거부·SELECT-only·원본해시변조거부 및기존private보관검사). YAML main/manual/암호문단일artifact검사, 저장소비밀키없음, diff검사통과. 원격실제암호화회수·복호화·파일전달은아직미실행.
+- 다음: PR CI/병합→BLUE Private Chart Encrypted Export 수동main/기본snapshot실행→암호문다운로드/수신키복호화/원본SHA및102사례재검증→HTML/대표이미지파일저장·전달. 이미전달한539사례V6파일은전체패턴102사례와다른모집단으로구분.

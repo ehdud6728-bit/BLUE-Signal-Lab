@@ -1,0 +1,49 @@
+name: BLUE Private Chart Encrypted Export (READ ONLY)
+on:
+  workflow_dispatch:
+    inputs:
+      snapshot_id:
+        description: 'Exact saved chart snapshot SHA256; reads existing data only'
+        type: string
+        required: true
+        default: a7c6ac3c1e6744394fb5991cd4f292ef29eb0a917d7722c903d3c94334df7cfc
+  pull_request:
+    paths:
+      - 'tools/turso/private-chart-export*'
+      - 'tools/turso/private-pattern-charts*'
+      - 'research/chart-export-recipient-public.pem'
+      - '.github/workflows/blue_private_chart_encrypted_export.yml'
+permissions:
+  contents: read
+concurrency:
+  group: blue-private-chart-encrypted-export
+  cancel-in-progress: false
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Verify encryption, tampering and SELECT-only snapshot retrieval
+        run: node --test tools/turso/private-chart-export.test.mjs tools/turso/private-pattern-charts.test.mjs
+      - name: Install existing read client
+        if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.repository == 'ehdud6728-bit/BLUE-Signal-Lab'
+        run: npm install --prefix tools/turso --no-audit --no-fund --ignore-scripts --no-package-lock
+      - name: Export stored chart evidence as authenticated ciphertext only
+        if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.repository == 'ehdud6728-bit/BLUE-Signal-Lab'
+        env:
+          TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
+          TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
+          CHART_SNAPSHOT_ID: ${{ inputs.snapshot_id }}
+          CHART_ENCRYPTED_OUT: output/private-chart-export/charts.sealed.json
+        run: node tools/turso/private-chart-export.mjs
+      - uses: actions/upload-artifact@v4
+        if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.repository == 'ehdud6728-bit/BLUE-Signal-Lab'
+        with:
+          name: BLUE_PRIVATE_CHART_ENCRYPTED_EXPORT
+          path: output/private-chart-export/charts.sealed.json
+          if-no-files-found: error
+          retention-days: 3
