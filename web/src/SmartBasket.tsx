@@ -19,7 +19,8 @@ import BasketSupplyRecordRow from './BasketSupplyRecordRow';
 import {readSupplyAtDiscovery,supplyFromSearchExtras,validSupplyRecord,type BasketSupplyRecord} from './basket-supply-record';
 import {fetchResearchEvidenceTursoFirst} from './turso-research-reader';
 import {discoveryTechnicalBadges,validDiscoveryTechnicalBadges,type DiscoveryTechBadge} from './discovery-technical';
-import {appendBasketRecord,pendingBasketQuickAdds} from './basket-quick-queue';
+import {pendingBasketQuickAdds} from './basket-quick-queue';
+import {MAX_BASKET_CODES,INITIAL_PRECISE_CODES,uniqueCodes,preciseCodes,canAddCode,dedupeRecords,appendTracked,togglePrecise,withinTrackingLimits} from './basket-tracking-limits';
 import {highestObservedPrice,lowestObservedPrice,basketReturn,rankBasketRecords,chooseBasketObservation,confirmedTrailingHigh,
  type BasketRank,type GainBasis} from './basket-rank';
 
@@ -63,7 +64,7 @@ type BasketItem={discovery?:ProvisionalDiscovery;id:string;source:'MANUAL'|'AI';
   added_at:string;signals:string[];memo:string;reason?:string;risk?:string;watch?:string;
   technicalBadges?:DiscoveryTechBadge[];
   selectionOrigin?:BasketSelectionOrigin;analysisMatched?:boolean;
-  protected?:boolean;protected_at?:string;
+  protected?:boolean;protected_at?:string;precise?:boolean;
   patternUp10d?:number;patternN10d?:number;patternLabel10d?:string;patternDays10d?:string[];
   stopMethod?:StopMethod; supplyRecord?:BasketSupplyRecord; supplyMemo?:string};
 type Quote={code:string;market:string;trade_date_kst:string;price:number;received_at_utc:string;exchange_tick_time_verified?:boolean};
@@ -71,18 +72,9 @@ type Quotes={status:string;items:Quote[];age_minutes?:number|null;latest_receive
 const cash=(v:number|null|undefined)=>typeof v==='number'&&Number.isFinite(v)?v.toLocaleString('ko-KR'):'—';
 const validDay=(s:unknown)=>typeof s==='string'&&/^\d{4}-\d{2}-\d{2}$/.test(s)&&!Number.isNaN(Date.parse(s+'T00:00:00Z'));
 const validCode=(s:unknown)=>typeof s==='string'&&/^\d{6}$/.test(s);
-function keepQuotas(list:BasketItem[]):BasketItem[]{
- const seen=new Set<string>();let regular=0,locked=0;
- return list.filter(x=>{
-  if(seen.has(x.id))return false;
-  if(x.protected===true){if(locked>=MAX_PROTECTED)return false;locked++;}
-  else {if(regular>=MAX_REGULAR)return false;regular++;}
-  seen.add(x.id);return true;
- });
-}
 function readItems():BasketItem[]{
  try {const json=localStorage.getItem(STORE);if(!json)return [];const arr=JSON.parse(json);
-  return Array.isArray(arr)?keepQuotas(arr.filter(validItem)):[];
+  return Array.isArray(arr)?dedupeRecords(arr.filter(validItem)):[];
  } catch{return [];}
 }
 function validDiscovery(x:any,day:string):x is ProvisionalDiscovery{
@@ -97,6 +89,7 @@ function validItem(x:any):x is BasketItem{
   (x.selectionOrigin===undefined||(x.source==='MANUAL'&&['SEARCH','ANALYSIS'].includes(x.selectionOrigin)))&&
   (x.analysisMatched===undefined||(x.selectionOrigin==='ANALYSIS'&&typeof x.analysisMatched==='boolean'))&&
   (x.protected===undefined||typeof x.protected==='boolean')&&
+  (x.precise===undefined||typeof x.precise==='boolean')&&
   (x.protected_at===undefined||typeof x.protected_at==='string')&&
    (x.stopMethod===undefined||(['SUPPORT','ATR','MA20','TRAILING'] as string[]).includes(x.stopMethod))&&
    (x.patternUp10d===undefined||(typeof x.patternUp10d==='number'&&Number.isFinite(x.patternUp10d)&&x.patternUp10d>=0&&x.patternUp10d<=100))&&
@@ -144,13 +137,19 @@ export default function SmartBasket({quickAddRequests,onItemsChange,onAddFeedbac
  patternHighlightMin?:number|null;
  patternSampleMin?:number;
 }){
- const [items,setItems]=useState<BasketItem[]>(readItems);
+ const [items,commitItems]=useState<BasketItem[]>(readItems);
+ // Synchronous latest-state guard for rapid taps and async AI/import replies.
+ const itemsRef=useRef(items);
+ function setItems(update:BasketItem[]|((old:BasketItem[])=>BasketItem[])){
+  const next=typeof update==='function'?update(itemsRef.current):update;
+  itemsRef.current=next;commitItems(next);
+ }
  const [supplyBusy,setSupplyBusy]=useState<string[]>([]);
  const supplyLoading=useRef<Set<string>>(new Set());
  const handledQuickAdd=useRef(0);
  const isHot=(x:BasketItem)=>hotPattern(x,patternHighlightMin,patternSampleMin);
  const evidenceAttempted=useRef<Set<string>>(new Set());
- const [filter,setFilter]=useState<'ALL'|'MANUAL'|'AI'|'PROTECTED'>('ALL');
+ const [filter,setFilter]=useState<'ALL'|'MANUAL'|'AI'|'PROTECTED'|'PRECISE'|'BASIC'>('ALL');
  const [cleanupDays,setCleanupDays]=useState(60);
  const [lastRemoved,setLastRemoved]=useState<BasketItem[]>([]);
  // R157_BASKET_FILTERS: local display filters; persisted basket order/data never changed.
@@ -326,14 +325,14 @@ export default function SmartBasket({quickAddRequests,onItemsChange,onAddFeedbac
    setError(msg);onAddFeedback?.(msg);return;
   }
   const id=`${source}:${data.code}:${data.day}`;
-  if(items.some(it=>it.id===id)){setMessage('이미 담긴 종목입니다.');onAddFeedback?.(`${data.name||data.code} · 이미 담긴 종목입니다.`);return;}
-  if(items.filter(x=>!x.protected).length>=MAX_REGULAR){const msg='일반 관찰함은 100건까지 가능합니다. 오래 보려는 종목은 장기 관찰로 보호하세요.';setError(msg);onAddFeedback?.(msg);return;}
+  if(itemsRef.current.some(it=>it.id===id)){setMessage('이미 담긴 종목입니다.');onAddFeedback?.(`${data.name||data.code} · 이미 담긴 종목입니다.`);return;}
+  if(!canAddCode(itemsRef.current,data.code)||itemsRef.current.filter(x=>!x.protected).length>=MAX_REGULAR){const msg='전체 50종목 또는 일반 발견 기록 100건 한도입니다. 기존 종목을 정리하세요.';setError(msg);onAddFeedback?.(msg);return;}
   const p=source==='AI'?data as AiPick:null;
   const initialSupply=source==='MANUAL'?supplyFromSearchExtras((data as SearchRow).extras,data.day):undefined;
   const technicalBadges=source==='MANUAL'?
     (validDiscoveryTechnicalBadges((data as SearchRow).technicalBadges)?(data as SearchRow).technicalBadges!:
       discoveryTechnicalBadges((data as SearchRow).extras)):[];
-  setItems(prev=>appendBasketRecord(prev,{id,source,code:data.code,name:data.name||data.code,day:data.day,
+  setItems(prev=>appendTracked(prev,{id,source,code:data.code,name:data.name||data.code,day:data.day,
     baseline:data.close_price as number,added_at:new Date().toISOString(),signals:data.signals||[],memo:'',
     technicalBadges,...(discovery?{discovery}:{}),
     ...(source==='MANUAL'?{selectionOrigin,...(selectionOrigin==='ANALYSIS'&&typeof analysisMatched==='boolean'?{analysisMatched}:{})}:{}),
@@ -358,22 +357,18 @@ export default function SmartBasket({quickAddRequests,onItemsChange,onAddFeedbac
      // R157_AI_AUTO_ADD: only server-verified picks, never invent a basket item.
      const picked=(Array.isArray(d.items)?d.items:[]).filter(p=>validCode(p.code)&&validDay(p.day)&&
        Number.isFinite(p.close_price)&&p.close_price>0).slice(0,6);
-     const already=new Set(items.map(x=>x.id));
-     const unique=picked.filter(p=>!already.has(`AI:${p.code}:${p.day}`));
-     setItems(old=>{
-      const existing=new Set(old.map(x=>x.id));
-      const room=Math.max(0,MAX_REGULAR-old.filter(x=>!x.protected).length);
-      const additions=unique.filter(p=>!existing.has(`AI:${p.code}:${p.day}`)).slice(0,room).map(p=>({
-       id:`AI:${p.code}:${p.day}`,source:'AI' as const,code:p.code,name:p.name||p.code,
+     let next=itemsRef.current;const added:AiPick[]=[];
+     for(const p of picked){
+      const candidate:BasketItem={id:`AI:${p.code}:${p.day}`,source:'AI',code:p.code,name:p.name||p.code,
        day:p.day,baseline:p.close_price,added_at:new Date().toISOString(),signals:p.signals||[],
-       memo:'',reason:p.reason,risk:p.risk,watch:p.watch,supplyMemo:''
-      }));
-      return additions.length?[...additions,...old]:old;
-     });
-     const capacity=Math.max(0,MAX_REGULAR-items.filter(x=>!x.protected).length);
-     for(const p of unique.slice(0,capacity)){void captureSupply(`AI:${p.code}:${p.day}`,p.code,p.day,p.close_price);}
+       memo:'',reason:p.reason,risk:p.risk,watch:p.watch,supplyMemo:''};
+      const updated=appendTracked(next,candidate,MAX_REGULAR);
+      if(updated!==next){added.push(p);next=updated;}
+     }
+     setItems(next);
+     for(const p of added){void captureSupply(`AI:${p.code}:${p.day}`,p.code,p.day,p.close_price);}
      setShowAi(false);setFilter('AI');setDayFilter('ALL');setRank('RECENT');setQuery('');
-     setMessage(picked.length?`AI 후보 ${picked.length}종목 확인 · 신규 ${Math.min(unique.length,Math.max(0,MAX_REGULAR-items.filter(x=>!x.protected).length))}종목 자동 등록 · 기존 후보는 중복 제외`:
+     setMessage(picked.length?`AI 후보 ${picked.length}종목 확인 · 신규 ${added.length}건 등록 · 중복 및 한도 제외`:
        'AI가 이번 기준일의 관찰 후보를 보류했습니다.');
     }
     if(d.status==='PENDING')setMessage('다른 요청에서 분석 중입니다. 잠시 뒤 화면을 다시 열어 주세요.');
@@ -389,18 +384,25 @@ export default function SmartBasket({quickAddRequests,onItemsChange,onAddFeedbac
  }
  async function importBackup(file:File|undefined){if(!file)return;if(file.size>900000){setError('백업 파일은 900KB 이하만 가능합니다.');return;}
   try{const obj=JSON.parse(await file.text());if(obj.version!==1||!Array.isArray(obj.items))throw Error('지원하지 않는 파일입니다.');
-   if(obj.items.length>MAX_REGULAR+MAX_PROTECTED||obj.items.some((x:unknown)=>!validItem(x)))throw Error('관찰함 데이터 형식이 맞지 않습니다.');
-   const all=new Map(items.map(x=>[x.id,x]));
+   if(obj.items.length>1000||obj.items.some((x:unknown)=>!validItem(x)))throw Error('관찰함 데이터 형식이 맞지 않습니다.');
+   const current=itemsRef.current;
+   const all=new Map(current.map(x=>[x.id,x]));
    for(const x of obj.items as BasketItem[]){
      const original=all.get(x.id);
      // Never clear an existing long-term protection through an older backup.
      all.set(x.id,original?.protected&&!x.protected?{...x,protected:true,protected_at:original.protected_at}:x);
    }
-   const merged=[...all.values()];
-   if(merged.filter(x=>x.protected).length>MAX_PROTECTED||merged.filter(x=>!x.protected).length>MAX_REGULAR)
-     throw Error('백업 병합 후 한도를 초과합니다. 일반 100건·장기 관찰 20건 이내로 정리한 뒤 다시 시도하세요.');
+   const merged=dedupeRecords([...all.values()].map(x=>preciseCodes(current).has(x.code)?{...x,precise:true}:x));
+   if(!withinTrackingLimits(current,merged)||merged.filter(x=>x.protected).length>Math.max(MAX_PROTECTED,current.filter(x=>x.protected).length)||merged.filter(x=>!x.protected).length>Math.max(MAX_REGULAR,current.filter(x=>!x.protected).length))
+     throw Error('백업 병합 후 전체 50종목·정밀 10종목 또는 기존 발견 기록 한도를 초과합니다. 기존 자료는 그대로 유지합니다.');
    setItems(merged);setLastRemoved([]);setError('');setMessage('백업을 가져왔습니다. 기존 장기 관찰 보호 설정은 유지했습니다.');
   }catch(e){setError(e instanceof Error?e.message:'백업 파일 오류');}
+ }
+ const codeCount=uniqueCodes(items).size,pinnedCodes=preciseCodes(items);
+ function changePrecise(code:string){
+  const old=itemsRef.current,next=togglePrecise(old,code);
+  if(next===old){setError('정밀 추적 지정은 초기 10종목 한도이며 전체 50종목 초과 상태에서는 신규 지정할 수 없습니다.');return;}
+  setItems(next);setError('');setMessage(preciseCodes(next).has(code)?'정밀 추적 지정 · 자동 분석 연결 전':'정밀 추적 해제 · 기본 추적 대상');
  }
  const normalCount=items.filter(x=>!x.protected).length;
  const lockedCount=items.length-normalCount;
@@ -425,10 +427,11 @@ export default function SmartBasket({quickAddRequests,onItemsChange,onAddFeedbac
   setMessage(`일반 관찰 ${expired.length}건 정리 완료 · 장기 관찰 ${lockedCount}건 유지 · 백업 파일 저장`);setError('');
  }
  function undoCleanup(){
-  const existing=new Set(items.map(x=>x.id));
+  const current=itemsRef.current,existing=new Set(current.map(x=>x.id));
   const restore=lastRemoved.filter(x=>!existing.has(x.id));
-  if(normalCount+restore.length>MAX_REGULAR){setError('일반 관찰 100건 한도 때문에 되돌릴 수 없습니다.');return;}
-  setItems(old=>[...restore,...old]);setLastRemoved([]);setError('');setMessage(`${restore.length}건 되돌렸습니다.`);
+  const restored=dedupeRecords([...restore,...current]);
+  if(!withinTrackingLimits(current,restored)||current.filter(x=>!x.protected).length+restore.length>Math.max(MAX_REGULAR,current.filter(x=>!x.protected).length)){setError('현재 추적 또는 발견 기록 한도 때문에 되돌릴 수 없습니다. 백업은 유지됩니다.');return;}
+  setItems(restored);setLastRemoved([]);setError('');setMessage(`${restore.length}건 되돌렸습니다.`);
  }
  const latestQuote=new Map<string,Quote>();
  for(const q of quotes?.items||[]){
@@ -439,7 +442,7 @@ export default function SmartBasket({quickAddRequests,onItemsChange,onAddFeedbac
  // R157_FILTER_SOURCE: keep source/date/name filtering independent of saved records.
  const availableDays=[...new Set(items.map(x=>x.day))].sort((a,b)=>b.localeCompare(a));
  const normalizedQuery=query.trim().toLocaleLowerCase('ko-KR');
- const scoped=items.filter(x=>(filter==='ALL'||(filter==='PROTECTED'?x.protected===true:x.source===filter))&&
+ const scoped=items.filter(x=>(filter==='ALL'||(filter==='PROTECTED'?x.protected===true:filter==='PRECISE'?pinnedCodes.has(x.code):filter==='BASIC'?!pinnedCodes.has(x.code):x.source===filter))&&
    (dayFilter==='ALL'||x.day===dayFilter)&&
    (!normalizedQuery||x.code.includes(normalizedQuery)||x.name.toLocaleLowerCase('ko-KR').includes(normalizedQuery)));
  const metricPrice=(x:BasketItem,basis:GainBasis):number|null=>{
@@ -476,7 +479,7 @@ export default function SmartBasket({quickAddRequests,onItemsChange,onAddFeedbac
      <div><span>AI 선택</span><strong>{items.filter(x=>x.source==='AI').length}</strong></div>
      <div><span>성과 차이</span><strong>{comparable?((machine.avg??0)-(manual.avg??0)>0?'+':'')+((machine.avg??0)-(manual.avg??0)).toFixed(2)+'%p':'—'}</strong></div>
    </div>
-   <div className="r158-capacity" role="status"><span>일반 <strong>{normalCount}/{MAX_REGULAR}</strong></span><span>장기 관찰 <strong>{lockedCount}/{MAX_PROTECTED}</strong></span><small>장기 관찰은 일반 한도와 별도 · 자동 정리 제외</small></div>
+   <div className="r158-capacity" role="status"><span>전체 <strong>{codeCount}/{MAX_BASKET_CODES}종목</strong></span><span>정밀 <strong>{pinnedCodes.size}/{INITIAL_PRECISE_CODES}종목</strong></span><span>기본 <strong>{codeCount-pinnedCodes.size}종목</strong></span><small>장기 관찰 {lockedCount}건 · 기존 기록 보호 유지 · 추적 등급 지정만 가능 (30/120분 자동 분석 미연결)</small>{codeCount>MAX_BASKET_CODES&&<small role="alert">기존 {codeCount}종목 보존 중 · 신규 종목 추가 전 정리 필요</small>}</div>
    {ai?.status==='READY'&&<details className="r152-ai-candidates" open={showAi} onToggle={e=>setShowAi(e.currentTarget.open)}>
      <summary><span>AI 관찰 후보 <strong>{(ai.items||[]).length}종목</strong></span><small>{ai.asof} · {ai.cached?'저장된 분석':'새 분석'}</small></summary>
      <div className="basket-ai-results"><small>Gemini 검토 결과 · {ai.model}</small>
@@ -499,7 +502,7 @@ export default function SmartBasket({quickAddRequests,onItemsChange,onAddFeedbac
     {compareChecked&&<span> · 시세 비교 조회 완료 {new Date(compareChecked).toLocaleTimeString('ko-KR',{timeZone:'Asia/Seoul'})} KST</span>}
     {confirmedKey&&performanceChecked&&<span> · 기존 추적 조회 완료 {new Date(performanceChecked).toLocaleTimeString('ko-KR',{timeZone:'Asia/Seoul'})} KST</span>}
    </p>}
-  <div className="basket-tabs" role="group" aria-label="장바구니 분류">{([['ALL','전체'],['MANUAL','내 선택'],['AI','AI 선택'],['PROTECTED','장기 관찰']] as const).map(([key,title])=><button
+  <div className="basket-tabs" role="group" aria-label="장바구니 분류">{([['ALL','전체'],['MANUAL','내 선택'],['AI','AI 선택'],['PRECISE','정밀 추적'],['BASIC','기본 추적'],['PROTECTED','장기 관찰']] as const).map(([key,title])=><button
     key={key} type="button" aria-pressed={filter===key} className={filter===key?'active':''} onClick={()=>setFilter(key)}>{title}</button>)}</div>
    <div className="r157-basket-filters" aria-label="장바구니 정렬과 검색">
      <div className="r157-rank-pills" role="group" aria-label="수익률 필터">
@@ -545,7 +548,7 @@ export default function SmartBasket({quickAddRequests,onItemsChange,onAddFeedbac
        aria-expanded={expandedCodes.includes(group.code)}
        onClick={()=>setExpandedCodes(prev=>prev.includes(group.code)?prev.filter(c=>c!==group.code):[...prev,group.code])}>
        <span><strong>{group.name} ({group.code}) · {group.records.length}개 발견 기록</strong>
-         <small>{group.records.map(it=>it.day).join(' · ')} · 펼쳐서 개별 수익률 확인</small></span>
+         <small>{pinnedCodes.has(group.code)?'정밀 추적 지정 · ':'기본 추적 · '}{group.records.map(it=>it.day).join(' · ')} · 펼쳐서 개별 수익률 확인</small></span>
        <ChevronDown size={17}/></button>}
      {(!groupSimilar||group.records.length===1||expandedCodes.includes(group.code))&&
        <div className="r1595-group-records">{group.records.map(it=>{const q=latestQuote.get(it.code);
@@ -570,9 +573,10 @@ export default function SmartBasket({quickAddRequests,onItemsChange,onAddFeedbac
      <div className="basket-record-head"><div><span className={`basket-src ${it.source==='AI'?'ai':''}`}>{it.source==='AI'?'AI 선택':it.selectionOrigin==='ANALYSIS'?'사용자 선택 · 정밀분석':'사용자 선택 · 검색'}</span>
        <strong>{it.name}</strong> <small>{it.code}</small>{it.protected&&<span className="r158-locked">장기 관찰</span>}</div>
        <div className="r158-record-actions">
+        <button type="button" className="r250-precise" style={{color:pinnedCodes.has(it.code)?'#b58a35':'#64748b'}} aria-pressed={pinnedCodes.has(it.code)} title={pinnedCodes.has(it.code)?'정밀 추적 해제':'정밀 추적 지정'} aria-label={`${it.name} ${pinnedCodes.has(it.code)?'정밀 추적 해제':'정밀 추적 지정'}`} onClick={()=>changePrecise(it.code)}>{pinnedCodes.has(it.code)?<BookmarkCheck size={17}/>:<Bookmark size={17}/>}<small>{pinnedCodes.has(it.code)?'정밀':'기본'}</small></button>
         <button type="button" className={'r158-protect '+(it.protected?'active':'')} aria-pressed={it.protected===true}
           title={it.protected?'장기 관찰 보호 해제':'장기 관찰로 보호'} aria-label={`${it.name} ${it.protected?'보호 해제':'장기 관찰 등록'}`}
-          onClick={()=>toggleProtection(it.id)}>{it.protected?<BookmarkCheck size={17}/>:<Bookmark size={17}/>}</button>
+          onClick={()=>toggleProtection(it.id)}>{it.protected?<BookmarkCheck size={17}/>:<Bookmark size={17}/>}<small>장기</small></button>
         <button type="button" className="basket-delete" title={it.protected?'장기 관찰 보호 해제 후 삭제 가능':'장바구니에서 제거'}
           disabled={it.protected===true} aria-label={`${it.name} 제거`}
           onClick={()=>setItems(old=>old.filter(x=>x.protected||x.id!==it.id))}><Trash2 size={16}/></button>
@@ -631,7 +635,7 @@ export default function SmartBasket({quickAddRequests,onItemsChange,onAddFeedbac
        <label className="basket-memo">관찰 메모<input value={it.memo} maxLength={240} placeholder="추세선·거래량·다음 확인 항목" onChange={e=>setItems(old=>old.map(x=>x.id===it.id?{...x,memo:e.target.value}:x))}/></label>
      </details>
     </article>})}</div>}</section>)}</div>}
-  <p className="basket-foot">장기 관찰 보호는 이 브라우저에서의 목록 정리·삭제 방지 기능입니다. 캐시 삭제·기기 변경까지 보장하지 않으므로 JSON 백업을 보관하세요. R1.5.3 검색일 다음 거래일부터의 KIS 원주가 일봉 고가를 사용합니다. 액면분할·합병에 따른 가격 보정은 하지 않아 수익률 왜곡 가능성이 있습니다. 수집 토큰 상태·장외시간에 따라 2분 안에 값이 표시되지 않을 수 있습니다. 장중 확인가는 확정 종가와 다릅니다. 연구 전용 · 등록 기준은 실제 체결가가 아닌 과거 확정 종가 또는 최초 KIS 관측가입니다. 성과는 후속 KRX 수집 스냅샷이 있을 때만 참고 비교하며, 최신 체결 확인·수수료·세금·배당·수정주가를 반영하지 않습니다. AI 후보는 검증된 투자 우위가 아닙니다. 장바구니는 현재 브라우저에만 저장됩니다.</p>
+  <p className="basket-foot">장기 관찰 보호는 이 브라우저에서의 목록 정리·삭제 방지 기능입니다. 캐시 삭제·기기 변경까지 보장하지 않으므로 JSON 백업을 보관하세요. R1.5.3 검색일 다음 거래일부터의 KIS 원주가 일봉 고가를 사용합니다. 액면분할·합병에 따른 가격 보정은 하지 않아 수익률 왜곡 가능성이 있습니다. 수집 토큰 상태·장외시간에 따라 2분 안에 값이 표시되지 않을 수 있습니다. 장중 확인가는 확정 종가와 다릅니다. 연구 전용 · 등록 기준은 실제 체결가가 아닌 과거 확정 종가 또는 최초 KIS 관측가입니다. 성과는 후속 KRX 수집 스냅샷이 있을 때만 참고 비교하며, 최신 체결 확인·수수료·세금·배당·수정주가를 반영하지 않습니다. AI 후보는 검증된 투자 우위가 아닙니다. 장바구니와 정밀 추적 지정은 현재 브라우저에만 저장됩니다. 자동 30/120분 분석, 서버 한도 및 시세 5분 보장은 아직 연결되지 않았습니다.</p>
    <details className="r152-data-management"><summary>데이터 관리 · 기기 변경 시 백업</summary>
      <div className="basket-actions"><button type="button" onClick={saveBackup}><Download size={15}/> 백업 저장</button>
        <label className="basket-import"><Upload size={15}/> 백업 가져오기<input type="file" accept=".json,application/json" onChange={e=>{void importBackup(e.target.files?.[0]);e.target.value='';}}/></label>
