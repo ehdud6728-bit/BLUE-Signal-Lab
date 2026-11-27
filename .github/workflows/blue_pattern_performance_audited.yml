@@ -8,8 +8,14 @@ on:
         type: choice
         options: ['60','120','250']
         default: '60'
+      private_charts_mode:
+        description: 'off: existing aggregate only / inspect: private chart validation / apply: private Turso evidence storage'
+        type: choice
+        options: ['off','inspect','apply']
+        default: 'off'
   pull_request:
     paths:
+      - 'tools/turso/private-pattern-charts*'
       - 'research/pattern_performance*.py'
       - 'research/pattern_entry_timing.py'
       - 'research/price_path_readiness.py'
@@ -33,6 +39,10 @@ jobs:
         run: python3 research/test_pattern_performance_audited.py
       - name: All basic and recommended pattern landmark tests
         run: python3 research/test_pattern_performance_landmark.py
+      - name: Private all-pattern chart evidence tests
+        run: |
+          python3 research/test_pattern_performance_chart_evidence.py
+          node --test tools/turso/private-pattern-charts.test.mjs
       - name: Recommendation threshold test
         run: python3 research/test_pattern_performance_web_snapshot.py
       - name: Web export and change history test
@@ -91,10 +101,20 @@ jobs:
           python3 research/pattern_performance_archive.py --input output/pattern/web-snapshot.json --archive output/pattern/archive
       - name: All same-run basic and recommended pattern evolution (manual only)
         if: github.ref == 'refs/heads/main' && github.event_name == 'workflow_dispatch'
+        env:
+          PRIVATE_CHARTS_MODE: ${{ inputs.private_charts_mode || 'off' }}
+          TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
+          TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
         run: |
+          set -euo pipefail
+          private_dir=$(mktemp -d "$RUNNER_TEMP/blue-pattern-charts.XXXXXX")
+          trap 'rm -rf "$private_dir"' EXIT
+          chart_args=()
+          case "$PRIVATE_CHARTS_MODE" in off) ;; inspect|apply) chart_args=(--private-charts "$private_dir/bundle.json");; *) exit 1;; esac
           python3 research/pattern_performance_audited.py --input output/pattern/source.json --output output/pattern/all-pattern-selection-report.json --recent-window 28
           python3 research/pattern_performance_web_snapshot.py --input output/pattern/all-pattern-selection-report.json --output output/pattern/all-pattern-selection.json
-          python3 research/pattern_performance_landmark.py --source output/pattern/source.json --snapshot output/pattern/all-pattern-selection.json --out output/pattern/all-pattern-landmark.json
+          python3 research/pattern_performance_landmark.py --source output/pattern/source.json --snapshot output/pattern/all-pattern-selection.json --out output/pattern/all-pattern-landmark.json "${chart_args[@]}"
+          if [[ "$PRIVATE_CHARTS_MODE" != off ]]; then node tools/turso/private-pattern-charts.mjs "$PRIVATE_CHARTS_MODE" "$private_dir/bundle.json"; fi
       - uses: actions/upload-artifact@v4
         if: github.ref == 'refs/heads/main' && (github.event_name == 'workflow_dispatch' || (github.event_name == 'schedule' && vars.BLUE_ADAPTIVE_AUTO_ENABLED == 'true'))
         with:
