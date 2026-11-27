@@ -47,7 +47,27 @@ export async function trackingRegistry(req:Request,env:Env,owner:string,{factory
    return {revision,items:validateRoster(JSON.parse(String(row.roster_json))),updated_at};
   };
   const current=await read();
-  if(req.method==='GET')return response(200,{status:current.revision?'REGISTERED':'NOT_REGISTERED',...current,auto_tracking:false});
+  if(req.method==='GET'){
+    const quotes = [];
+    let quotes_available = true;
+    if(current.items.length){
+      try {
+        const codes = current.items.map(item=>item.code);
+        const result = await db.execute({sql:`SELECT code,close,trade_day,observed_at_utc
+          FROM blue_kis_provisional_daily_v1
+          WHERE trade_day=(SELECT MAX(trade_day) FROM blue_kis_provisional_daily_v1 WHERE trade_day<=?)
+          AND code IN (${codes.map(()=>'?').join(',')}) AND market='J' ORDER BY code`,
+          args:[new Date(now.getTime()+9*3600000).toISOString().slice(0,10),...codes]});
+        for(const row of result.rows){
+          const price = Number(row.close), observed = Date.parse(String(row.observed_at_utc));
+          if(!Number.isSafeInteger(price)||price<=0||!Number.isFinite(observed)||observed>now.getTime())continue;
+          quotes.push({code:String(row.code),price,day:String(row.trade_day),observed_at:String(row.observed_at_utc)});
+        }
+      } catch { quotes_available=false; }
+    }
+    return response(200,{status:current.revision?'REGISTERED':'NOT_REGISTERED',...current,
+      quotes,quotes_available,auto_tracking:false});
+  }
   if(current.revision!==expected)return response(409,{error:'REVISION_CONFLICT'});
   const payload=JSON.stringify(items);
   if(current.revision&&payload===JSON.stringify(current.items))return response(200,{status:'UNCHANGED',...current,auto_tracking:false});

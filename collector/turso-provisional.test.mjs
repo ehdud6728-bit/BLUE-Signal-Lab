@@ -351,3 +351,19 @@ test('regular phase response crossing 15:20 is not mislabeled as a regular obser
  assert.equal(result.status,'COLLECTION_WINDOW_ENDED');assert.equal(result.rejected,1);
  assert.equal(result.reasons.RESPONSE_OUTSIDE_COLLECTION_WINDOW,1);assert.equal(state.batches.length,0);
 });
+
+test('registered quote joins the same bounded request list and provisional write batch',async()=>{
+ const {db,state}=mockDb(),execute=db.execute.bind(db),calls=[];
+ db.execute=async q=>{
+   if(typeof q==='string'&&q.startsWith('SELECT r.roster_json'))return {rows:[{roster_json:JSON.stringify([{code:'028050',precise:false}])}]};
+   if(q.sql?.includes('AND code IN')){assert.deepEqual(q.args,['2026-11-18','028050']);return {rows:[{code:'028050',name:'fixture',close:66000}]};}
+   return execute(q);
+ };
+ const result=await collectTursoProvisional(env({TURSO_PROVISIONAL_QUOTES_ENABLED:'true'}),NOW,deps(db,{
+   quote:async(_env,_token,_venue,code)=>{calls.push(code);return quote();}
+ }));
+ assert.equal(result.status,'SAVED');assert.equal(calls[0],'028050');
+ assert.equal(calls.filter(c=>c==='028050').length,1);
+ assert.ok(calls.length<=result.batch_cap);
+ assert.ok(state.batches.some(b=>b.statements.some(q=>q.sql.includes('INSERT INTO blue_kis_provisional_daily_v1')&&q.args[1]==='028050')));
+});
