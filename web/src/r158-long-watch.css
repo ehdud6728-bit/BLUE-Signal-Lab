@@ -20,3 +20,16 @@
 .r158-cleanup-controls button.r158-undo{border:1px solid #9bb8e7;background:#f0f5ff;color:#2458a8}
 .r158-cleanup>small{font-size:10px;color:#8495aa;line-height:1.5}
 @media(max-width:700px){.r158-capacity{gap:5px 9px}.r158-protect{width:32px;height:32px}.r158-locked{font-size:9px}}
+
+/* R252: compact action-only toggles, independent of research card outlines. */
+.blue-basket .r252-basket-tabs{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:5px;align-items:stretch}
+.blue-basket .r252-basket-tabs button{min-width:0;min-height:40px;width:100%;height:auto;padding:7px 3px;white-space:nowrap;word-break:keep-all;font-size:12px;line-height:1.2;text-align:center}
+.blue-basket .basket-record-head{gap:6px;align-items:center}
+.blue-basket .basket-record-head>div:first-child{min-width:0;flex:1}
+.blue-basket .basket-record-head>.r158-record-actions{flex:0 0 auto;flex-wrap:nowrap;gap:4px}
+.blue-basket .r252-icon-action{box-sizing:border-box;display:inline-flex;align-items:center;justify-content:center;flex:0 0 36px;width:36px;height:36px;padding:0;border:1px solid #d3dce7;border-radius:8px;color:#718096;background:#f9fbfd;cursor:pointer}
+.blue-basket .r250-precise[aria-pressed=true]{background:#fff0ee;color:#c43832;border-color:#e7a39c}
+.blue-basket .r158-protect[aria-pressed=true]{background:#fff5d6;color:#8d6500;border-color:#e1c468}
+.blue-basket .r252-icon-action:disabled{opacity:.35;cursor:not-allowed}
+.blue-basket .r252-icon-action:focus-visible{outline:2px solid #2863dc;outline-offset:2px}
+@media(max-width:380px){.blue-basket .r252-basket-tabs{gap:3px}.blue-basket .r252-basket-tabs button{font-size:11px;padding:6px 2px}.blue-basket .r252-icon-action{flex-basis:34px;width:34px;height:36px}}

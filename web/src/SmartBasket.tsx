@@ -5,7 +5,7 @@
 import {ForwardSymbolResearch} from './ForwardResearch';
 import {useEffect,useRef,useState} from 'react';
 import {basketReadDue} from './basket-polling';
-import {Bot,Download,Upload,Trash2,RefreshCw,AlertCircle,ShoppingBasket,Bookmark,BookmarkCheck,ChevronDown} from 'lucide-react';
+import {Bot,Download,Upload,Trash2,RefreshCw,AlertCircle,ShoppingBasket,Bookmark,BookmarkCheck,Lock,LockOpen,ChevronDown} from 'lucide-react';
 import {groupBasketRecords} from './basket-grouping';
 import './r1595-group-price.css';
 import './smart-basket.css';
@@ -150,7 +150,7 @@ export default function SmartBasket({quickAddRequests,onItemsChange,onAddFeedbac
  const handledQuickAdd=useRef(0);
  const isHot=(x:BasketItem)=>hotPattern(x,patternHighlightMin,patternSampleMin);
  const evidenceAttempted=useRef<Set<string>>(new Set());
- const [filter,setFilter]=useState<'ALL'|'MANUAL'|'AI'|'PROTECTED'|'PRECISE'|'BASIC'>('ALL');
+ const [filter,setFilter]=useState<'ALL'|'MANUAL'|'AI'|'PROTECTED'|'PRECISE'>('ALL');
  const [cleanupDays,setCleanupDays]=useState(60);
  const [lastRemoved,setLastRemoved]=useState<BasketItem[]>([]);
  // R157_BASKET_FILTERS: local display filters; persisted basket order/data never changed.
@@ -443,7 +443,7 @@ export default function SmartBasket({quickAddRequests,onItemsChange,onAddFeedbac
  // R157_FILTER_SOURCE: keep source/date/name filtering independent of saved records.
  const availableDays=[...new Set(items.map(x=>x.day))].sort((a,b)=>b.localeCompare(a));
  const normalizedQuery=query.trim().toLocaleLowerCase('ko-KR');
- const scoped=items.filter(x=>(filter==='ALL'||(filter==='PROTECTED'?x.protected===true:filter==='PRECISE'?pinnedCodes.has(x.code):filter==='BASIC'?!pinnedCodes.has(x.code):x.source===filter))&&
+ const scoped=items.filter(x=>(filter==='ALL'||(filter==='PROTECTED'?x.protected===true:filter==='PRECISE'?pinnedCodes.has(x.code):x.source===filter))&&
    (dayFilter==='ALL'||x.day===dayFilter)&&
    (!normalizedQuery||x.code.includes(normalizedQuery)||x.name.toLocaleLowerCase('ko-KR').includes(normalizedQuery)));
  const metricPrice=(x:BasketItem,basis:GainBasis):number|null=>{
@@ -503,7 +503,7 @@ export default function SmartBasket({quickAddRequests,onItemsChange,onAddFeedbac
     {compareChecked&&<span> · 시세 비교 조회 완료 {new Date(compareChecked).toLocaleTimeString('ko-KR',{timeZone:'Asia/Seoul'})} KST</span>}
     {confirmedKey&&performanceChecked&&<span> · 기존 추적 조회 완료 {new Date(performanceChecked).toLocaleTimeString('ko-KR',{timeZone:'Asia/Seoul'})} KST</span>}
    </p>}
-  <div className="basket-tabs" role="group" aria-label="장바구니 분류">{([['ALL','전체'],['MANUAL','내 선택'],['AI','AI 선택'],['PRECISE','정밀 추적'],['BASIC','기본 추적'],['PROTECTED','장기 관찰']] as const).map(([key,title])=><button
+  <div className="basket-tabs r252-basket-tabs" role="group" aria-label="장바구니 분류">{([['ALL','전체'],['MANUAL','내 선택'],['AI','AI 선택'],['PRECISE','정밀'],['PROTECTED','장기']] as const).map(([key,title])=><button
     key={key} type="button" aria-pressed={filter===key} className={filter===key?'active':''} onClick={()=>setFilter(key)}>{title}</button>)}</div>
    <div className="r157-basket-filters" aria-label="장바구니 정렬과 검색">
      <div className="r157-rank-pills" role="group" aria-label="수익률 필터">
@@ -549,7 +549,7 @@ export default function SmartBasket({quickAddRequests,onItemsChange,onAddFeedbac
        aria-expanded={expandedCodes.includes(group.code)}
        onClick={()=>setExpandedCodes(prev=>prev.includes(group.code)?prev.filter(c=>c!==group.code):[...prev,group.code])}>
        <span><strong>{group.name} ({group.code}) · {group.records.length}개 발견 기록</strong>
-         <small>{pinnedCodes.has(group.code)?'정밀 추적 지정 · ':'기본 추적 · '}{group.records.map(it=>it.day).join(' · ')} · 펼쳐서 개별 수익률 확인</small></span>
+         <small>{pinnedCodes.has(group.code)?'정밀 추적 · ':''}{group.records.map(it=>it.day).join(' · ')} · 펼쳐서 개별 수익률 확인</small></span>
        <ChevronDown size={17}/></button>}
      {(!groupSimilar||group.records.length===1||expandedCodes.includes(group.code))&&
        <div className="r1595-group-records">{group.records.map(it=>{const q=latestQuote.get(it.code);
@@ -572,13 +572,13 @@ export default function SmartBasket({quickAddRequests,onItemsChange,onAddFeedbac
      const state=it.discovery?'Turso 관찰 · 최초 발견가 보존':pr?statusText(pr.status):'등록 확인 중';
     return <article className={"basket-record"+(isHot(it)?" r1591-basket-tomato":"")+(it.discovery?.aiMatch?" r-research-gold":"")} key={it.id}>
      <div className="basket-record-head"><div><span className={`basket-src ${it.source==='AI'?'ai':''}`}>{it.source==='AI'?'AI 선택':it.selectionOrigin==='ANALYSIS'?'사용자 선택 · 정밀분석':'사용자 선택 · 검색'}</span>
-       <strong>{it.name}</strong> <small>{it.code}</small>{it.protected&&<span className="r158-locked">장기 관찰</span>}</div>
+       <strong>{it.name}</strong> <small>{it.code}</small></div>
        <div className="r158-record-actions">
-        <button type="button" className="r250-precise" style={{color:pinnedCodes.has(it.code)?'#b58a35':'#64748b'}} aria-pressed={pinnedCodes.has(it.code)} title={pinnedCodes.has(it.code)?'정밀 추적 해제':'정밀 추적 지정'} aria-label={`${it.name} ${pinnedCodes.has(it.code)?'정밀 추적 해제':'정밀 추적 지정'}`} onClick={()=>changePrecise(it.code)}>{pinnedCodes.has(it.code)?<BookmarkCheck size={17}/>:<Bookmark size={17}/>}<small>{pinnedCodes.has(it.code)?'정밀':'기본'}</small></button>
-        <button type="button" className={'r158-protect '+(it.protected?'active':'')} aria-pressed={it.protected===true}
+        <button type="button" className="r250-precise r252-icon-action" aria-pressed={pinnedCodes.has(it.code)} title={pinnedCodes.has(it.code)?'정밀 추적 해제':'정밀 추적 지정'} aria-label={`${it.name} ${pinnedCodes.has(it.code)?'정밀 추적 해제':'정밀 추적 지정'}`} onClick={()=>changePrecise(it.code)}>{pinnedCodes.has(it.code)?<BookmarkCheck size={17}/>:<Bookmark size={17}/>}</button>
+        <button type="button" className={'r158-protect r252-icon-action '+(it.protected?'active':'')} aria-pressed={it.protected===true}
           title={it.protected?'장기 관찰 보호 해제':'장기 관찰로 보호'} aria-label={`${it.name} ${it.protected?'보호 해제':'장기 관찰 등록'}`}
-          onClick={()=>toggleProtection(it.id)}>{it.protected?<BookmarkCheck size={17}/>:<Bookmark size={17}/>}<small>장기</small></button>
-        <button type="button" className="basket-delete" title={it.protected?'장기 관찰 보호 해제 후 삭제 가능':'장바구니에서 제거'}
+          onClick={()=>toggleProtection(it.id)}>{it.protected?<Lock size={17}/>:<LockOpen size={17}/>}</button>
+        <button type="button" className="basket-delete r252-icon-action" title={it.protected?'장기 관찰 보호 해제 후 삭제 가능':'장바구니에서 제거'}
           disabled={it.protected===true} aria-label={`${it.name} 제거`}
           onClick={()=>setItems(old=>old.filter(x=>x.protected||x.id!==it.id))}><Trash2 size={16}/></button>
        </div></div>
@@ -636,7 +636,7 @@ export default function SmartBasket({quickAddRequests,onItemsChange,onAddFeedbac
        <label className="basket-memo">관찰 메모<input value={it.memo} maxLength={240} placeholder="추세선·거래량·다음 확인 항목" onChange={e=>setItems(old=>old.map(x=>x.id===it.id?{...x,memo:e.target.value}:x))}/></label>
      </details>
     </article>})}</div>}</section>)}</div>}
-  <p className="basket-foot">장기 관찰 보호는 이 브라우저에서의 목록 정리·삭제 방지 기능입니다. 캐시 삭제·기기 변경까지 보장하지 않으므로 JSON 백업을 보관하세요. R1.5.3 검색일 다음 거래일부터의 KIS 원주가 일봉 고가를 사용합니다. 액면분할·합병에 따른 가격 보정은 하지 않아 수익률 왜곡 가능성이 있습니다. 수집 토큰 상태·장외시간에 따라 2분 안에 값이 표시되지 않을 수 있습니다. 장중 확인가는 확정 종가와 다릅니다. 연구 전용 · 등록 기준은 실제 체결가가 아닌 과거 확정 종가 또는 최초 KIS 관측가입니다. 성과는 후속 KRX 수집 스냅샷이 있을 때만 참고 비교하며, 최신 체결 확인·수수료·세금·배당·수정주가를 반영하지 않습니다. AI 후보는 검증된 투자 우위가 아닙니다. 장바구니와 정밀 추적 지정은 현재 브라우저에만 저장됩니다. 자동 30/120분 분석, 서버 한도 및 시세 5분 보장은 아직 연결되지 않았습니다.</p>
+  <p className="basket-foot">장기 관찰 보호는 이 브라우저에서의 목록 정리·삭제 방지 기능입니다. 캐시 삭제·기기 변경까지 보장하지 않으므로 JSON 백업을 보관하세요. R1.5.3 검색일 다음 거래일부터의 KIS 원주가 일봉 고가를 사용합니다. 액면분할·합병에 따른 가격 보정은 하지 않아 수익률 왜곡 가능성이 있습니다. 수집 토큰 상태·장외시간에 따라 2분 안에 값이 표시되지 않을 수 있습니다. 장중 확인가는 확정 종가와 다릅니다. 연구 전용 · 등록 기준은 실제 체결가가 아닌 과거 확정 종가 또는 최초 KIS 관측가입니다. 성과는 후속 KRX 수집 스냅샷이 있을 때만 참고 비교하며, 최신 체결 확인·수수료·세금·배당·수정주가를 반영하지 않습니다. AI 후보는 검증된 투자 우위가 아닙니다. 빨간 책갈피는 정밀 추적, 회색은 기본 추적입니다. 노란 자물쇠는 장기 관찰 보호입니다. 브라우저의 목록과 서버 등록 목록은 별도이며, 자동 30/120분 분석 및 시세 5분 보장은 아직 연결되지 않았습니다.</p>
    <BasketTrackingRegistry items={[...uniqueCodes(items)].sort().map(code=>({code,precise:pinnedCodes.has(code)}))}/>
    <details className="r152-data-management"><summary>데이터 관리 · 기기 변경 시 백업</summary>
      <div className="basket-actions"><button type="button" onClick={saveBackup}><Download size={15}/> 백업 저장</button>
