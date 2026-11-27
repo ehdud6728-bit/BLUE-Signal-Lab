@@ -1,0 +1,38 @@
+name: BLUE Discovery High 15 Study (READ ONLY)
+on:
+  pull_request:
+    paths:
+      - 'tools/turso/discovery-high15.mjs'
+      - '.github/workflows/blue_discovery_high15.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: blue-discovery-high15-fixed
+  cancel-in-progress: false
+jobs:
+  study:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install existing Turso dependencies
+        run: npm install --prefix tools/turso --no-audit --no-fund --ignore-scripts --no-package-lock
+      - name: Offline synthetic tests
+        run: node tools/turso/discovery-high15.mjs --test
+      - name: Read fixed discovery window and compare outcomes
+        if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.repository == 'ehdud6728-bit/BLUE-Signal-Lab'
+        env:
+          TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
+          TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
+        run: node tools/turso/discovery-high15.mjs --out=output/high15/report.json
+      - uses: actions/upload-artifact@v4
+        if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.repository == 'ehdud6728-bit/BLUE-Signal-Lab'
+        with:
+          name: BLUE_DISCOVERY_HIGH15_AGGREGATE
+          path: output/high15/report.json
+          if-no-files-found: error
+          retention-days: 7
