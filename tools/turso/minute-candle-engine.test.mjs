@@ -1,0 +1,9 @@
+import test from 'node:test';import assert from 'node:assert/strict';
+import {reconcilePages,repeatedMinutes,aggregateWindow,candle} from './minute-candle-engine.mjs';
+const h=m=>String(Math.floor(m/60)).padStart(2,'0')+String(m%60).padStart(2,'0')+'00';
+const row=m=>({h:h(m),o:100+m,hi:104+m,lo:99+m,c:103+m,v:10});
+const page=(a,b)=>Array.from({length:b-a+1},(_,i)=>row(b-i));
+const pages=[page(569,598),page(541,570),page(540,541)]; // 540–597, first row stripped
+test('separate 5/30/60 boundaries and exact OHLCV',()=>{const p=[page(572,601),page(544,573),page(540,545)];const e=repeatedMinutes(p,p);const b=aggregateWindow(e,'090000','100000',60,'100200');assert.equal(b.status,'REPEAT_STABLE_CANDIDATE');assert.deepEqual([b.open,b.high,b.low,b.close,b.volume],[640,703,639,702,600]);assert.equal(aggregateWindow(e,'093000','100000',30,'100200').volume,300);assert.equal(aggregateWindow(e,'095500','100000',5,'100200').volume,50);assert.equal(aggregateWindow(e,'093000','100000',30,'095900').status,'NOT_CLOSED');assert.equal(candle(b).shape,'LONG_BULL')});
+test('missing minute, changed revision and first row never fabricate',()=>{const p=[page(572,601),page(544,573),page(540,545)];const q=p.map(a=>a.map(r=>r.h==='091000'?{...r,v:11}:r));const b=aggregateWindow(repeatedMinutes(p,q),'090000','100000',60,'100200');assert.equal(b.status,'INCOMPLETE');assert.deepEqual(b.conflicts,['091000']);assert.equal(reconcilePages([page(540,569)]).map.has(569),false);const m=aggregateWindow(repeatedMinutes(pages,pages),'093000','100000',30,'100200');assert.equal(m.status,'INCOMPLETE')});
+test('no cross-session or shifted bucket',()=>{const e=repeatedMinutes([],[]);assert.throws(()=>aggregateWindow(e,'090100','093100',30,'100000'));assert.throws(()=>aggregateWindow(e,'150000','160000',60,'160000'));assert.equal(candle({status:'INCOMPLETE'}),null);assert.equal(candle({status:'REPEAT_STABLE_CANDIDATE',open:100,close:101,high:110,low:90}).shape,'DOJI')});

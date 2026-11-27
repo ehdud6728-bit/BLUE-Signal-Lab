@@ -10,6 +10,7 @@ on:
   pull_request:
     paths:
       - 'tools/turso/basket-market-probe*.mjs'
+      - 'tools/turso/minute-candle-engine*.mjs'
       - '.github/workflows/blue_kis_basket_market_probe.yml'
 permissions:
   contents: read
@@ -27,7 +28,7 @@ jobs:
           node-version: '22'
       - run: npm install --prefix tools/turso --no-audit --no-fund --ignore-scripts --no-package-lock
       - run: npm install --prefix collector --no-audit --no-fund --ignore-scripts --no-package-lock
-      - run: node --test tools/turso/basket-market-probe.test.mjs
+      - run: node --test tools/turso/basket-market-probe.test.mjs tools/turso/minute-candle-engine.test.mjs
       - name: Bounded manual KIS read-only probe (09:35–15:20 KST)
         if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.repository == 'ehdud6728-bit/BLUE-Signal-Lab'
         env:

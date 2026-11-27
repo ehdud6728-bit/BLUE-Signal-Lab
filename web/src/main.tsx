@@ -871,20 +871,21 @@ function App(){
     if(total!==null)void search(1,false,gcFields,gcLogic,undefined,undefined,next,mode);
   };
   const flip=(t:string)=>setSignals(a=>a.includes(t)?a.filter(s=>s!==t):[...a,t]);
+  const basketAtLimit=(code:string)=>basketRegularCount>=100||(!basketIds.some(id=>id.split(':')[1]===code)&&new Set(basketIds.map(id=>id.split(':')[1])).size>=50);
   const inBasket=(r:Signal)=>basketIds.includes(`MANUAL:${r.code}:${r.day}`);
   const canBasket=(r:Signal)=>(!r.provisional||typeof r.extras?.provisional_snapshot_id==='string'&&!!r.observed_at_utc&&Number.isFinite(Date.parse(r.observed_at_utc)))&&/^\d{6}$/.test(r.code)&&typeof r.close_price==='number'&&Number.isFinite(r.close_price)&&r.close_price>0;
   const basketBlocked=(r:Signal)=>r.provisional&&!canBasket(r)?'잠정 발견 시각 또는 가격 증거가 없습니다.':!/^\d{6}$/.test(r.code)?'현재 장바구니는 숫자 6자리 종목코드만 지원합니다.':
     typeof r.close_price!=='number'||!Number.isFinite(r.close_price)||r.close_price<=0?'검색일 확정 종가가 없어 담을 수 없습니다.':
-    basketRegularCount>=100?'장바구니 일반 관찰 100건 한도에 도달했습니다.':'장바구니에 담기';
+    basketAtLimit(r.code)?'장바구니 전체 50종목 또는 일반 발견 기록 100건 한도에 도달했습니다.':'장바구니에 담기';
   const basketLabel=(r:Signal)=>inBasket(r)?'담김':!/^\d{6}$/.test(r.code)?'코드 제한':
-    !canBasket(r)?'가격 없음':basketRegularCount>=100?'한도 초과':'담기';
+    !canBasket(r)?'가격 없음':basketAtLimit(r.code)?'한도 초과':'담기';
   const enqueueBasket=(item:BasketQuickAddRequest['item'],other?:Pick<BasketQuickAddRequest,'selectionOrigin'|'analysisMatched'>)=>{
     setBasketNotice(`${item.name||item.code} · 장바구니에 저장 중…`);
     const request:BasketQuickAddRequest={serial:++basketSequence.current,item,...other};
     setBasketRequests(prev=>[...prev,request]);
   };
   const quickBasket=(r:Signal)=>{
-    if(!canBasket(r)||inBasket(r)||basketRegularCount>=100)return;
+    if(!canBasket(r)||inBasket(r)||basketAtLimit(r.code))return;
     enqueueBasket({...r,name:displayName(r),...(r.provisional?{discovery:{kind:'KIS_PROVISIONAL',observedAt:r.observed_at_utc!,snapshotId:String(r.extras?.provisional_snapshot_id),aiMatch:recentMatch(r)}}:{})});
   };
   const nav=(target:'search'|'results'|'summary'|'ai'|'basket'|'tracking'|'analysis')=>{
@@ -1289,7 +1290,7 @@ function App(){
                     <button type="button" className={'r151-quick-add '+(inBasket(r)?'saved':'')}
                    title={inBasket(r)?'이미 담긴 종목':basketBlocked(r)}
                    aria-label={`${displayName(r)} ${inBasket(r)?'장바구니에 담김':basketBlocked(r)}`}
-                   disabled={inBasket(r)||!canBasket(r)||basketRegularCount>=100}
+                   disabled={inBasket(r)||!canBasket(r)||basketAtLimit(r.code)}
                    onClick={e=>{e.stopPropagation();quickBasket(r);}}
                    onKeyDown={e=>e.stopPropagation()}>
                    {inBasket(r)?<CheckCircle2 size={16}/>:<ShoppingBasket size={16}/>}
@@ -1354,7 +1355,7 @@ function App(){
               <button type="button" className={'r151-mobile-add '+(inBasket(r)?'saved':'')}
                 title={inBasket(r)?'장바구니에 담김':basketBlocked(r)}
                 aria-label={`${displayName(r)} ${inBasket(r)?'장바구니에 담김':basketBlocked(r)}`}
-                disabled={inBasket(r)||!canBasket(r)||basketRegularCount>=100}
+                disabled={inBasket(r)||!canBasket(r)||basketAtLimit(r.code)}
                 onClick={()=>quickBasket(r)}>
                 {inBasket(r)?<CheckCircle2 size={19}/>:<ShoppingBasket size={19}/>}
                 <span>{basketLabel(r)}</span>

@@ -50,10 +50,10 @@ test('Turso mounts the basket while the search tab is visible, without idle watc
  assert.doesNotMatch(main,/storageMode==='turso'&&activeView==='basket'\)\)\&\&<SmartBasket/);
  assert.match(main,/setBasketRequests\(prev=>\[\.\.\.prev,request\]\)/);
  assert.match(main,/onItemsChange=\{onBasketItemsChange\}/);
- assert.match(main,/basketRegularCount>=100/);
+ assert.match(main,/basketAtLimit\(r\.code\)/);
  assert.match(main,/onQuickAddsHandled=\{serial=>setBasketRequests\(prev=>prev\.filter\(x=>x\.serial>serial\)\)\}/);
  assert.match(basket,/pendingBasketQuickAdds\(quickAddRequests\|\|\[\],handledQuickAdd\.current\)/);
- assert.match(basket,/appendBasketRecord\(prev,\{id,source,code:data\.code/);
+ assert.match(basket,/appendTracked\(prev,\{id,source,code:data\.code/);
  assert.match(basket,/if\(!active\|\|!idsKey\)return;/);
  assert.match(basket,/if\(!active\)return;\s*let mounted=true;/);
  assert.match(basket,/onItemsChange\?\.\(items\.map\(x=>x\.id\),items\.filter\(x=>!x\.protected\)\.length\)/);
