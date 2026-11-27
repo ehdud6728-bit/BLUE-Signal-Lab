@@ -4,6 +4,7 @@ on:
   pull_request:
     paths:
       - 'tools/turso/tracking-plan*.mjs'
+      - 'collector/src/tracking-checkpoint*.mjs'
       - '.github/workflows/blue_tracking_roster_plan.yml'
 permissions:
   contents: read
@@ -17,7 +18,8 @@ jobs:
         with:
           node-version: '22'
       - run: npm install --prefix tools/turso --no-audit --no-fund --ignore-scripts --no-package-lock
-      - run: node --test tools/turso/tracking-plan.test.mjs
+      - name: Verify delayed planning and durable local SQLite checkpoint lifecycle
+        run: node --test tools/turso/tracking-plan.test.mjs collector/src/tracking-checkpoint.test.mjs
       - if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.repository == 'ehdud6728-bit/BLUE-Signal-Lab'
         env:
           TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}

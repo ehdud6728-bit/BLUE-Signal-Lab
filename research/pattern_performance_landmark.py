@@ -24,7 +24,7 @@ def registry(snapshot):
     for t in targets.values():t['recommendation_horizons'].sort()
     return targets,dict(watch)
 
-def study(source,snapshot,split_day=FIXED_SPLIT_DAY):
+def study(source,snapshot,split_day=FIXED_SPLIT_DAY,case_sink=None):
     split_day=comparison_split(split_day)
     if snapshot['asof']>source['asof_day']:raise ValueError('SELECTION_AFTER_SOURCE')
     # Reconstruct exact original basic/candle/detail/turnover/market cohorts.
@@ -64,6 +64,7 @@ def study(source,snapshot,split_day=FIXED_SPLIT_DAY):
     inventory=[];rows=[];coverage=[]
     for key,t in sorted(targets.items()):
         pairs=[case(d,c) for d,c in sorted(selected[key])]
+        if case_sink is not None:case_sink(t,pairs)
         r=landmark(dict(schema='BLUE_PATTERN_CASE_FEATURES_V1',asof=source['asof_day'],split_day=split_day,split_policy='FIXED_EXPLICIT_DAY'),[a for a,_,_ in pairs],[b for _,b,_ in pairs])
         inventory.append(dict(**t,matched_cases=len(pairs),status='COMPUTED_SAME_SOURCE' if pairs else 'NO_MATCHING_CASES',path_end_reasons=dict(Counter(e for _,_,e in pairs))))
         for z in r['rows']:rows.append(dict(group=key[0],pattern=key[1],**z))
@@ -73,6 +74,13 @@ def study(source,snapshot,split_day=FIXED_SPLIT_DAY):
 def main():
     p=argparse.ArgumentParser()
     for k in ('source','snapshot','out'):p.add_argument('--'+k,type=Path,required=True)
-    a=p.parse_args();raw=a.source.read_bytes();snap=a.snapshot.read_bytes();r=study(json.loads(raw),json.loads(snap));r['input_sha256']=dict(source=hashlib.sha256(raw).hexdigest(),snapshot=hashlib.sha256(snap).hexdigest())
+    p.add_argument('--private-charts',type=Path,help='Local/private bundle only; never add to public artifacts')
+    a=p.parse_args();raw=a.source.read_bytes();snap=a.snapshot.read_bytes();hashes=dict(source=hashlib.sha256(raw).hexdigest(),snapshot=hashlib.sha256(snap).hexdigest())
+    collector=None
+    if a.private_charts:
+        from pattern_performance_chart_evidence import EvidenceCollector
+        collector=EvidenceCollector(hashes)
+    r=study(json.loads(raw),json.loads(snap),case_sink=collector.capture if collector else None);r['input_sha256']=hashes
+    if collector:collector.write(a.private_charts,r['asof'],r['selection_asof'])
     a.out.write_text(json.dumps(r,ensure_ascii=False,allow_nan=False,separators=(',',':'))+'\n');print(json.dumps({k:r[k] for k in ('asof','selection_asof','split_day','unique_case_count','inventory','watch_not_promoted')}))
 if __name__=='__main__':main()

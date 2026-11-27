@@ -216,3 +216,27 @@
 - 원천 한계: 49개 감사 일봉 관측은2024-10-28~2026-11-26에 걸쳐 있어 연속49거래일로 해석 금지. 4일(11/10,13,16,17)의 연구 종목수와 EOD수 불일치로 신호 연구에서 제외. 종목 수 차이는 해당4일 각50건, 누락원인/코드 정합성은 미확인. 기록된 감사일봉 N개 간격이며 독립 거래일 달력/기업행동/외부가격 검증 전 확정 전략 결론 금지.
 - 별도 계산 감사: profitability1040행 일치/범위외9181, high-return217행 일치/범위외2098, 실패0. 범위외를 검증 완료로 간주하지 않음. 저장소 게시 성공과 운영 웹 배포·인증기기 화면 검증은 구분.
 - 다음: CI/병합→동일 BLUE Audited Pattern Performance 수동sessions60→선택asof==결과asof·동일실행 게시 추천과 exact inventory/horizon 비교. 후속 실제 차트는 인증된 자료 연결 필요, calendar/누락 데이터 검증 미완료 상태를 유지.
+
+
+## 2026-11-27 — 장바구니 추적 병행 개발: 지연 슬롯·durable 체크포인트/lease
+- 기준 main #257 병합23ee243d0473259b27544d94f4f030981c52cc55. 실제 사용자 요청에 따라 연구와 별도로 G03/G04/G09/G10 운영 연결 준비를 진행. 기존 planner는 정각5분/+2분에만 후보를 반환하고 작업 성공/실패 원장이 없어서 지연 실행·중복 실행·실패 재시도를 제어하지 못함.
+- `tracking-plan.mjs`에 별도 checkpoint_tasks를 연결. 최신5분 QUOTE, 숫자 코드 기준 고정120분 BASIC 분산 슬롯, 마감후2분 지난 PRECISE30분 슬롯을 정각이 아닌 지연 호출에도 동일 task ID로 재제공. 기존 exact 후보 필드 보존, 원격 inspect는 코드/계정/task ID를 출력하지 않고 후보수만 출력. 50/정밀10 전계정 합집합 상한 유지, 주말·장외 후보 없음. 누락된 과거 시세를 생성하거나 전구간 복구했다고 주장하지 않음.
+- 새 collector/src/tracking-checkpoint.mjs: SQLite/libSQL형 execute 인터페이스에 명시적 prepare/enqueue/claim/finish/retry/due/executeOne 구현. task(code/kind/window_end) SHA256 키, 중복 INSERT 거부, 원자 UPDATE RETURNING claim, 최대5분 lease·최대3시도, 만료 lease 재할당, stale token 완료/재시도 차단,30/60초 backoff, 만료된3번째 시도 FAILED 확정. 저장/read-back 확인과 SHA256영수증이 없으면 COMPLETE 금지. due는 후보 재등록 없이 재시도/만료 작업을 최대10개 복원.
+- 검증: 기존 planner3+신규 checkpoint7=Node10개 PASS. 실제 SQLite 메모리 및 파일 DB에서 close/reopen 상태 보존, 독립 연결 간 한 lease, 두 동시 claim 중 하나만 성공, 미저장 완료 금지·재시도·3회종료 검증. YAML parse/diff 검사 PASS. 기존 BLUE Tracking Roster Plan workflow에 이 로컬 lifecycle 테스트를 포함해 PR/수동 실행에서 재현 가능. 테스트를 위한 실제 저장은 로컬 임시DB 한정.
+- 운영 영향: 모듈 import만으로 DB 생성/쓰기·KIS 요청 없음. 운영 collector handler·cron·Worker 배포 변경 없음. 원격 workflow는 기존 SELECT-only inspect 유지. 기존 @libsql/client는 CLI에서만 lazy import해 오프라인 planner 검증이 원격 의존성을 요구하지 않음.
+- 한계/다음: delivery는 at-least-once이며 crash후 KIS 재요청 가능; provider/저장 callback의 task ID 멱등성과 lease fencing 검증이 필요. 독립 거래일 달력·시장 수집 공유 호출량·stale 작업 만료/정책·가격 및 분봉 storage callback 연결·Turso 실제 파일럿과10/20/50부하·인증화면은 미완료. 이번 PR은 durable 실행 기반을 실제 구현/검증한 것이며 자동추적 운영 활성화는 아님. 다음은 공유예산·세션/만료 gate를 포함한 bounded collector 연결 및 명시적 수동 파일럿.
+
+
+## 2026-11-27 — 병행개발: 전체 패턴 실제 차트 증거 생성·비공개 보관 경로
+- 사용자 요청: 연구와 장바구니 개발을 병행하고 실제 종목 차트를 전달. 공통 연구의 정확 cohort callback을 추가해 기존 집계 output을 바꾸지 않고 전체 기본/추천 조건별 실제 저장 OHLC 증거를 추출한다.
+- `pattern_performance_chart_evidence.py`: 조건별 HIT5/MISS5/INCOMPLETE를 구분해 고정 해시순으로 각2건까지 선택(수익률 크기로 선별하지 않음), 패턴 membership/원래 추천기간/신호일/진입시가/+5%목표/첫도달일/고저종가/이전하락가격/경로종료사유 및 입력·사례SHA256 보존. 중복사례 경로 불일치·변조·잘못된날짜·asof이후가격 거부. 실제 저장 날짜를 유지하고 감사 관측 간격·일봉 내 순서 미확인·독립가격 미검증 명시. 불완전 경로를 실패0수익으로 변환하지 않는다.
+- private HTML은 조건별 신호일까지 차트를 먼저 보여주고 이후 실제 경로/결과를 펼치며, OHLC표와 실제 날짜/가격범위를 제공. 목표는 숫자로 표시(차트 목표선은 미구현). 공개GitHub artifact에 원시증거/HTML 추가 없음.
+- 기존 수동 전체패턴 workflow에 `private_charts_mode=off|inspect|apply` 추가, 기본off. inspect의 private 보관 단계는 원격DB0쿼리로 생성/검증(기존 source export SELECT는 별도), apply만 별도 Turso private table에 SHA키 불변 저장과 read-back. runner temp 증거/HTML은 trap으로삭제. 기존 집계·예약실행·추천게시·자동수집/운영UI/Access정책 변경없음. Node read모드는 해시검증 후 로컬private파일로 내려받는 경로이며 웹화면/Access API 연결은 아직 미구현.
+- 검증: pattern_performance 관련57개(기존52+신규5), 기존 ENV20 landmark4개, Node private 저장/조회2개 통과. YAML 파싱·수동조건·private경로의 공개artifact 비포함·집계output불변·diff검사 통과.
+- 저장허용최대16MB 단일행은 원격Turso 요청크기/부하 미검증이다. 실제apply/읽기·전체원천 실데이터생성은 미실행. Node 저장/읽기검증은 mock테스트이며 원격DB성공으로 보고하지 않는다.
+- 재현: 기존 BLUE Audited Pattern Performance 수동sessions60에서 private_charts_mode=inspect는 원격쓰기없이 증거검증(원천 SELECT는 기존대로 수행); apply는 명시적 private저장. 로컬 CLI `pattern_performance_landmark.py --source ... --snapshot ... --out ... --private-charts <private>/bundle.json`; 검증/보관 `node tools/turso/private-pattern-charts.mjs inspect|apply <private>/bundle.json`, credential이있는로컬에서 `read SNAPSHOT_ID <private>/bundle.json`. 원시bundle/HTML은 공개artifact/git금지.
+- 다음: 통합PR CI→inspect 실제원천실행→증거표본/조건/원천hash 확인→Turso 제한apply/readback 및 인증된 차트조회는 별도 검증. 이번턴 별도Library차트북은 기존V6실제539사례범위이며 전체패턴 모집단 검증과 구분.
+
+- 실제 전달 완료: 기존 V6 실제539사례 검색형 HTML 및 대표6건 PNG를 사용자에게 제공. ZIP/입력해시·1840 OBSERVED 산술 일치, PNG 육안검토 및 HTML JS모의DOM 검사. 전체패턴 차트/외부가격 독립검증 완료로 주장하지 않음. 통합브랜치에서 tracking과공통차트 회귀를 함께 재검증한다.
+
+- 통합 작업본 회귀: Python72개 및 Node12개 총84개 통과, 두 workflow YAML 파싱과 diff 검사 통과. 최신통합 커밋의 원격CI는 별도 확인.
