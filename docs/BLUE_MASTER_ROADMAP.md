@@ -177,3 +177,11 @@
 - `env20_landmark.py`는 새 경로 우선, 기존 파일은 명시적 LEGACY_OR_MIXED_PREFIX 표시. 보고서 V2, 빈 경로도 20개 landmark/window 조합에서 NO_COMPLETE_PATH 집계. 누락을 실패·0% 수익으로 변환하지 않음.
 - 검증: Python 연구 회귀 27개 통과(6 case features, 4 landmark, 5 pullback, 4 structural, 4 confluence, 4 technical room); git diff --check 통과. 합성 fixture 기반이며 실제 시장자료 독립 검증 아님.
 - 미검증/다음: PR CI 및 병합 후 기존 `blue_env20_pullback_study.yml` 수동 실행으로 실제 539사례의 V6 기존 요약 불변, V2 coverage 분모와 새 포함 사례/원천 해시 확인. 과거 B09/B10 수치는 재산출 전 구버전 결과로 유지. 운영 DB/API/UI/수집/스케줄/추천 변경 및 배포 없음.
+
+
+## 2026-11-27 — 실제 종목 차트 검토를 B09/B10 수정과 통합
+- 사용자 요청: 연결된 수정/검증은 묶어 진행하고 실제 종목 차트로 대조. 기존 PR #253 범위에 chart-review 생성·검증을 함께 추가.
+- 기존 artifact 15167004369를 실제 다운로드, ZIP SHA256 `893d463401fd4aec295c51f5c8d3c39b12eac63716cd8db9a5c775cabd96137a` 일치. 539사례/1840 OBSERVED 구간의 최고·최저 수익률 및 +5% HIGH 도달을 저장 OHLC로 별도 산술 재계산해 일치. 동일 원천 재계산이며 독립 시장가격 검증 아님.
+- 실제 차트 시각 검토 예시: 015260 2026-10-02 신호(5일 HIGH +26.7327%, LOW -23.2673%, 지지 이탈 후 목표 도달), 054410 2026-10-06 신호(HIGH 0%, LOW -18.6667%, 미도달). 날짜순 첫 도달/미도달 예시이며 대표성 주장 없음. 종목명 원본 누락 유지, 임의 이름 보충 없음.
+- 새 `env20_chart_review.py`는 전체 사례 코드/날짜순 실제 캔들·OHLC 툴팁, 신호일 먼저/이후 경로 펼침, 원본 결과 및 입력 SHA256 감사 JSON을 생성. 기존 수동 연구 workflow artifact에 HTML/감사 JSON 포함. 원시 가격은 Git 소스·공개 사이트로 게시하지 않음.
+- 신규 단위테스트 2개 통과(값 변조/ID 불일치 거부, 미래 경로 접기, HTML escaping); 실제 기존 산출물로 생성 및 가격 재계산 성공. 새 exact-window 실제 자료 재실행, 신규 HTML 브라우저 렌더, 외부 가격/수정주가 독립 확인은 미완료. 기존 V2 표본 보완 회귀 27개와 구분. 배포/운영 DB/추천 변경 없음.
