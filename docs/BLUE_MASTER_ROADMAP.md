@@ -216,3 +216,12 @@
 - 원천 한계: 49개 감사 일봉 관측은2024-10-28~2026-11-26에 걸쳐 있어 연속49거래일로 해석 금지. 4일(11/10,13,16,17)의 연구 종목수와 EOD수 불일치로 신호 연구에서 제외. 종목 수 차이는 해당4일 각50건, 누락원인/코드 정합성은 미확인. 기록된 감사일봉 N개 간격이며 독립 거래일 달력/기업행동/외부가격 검증 전 확정 전략 결론 금지.
 - 별도 계산 감사: profitability1040행 일치/범위외9181, high-return217행 일치/범위외2098, 실패0. 범위외를 검증 완료로 간주하지 않음. 저장소 게시 성공과 운영 웹 배포·인증기기 화면 검증은 구분.
 - 다음: CI/병합→동일 BLUE Audited Pattern Performance 수동sessions60→선택asof==결과asof·동일실행 게시 추천과 exact inventory/horizon 비교. 후속 실제 차트는 인증된 자료 연결 필요, calendar/누락 데이터 검증 미완료 상태를 유지.
+
+
+## 2026-11-27 — 장바구니 추적 병행 개발: 지연 슬롯·durable 체크포인트/lease
+- 기준 main #257 병합23ee243d0473259b27544d94f4f030981c52cc55. 실제 사용자 요청에 따라 연구와 별도로 G03/G04/G09/G10 운영 연결 준비를 진행. 기존 planner는 정각5분/+2분에만 후보를 반환하고 작업 성공/실패 원장이 없어서 지연 실행·중복 실행·실패 재시도를 제어하지 못함.
+- `tracking-plan.mjs`에 별도 checkpoint_tasks를 연결. 최신5분 QUOTE, 숫자 코드 기준 고정120분 BASIC 분산 슬롯, 마감후2분 지난 PRECISE30분 슬롯을 정각이 아닌 지연 호출에도 동일 task ID로 재제공. 기존 exact 후보 필드 보존, 원격 inspect는 코드/계정/task ID를 출력하지 않고 후보수만 출력. 50/정밀10 전계정 합집합 상한 유지, 주말·장외 후보 없음. 누락된 과거 시세를 생성하거나 전구간 복구했다고 주장하지 않음.
+- 새 collector/src/tracking-checkpoint.mjs: SQLite/libSQL형 execute 인터페이스에 명시적 prepare/enqueue/claim/finish/retry/due/executeOne 구현. task(code/kind/window_end) SHA256 키, 중복 INSERT 거부, 원자 UPDATE RETURNING claim, 최대5분 lease·최대3시도, 만료 lease 재할당, stale token 완료/재시도 차단,30/60초 backoff, 만료된3번째 시도 FAILED 확정. 저장/read-back 확인과 SHA256영수증이 없으면 COMPLETE 금지. due는 후보 재등록 없이 재시도/만료 작업을 최대10개 복원.
+- 검증: 기존 planner3+신규 checkpoint7=Node10개 PASS. 실제 SQLite 메모리 및 파일 DB에서 close/reopen 상태 보존, 독립 연결 간 한 lease, 두 동시 claim 중 하나만 성공, 미저장 완료 금지·재시도·3회종료 검증. YAML parse/diff 검사 PASS. 기존 BLUE Tracking Roster Plan workflow에 이 로컬 lifecycle 테스트를 포함해 PR/수동 실행에서 재현 가능. 테스트를 위한 실제 저장은 로컬 임시DB 한정.
+- 운영 영향: 모듈 import만으로 DB 생성/쓰기·KIS 요청 없음. 운영 collector handler·cron·Worker 배포 변경 없음. 원격 workflow는 기존 SELECT-only inspect 유지. 기존 @libsql/client는 CLI에서만 lazy import해 오프라인 planner 검증이 원격 의존성을 요구하지 않음.
+- 한계/다음: delivery는 at-least-once이며 crash후 KIS 재요청 가능; provider/저장 callback의 task ID 멱등성과 lease fencing 검증이 필요. 독립 거래일 달력·시장 수집 공유 호출량·stale 작업 만료/정책·가격 및 분봉 storage callback 연결·Turso 실제 파일럿과10/20/50부하·인증화면은 미완료. 이번 PR은 durable 실행 기반을 실제 구현/검증한 것이며 자동추적 운영 활성화는 아님. 다음은 공유예산·세션/만료 gate를 포함한 bounded collector 연결 및 명시적 수동 파일럿.
