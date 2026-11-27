@@ -20,6 +20,7 @@ import {readSupplyAtDiscovery,supplyFromSearchExtras,validSupplyRecord,type Bask
 import {fetchResearchEvidenceTursoFirst} from './turso-research-reader';
 import {discoveryTechnicalBadges,validDiscoveryTechnicalBadges,type DiscoveryTechBadge} from './discovery-technical';
 import {pendingBasketQuickAdds} from './basket-quick-queue';
+import BasketTrackingRegistry from './BasketTrackingRegistry';
 import {MAX_BASKET_CODES,INITIAL_PRECISE_CODES,uniqueCodes,preciseCodes,canAddCode,dedupeRecords,appendTracked,togglePrecise,withinTrackingLimits} from './basket-tracking-limits';
 import {highestObservedPrice,lowestObservedPrice,basketReturn,rankBasketRecords,chooseBasketObservation,confirmedTrailingHigh,
  type BasketRank,type GainBasis} from './basket-rank';
@@ -636,6 +637,7 @@ export default function SmartBasket({quickAddRequests,onItemsChange,onAddFeedbac
      </details>
     </article>})}</div>}</section>)}</div>}
   <p className="basket-foot">장기 관찰 보호는 이 브라우저에서의 목록 정리·삭제 방지 기능입니다. 캐시 삭제·기기 변경까지 보장하지 않으므로 JSON 백업을 보관하세요. R1.5.3 검색일 다음 거래일부터의 KIS 원주가 일봉 고가를 사용합니다. 액면분할·합병에 따른 가격 보정은 하지 않아 수익률 왜곡 가능성이 있습니다. 수집 토큰 상태·장외시간에 따라 2분 안에 값이 표시되지 않을 수 있습니다. 장중 확인가는 확정 종가와 다릅니다. 연구 전용 · 등록 기준은 실제 체결가가 아닌 과거 확정 종가 또는 최초 KIS 관측가입니다. 성과는 후속 KRX 수집 스냅샷이 있을 때만 참고 비교하며, 최신 체결 확인·수수료·세금·배당·수정주가를 반영하지 않습니다. AI 후보는 검증된 투자 우위가 아닙니다. 장바구니와 정밀 추적 지정은 현재 브라우저에만 저장됩니다. 자동 30/120분 분석, 서버 한도 및 시세 5분 보장은 아직 연결되지 않았습니다.</p>
+   <BasketTrackingRegistry items={[...uniqueCodes(items)].sort().map(code=>({code,precise:pinnedCodes.has(code)}))}/>
    <details className="r152-data-management"><summary>데이터 관리 · 기기 변경 시 백업</summary>
      <div className="basket-actions"><button type="button" onClick={saveBackup}><Download size={15}/> 백업 저장</button>
        <label className="basket-import"><Upload size={15}/> 백업 가져오기<input type="file" accept=".json,application/json" onChange={e=>{void importBackup(e.target.files?.[0]);e.target.value='';}}/></label>
