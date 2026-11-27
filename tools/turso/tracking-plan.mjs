@@ -27,7 +27,7 @@ export function plan(rows,now=new Date()){
  // spread basic over 24 five-minute slots in each 120-minute block.
  const basic_due=minutes%5===0?basic.filter((_,i)=>i%24===slot%24):[];
  // All precise candidates after a 30-minute window, not at opening.
- const precise_due=minutes>0&&minutes%30===2?precise:[];
+ const precise_due=minutes>=32&&minutes%30===2?precise:[];
  return {...meta,status:codes.size?'PLAN_ONLY':'NO_REGISTERED_SYMBOLS',quote_batches:batches,basic_due,precise_due};
 }
 export async function inspect(client,now){
