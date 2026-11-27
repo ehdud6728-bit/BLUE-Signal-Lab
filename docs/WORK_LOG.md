@@ -822,3 +822,9 @@
 - 기본 snapshot은 위의 검증저장ID, main/repository guard, PR에서는자격증명없이암호화테스트만 실행. 운영DB SELECT1회, 새테이블/행쓰기/자동스케줄/가격수집/앱권한 변경없음.
 - 로컬 Node 관련5개 통과(암호화roundtrip·무작위성·평문필드비노출·변조AAD/잘못된수신키거부·SELECT-only·원본해시변조거부 및기존private보관검사). YAML main/manual/암호문단일artifact검사, 저장소비밀키없음, diff검사통과. 원격실제암호화회수·복호화·파일전달은아직미실행.
 - 다음: PR CI/병합→BLUE Private Chart Encrypted Export 수동main/기본snapshot실행→암호문다운로드/수신키복호화/원본SHA및102사례재검증→HTML/대표이미지파일저장·전달. 이미전달한539사례V6파일은전체패턴102사례와다른모집단으로구분.
+
+## 2026-11-27 (KST) — KIS Worker 토큰 자동 동기화 복구 보완
+- 사용자 요청: 토큰은 수동 조치 없이 자동 확보해야 함. main 61b2b90 기준 코드 점검에서 유효 Turso 토큰은 발급 장부가 D1_SYNC_PENDING일 때만 D1을 재동기화하고, SAVED_DUAL 이후 실제 D1 누락/만료는 복구하지 않는 경로 확인. 이번 화면 장애의 운영 원인으로 확정한 것은 아님.
+- 기존 단일 자동 issuer의 issue 실행마다 유효 primary와 실제 D1 standby의 복호화 토큰/발급·만료 시각을 비교. 같으면 쓰기 없음, 누락/만료/상이하면 기존 mirror의 타임스탬프 방어·readback으로 복구. 검사 실패는 재발급하지 않고 실패 상태 반환. 24h/중복발급/전환 gate 유지. read-only check 유지. 잘못된 미정의 error 참조도 정형 오류로 수정.
+- 로컬 Node 관련 24개 통과(실제 메모리 SQLite, 동기화 후 D1 유실→자동 복구→다음 점검 무쓰기, 검사 장애 시 무발급 포함), diff check 통과. PR 전용 무비밀 CI 추가. 실제 계정/토큰/운영 DB 접근·발급·배포는 미실행.
+- 운영 자동 발급 workflow는 기존 schedule 존재. 활성 repo 변수, 실제 최근 실행·D1 읽기/쓰기 가능 여부는 미확인. 본 변경만으로 현재 화면 복구 완료라고 보고하지 않음. 병합 후 자동 issuer 실행 로그/동기화 성공 및 실제 시세 저장을 별도로 검증해야 함.

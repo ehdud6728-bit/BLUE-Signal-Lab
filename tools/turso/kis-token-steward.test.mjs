@@ -21,6 +21,7 @@ function client(row){
     const sql=typeof q==='string'?q:q.sql;
     statements.push(sql);
     if(sql.startsWith('SELECT expires_at_utc,saved_at_utc'))return returned;
+    if(sql.startsWith('SELECT ciphertext,expires_at_utc,saved_at_utc'))return {rows:row?[{...row,ciphertext:encryptKisToken('cached-test-token',base.KIS_APP_KEY,base.KIS_APP_SECRET)}]:[]};
     if(sql.includes('RETURNING last_attempt_at_utc'))return {rows:[{last_attempt_at_utc:NOW.toISOString()}]};
     return {rows:[]};
   }};
@@ -72,7 +73,7 @@ test('pre-cutover issue is safely blocked before any reservation or KIS call',as
 test('valid saved token is reused; no tokenP issuance even if cutover is approved',async()=>{
   const c=client({saved_at_utc:'2026-11-18T00:00:00.000Z',expires_at_utc:'2026-11-20T00:00:00.000Z'});
   const result=await steward(c,base,NOW,{mode:'issue',backup:standby,issuer:async()=>{throw Error('UNEXPECTED_TOKENP');}});
-  assert.equal(result.status,'TOKEN_VALID');
+  assert.equal(result.status,'D1_BACKUP_VERIFIED');
 });
 
 test('metadata check distinguishes missing, expired and soon-to-expire tokens',async()=>{
@@ -85,7 +86,7 @@ test('metadata check distinguishes missing, expired and soon-to-expire tokens',a
 test('06:00 renewal window never bypasses the 24h saved-token guard',async()=>{
   const c=client({saved_at_utc:'2026-11-18T00:20:00.000Z',expires_at_utc:'2026-11-19T00:20:00.000Z'});
   const result=await steward(c,base,NOW,{mode:'issue',backup:standby,issuer:async()=>{throw Error('UNEXPECTED_TOKENP');}});
-  assert.equal(result.status,'TOKEN_VALID_RENEWAL_WAIT_24H');
+  assert.equal(result.status,'D1_BACKUP_VERIFIED');
 });
 
 test('one provider failure retries only after 30m, never a third time',async()=>{
@@ -108,7 +109,7 @@ test('one provider failure retries only after 30m, never a third time',async()=>
 test('a saved token is not reissued on the 06:00 check',async()=>{
   const c=client({saved_at_utc:'2026-11-18T00:10:00.000Z',expires_at_utc:'2026-11-20T00:10:00.000Z'});
   const result=await steward(c,base,NOW,{mode:'issue',backup:standby,issuer:async()=>{throw Error('UNEXPECTED_TOKENP');}});
-  assert.equal(result.status,'TOKEN_VALID');
+  assert.equal(result.status,'D1_BACKUP_VERIFIED');
 });
 test('without the D1 standby configuration no KIS issuance is possible',async()=>{
   const db=createClient({url:'file::memory:'});
@@ -137,7 +138,7 @@ test('a single issued token is stored in Turso and mirrored to D1 with matching 
     assert.equal(decryptKisToken(cached.rows[0].ciphertext,base.KIS_APP_KEY,base.KIS_APP_SECRET),'fake-provider-token');
     const second=await steward(db,base,new Date(NOW.getTime()+60_000),{
       mode:'issue',backup:standby,issuer:async()=>{throw Error('UNEXPECTED_REISSUE');}});
-    assert.equal(second.status,'TOKEN_VALID');
+    assert.equal(second.status,'D1_BACKUP_VERIFIED');
   }finally{db.close();}
 });
 test('failed D1 storage retains the Turso token, and retry sync never calls tokenP',async()=>{
@@ -211,6 +212,25 @@ test('verified early cutover issues once into both vaults without skipping issue
     const second=await steward(db,early,new Date(NOW.getTime()+60_000),{
       mode:'issue',backup:{...standby,auditIssuer:async()=>({status:'EARLY_D1_ISSUER_VERIFIED'})},
       issuer:async()=>{throw Error('UNEXPECTED_REISSUE');}});
-    assert.equal(second.status,'TOKEN_VALID');
+    assert.equal(second.status,'D1_BACKUP_VERIFIED');
   }finally{db.close();}
+});
+
+test('healthy issuance ledger repairs a lost Worker standby, then makes no repeated writes',async()=>{
+ const db=createClient({url:'file::memory:'});let calls=0,writes=0,current={status:'MISSING'};
+ const issuer=async()=>{calls++;return {token:'reconcile-fixture',expires:NOW.getTime()+86400000};};
+ const backup={inspect:async()=>current,mirror:async v=>{
+   writes++;current={status:'VALID',token:v.token,expiresAt:v.expiresAt,savedAt:v.savedAt};
+ }};
+ try{
+  assert.equal((await steward(db,base,NOW,{mode:'issue',issuer,backup})).status,'TOKEN_SAVED_DUAL');
+  current={status:'MISSING'}; // D1 later loses its token while ledger says SAVED_DUAL.
+  assert.equal((await steward(db,base,new Date(+NOW+60000),{mode:'issue',issuer,backup})).status,'D1_BACKUP_VERIFIED');
+  assert.equal(calls,1);assert.equal(writes,2);
+  assert.equal((await steward(db,base,new Date(+NOW+120000),{mode:'issue',issuer,backup})).status,'TOKEN_VALID');
+  assert.equal(writes,2);assert.equal(calls,1);
+  current={status:'UNAVAILABLE'};
+  assert.equal((await steward(db,base,new Date(+NOW+180000),{mode:'issue',issuer,backup})).status,'D1_BACKUP_SYNC_FAILED');
+  assert.equal(writes,2);assert.equal(calls,1);
+ }finally{db.close();}
 });
