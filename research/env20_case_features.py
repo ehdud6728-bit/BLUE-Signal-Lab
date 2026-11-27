@@ -176,7 +176,22 @@ def study(src,bench,factors):
                 if h==PRIMARY:
                     phase="TRAIN" if seq[-1]<split else "HOLDOUT" if d>=split else "EMBARGO"
                     rows.append(dict(id=cid,day=d,code=c,phase=phase,features=f,outcome=by_h[str(h)]))
-        outcomes.append(dict(id=cid,horizons=by_h,post_bars=[compact(z) for z in longest],
+        # Separate contiguous audited prefix for exact landmark windows. Preserve
+        # original fixed-horizon post_bars and all V6 outcome denominators.
+        exact=[];end_status="MAX_WINDOW"
+        for q in sorted({q for q in days+ds if d<q<=days[-1]})[:20]:
+            z=bars.get((q,c))
+            if q not in ds or q not in meta:end_status="DATE_WINDOW_MISSING";break
+            if z is None or z["market"]!=market:end_status="MISSING_PATH";break
+            previous=exact[-1] if exact else b
+            if abs(F(z["open"],previous["close"])-1)>=F(2,5):end_status="DISCONTINUITY_REVIEW";break
+            exact.append(z)
+        else:
+            if len(exact)<20:end_status="PENDING"
+        outcomes.append(dict(id=cid,landmark_path_version=1,
+            landmark_bars=[compact(z) for z in exact],landmark_end_status=end_status,
+            landmark_source_hashes={z["day"]:meta[z["day"]]["sha256"] for z in exact},
+            horizons=by_h,post_bars=[compact(z) for z in longest],
             source_hashes={z["day"]:meta[z["day"]]["sha256"] for z in longest}))
     phase_rows={"ALL":rows,"TRAIN":[z for z in rows if z["phase"]=="TRAIN"],"HOLDOUT":[z for z in rows if z["phase"]=="HOLDOUT"],
         "POST_FREEZE_DATES":[z for z in rows if z["day"]>FROZEN_AFTER]}

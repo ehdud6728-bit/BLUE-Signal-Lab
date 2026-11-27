@@ -743,3 +743,11 @@
 - 데이터의 일관성·신뢰성이 실시간 초저지연보다 중요함(약 1분 지연 허용).
 - DB를 즉시 교체하지 않음. Turso는 검증된 병행 수단으로 단계적 도입.
 - 새로운 기능과 운영 변경이 발생한 경우 같은 PR/커밋에서 이 작업 기록을 보완.
+
+
+## 2026-11-27 — B09/B10 정확한 관찰기간 표본 보완
+- 기준 main: PR #252 merge `74bd3474d4d4868ff9d9806e14e297bf40a0bb76`. 기존 V6 `post_bars`는 가장 긴 완성 고정 구간만 보존하므로 4일치 자료도 3일까지만 전달되는 누락 원인 확인.
+- `env20_case_features.py`에 별도 `landmark_bars`/원천 해시/종료 사유 추가. 기존 시장 거래일과 EOD 날짜 합집합을 대조하고 첫 날짜 공백·종목 누락·시장 불일치·40% 이상 시가 불연속에서 중단. 최대 20개 후속 세션, 미래 봉으로 공백을 건너뛰지 않음. 기존 horizons/post_bars 및 V6 성과 분모 보존.
+- `env20_landmark.py`는 새 경로 우선, 기존 파일은 명시적 LEGACY_OR_MIXED_PREFIX 표시. 보고서 V2, 빈 경로도 20개 landmark/window 조합에서 NO_COMPLETE_PATH 집계. 누락을 실패·0% 수익으로 변환하지 않음.
+- 검증: Python 연구 회귀 27개 통과(6 case features, 4 landmark, 5 pullback, 4 structural, 4 confluence, 4 technical room); git diff --check 통과. 합성 fixture 기반이며 실제 시장자료 독립 검증 아님.
+- 미검증/다음: PR CI 및 병합 후 기존 `blue_env20_pullback_study.yml` 수동 실행으로 실제 539사례의 V6 기존 요약 불변, V2 coverage 분모와 새 포함 사례/원천 해시 확인. 과거 B09/B10 수치는 재산출 전 구버전 결과로 유지. 운영 DB/API/UI/수집/스케줄/추천 변경 및 배포 없음.

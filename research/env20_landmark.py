@@ -46,10 +46,9 @@ def study(report,cases,outcomes):
     if len(lookup)!=len(cases) or len(results)!=len(outcomes) or set(lookup)!=set(results):raise ValueError("CASE_ID_MISMATCH")
     split=report["split_day"];coverage=Counter();groups=defaultdict(list);baseline=defaultdict(list)
     for id,c in lookup.items():
-        o=results[id];pre=c["pre_bars"];path=o["post_bars"]
+        o=results[id];pre=c["pre_bars"];path=o.get("landmark_bars",o["post_bars"])
         if not pre or pre[-1]["day"]!=c["day"] or any(z["day"]>c["day"] for z in pre) or any(z["day"]<=c["day"] for z in path) or [z["day"] for z in path]!=sorted({z["day"] for z in path}):raise ValueError("TIME_ORDER")
-        if not path:continue
-        entry=path[0]["open"]
+        entry=path[0]["open"] if path else None
         for d in LANDMARKS:
             for h in WINDOWS:
                 # Only complete path through the entire observation/future window.
@@ -73,7 +72,7 @@ def study(report,cases,outcomes):
         d,h,t,cohort,phase=key;out.append(dict(landmark=d,future_sessions=h,target_pct=t,cohort=cohort,phase=phase,feature="BASELINE",value="ALL",**metrics(a)))
     for key,a in sorted(groups.items()):
         d,h,t,cohort,phase,k,v=key;out.append(dict(landmark=d,future_sessions=h,target_pct=t,cohort=cohort,phase=phase,feature=k,value=v,**metrics(a)))
-    return dict(schema="BLUE_ENV20_LANDMARK_V1",asof=report["asof"],split_day=split,case_count=len(cases),coverage=[dict(landmark=d,future_sessions=h,status=s,n=n) for (d,h,s),n in sorted(coverage.items())],rows=out,limits=["SAME_V6_SOURCE_NOT_INDEPENDENT","FUTURE_HIGH_NOT_REALIZED_RETURN","EXIT_NEXT_OPEN_VS_HOLD_CLOSE_NO_COSTS","NO_RECOMMENDATION","NO_INDEPENDENT_PRICE_OR_CORPORATE_ACTION_VALIDATION","MISSING_PATHS_NOT_ZERO","FIXED_STRATA_MULTIPLE_COMPARISONS","NOT_IMMUTABLE_FORWARD_CAPTURE","NO_INTRADAY_ORDER"])
+    return dict(schema="BLUE_ENV20_LANDMARK_V2",path_basis="EXACT_CONTIGUOUS_PREFIX" if all(o.get("landmark_path_version")==1 for o in outcomes) else "LEGACY_OR_MIXED_PREFIX",asof=report["asof"],split_day=split,case_count=len(cases),coverage=[dict(landmark=d,future_sessions=h,status=s,n=n) for (d,h,s),n in sorted(coverage.items())],rows=out,limits=["SAME_V6_SOURCE_NOT_INDEPENDENT","FUTURE_HIGH_NOT_REALIZED_RETURN","EXIT_NEXT_OPEN_VS_HOLD_CLOSE_NO_COSTS","NO_RECOMMENDATION","NO_INDEPENDENT_PRICE_OR_CORPORATE_ACTION_VALIDATION","MISSING_PATHS_NOT_ZERO","FIXED_STRATA_MULTIPLE_COMPARISONS","NOT_IMMUTABLE_FORWARD_CAPTURE","NO_INTRADAY_ORDER"])
 def main():
     p=argparse.ArgumentParser()
     for k in ("report","cases","outcomes","out"):p.add_argument("--"+k,type=Path,required=True)
