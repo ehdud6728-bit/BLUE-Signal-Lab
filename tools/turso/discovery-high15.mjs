@@ -69,7 +69,7 @@ function features(base,record,ev,supply,market){
  rsi_stored:ev.rsi_value_chart_consistent===true?band(ev.rsi_value??NaN,[30,50,70],["LT30","30_50","50_70","GE70"]):"UNKNOWN",
  rsi_gc:ev.rsi_chart_consistent===true?(ev.rsi_gc===true?"YES":ev.rsi_gc===false?"NO":"UNKNOWN"):"UNKNOWN",
  supply_distance:supply.status==="NO_UPPER_CONCENTRATION"?"NO_UPPER":supply.status==="STORED_ESTIMATE"?band(supply.distance_pct,[3,8,15],["LT3","3_8","8_15","GE15"]):"UNKNOWN"};
- for(const k of ["macd_gc","slow_14_3_3_gc","slow_12_5_5_gc","slow_20_12_12_gc"]){const v=ex[k];f[k+"_stored"]=[true,1,"1","true","True"].includes(v)?"YES":[false,0,"0","false","False"].includes(v)?"NO":"UNKNOWN"}
+ for(const k of ["macd_gc","slow_14_3_3_gc","slow_12_5_5_gc","slow_20_12_12_gc","ma112_cross","ma224_cross"]){const v=ex[k];f[k+"_stored"]=[true,1,"1","true","True"].includes(v)?"YES":[false,0,"0","false","False"].includes(v)?"NO":"UNKNOWN"}
  const known=["BB20","BB30","BB40","ENV20","ENV40","BB20_LOWER","BB30_LOWER","BB40_LOWER","BB20_ALT","BB30_ALT","BB40_ALT","BB20_LOWER_ALT","BB30_LOWER_ALT","BB40_LOWER_ALT","BB30_LOWER_RECLAIM","ENV20_LOWER_TOUCH"];
  for(const p of known)f["signal_"+p]=record.signal_names.split(",").includes(p)?"YES":"NO";
  f.signal_count=band(record.signal_names.split(",").length,[2,3,5],["1","2","3_4","GE5"]);
@@ -84,7 +84,23 @@ function buildReport(data){
   windows[h]={all_recorded:summarize(es),full_universe_days_only:summarize(es.filter(e=>e.full)),
    by_discovery_day:DAYS.slice(0,-1).map(day=>{const s=summarize(es.filter(e=>e.day===day));delete s.comparisons;return {day,...s}})};
  }
- return {schema:"BLUE_DISCOVERY_HIGH15_V1",start:DAYS[0],end:DAYS.at(-2),cutoff:DAYS.at(-1),target_pct:15,
+ // The search screen ranks MAX(high) over all later audited dates, even
+ // when intermediate observations are absent. Keep this descriptive screen
+ // metric distinct from the contiguous, risk-aware research cohort.
+ const screenRows=events.map(e=>{
+  const path=DAYS.slice(DAYS.indexOf(e.day)+1),observed=path.map(day=>barAt(day,e.code)).filter(Boolean);
+  const high=observed.length?Math.max(...observed.map(b=>b.high)):null;
+  const hit=high===null?null:BigInt(high)*100n>=BigInt(e.base.close)*115n;
+  return {day:e.day,code:e.code,hit,complete:observed.length===path.length};
+ });
+ const screenSummary=rows=>({n:rows.length,observed:rows.filter(r=>r.hit!==null).length,
+   observed_hits:rows.filter(r=>r.hit===true).length,observed_nonhits:rows.filter(r=>r.hit===false).length,
+   no_observations:rows.filter(r=>r.hit===null).length,
+   incomplete_hits:rows.filter(r=>r.hit===true&&!r.complete).length,
+   unique_hit_stocks:new Set(rows.filter(r=>r.hit===true).map(r=>r.code)).size});
+ const screen_metric={...screenSummary(screenRows),by_day:DAYS.slice(0,-1).map(day=>({day,...screenSummary(screenRows.filter(r=>r.day===day))})),
+   note:"Search-style observed maximum, not a completed outcome; no path continuity or corporate-action guard."};
+ return {schema:"BLUE_DISCOVERY_HIGH15_V1",screen_metric,start:DAYS[0],end:DAYS.at(-2),cutoff:DAYS.at(-1),target_pct:15,
    reference:"STORED_DISCOVERY_CLOSE_MATCHED_TO_KRX_EOD",future:"LATER_EOD_HIGH_ONLY",expected_sessions:DAYS,
    coverage,windows,limitations:["Recorded V1 discovery rows only; partial scanner universe reported separately; V2 replay not substituted.","Fixed weekday session list; independent calendar verification pending.","Corporate actions and outside-source price verification pending; gaps >=40% censored.","ASOF follow-up differs by date; compare equal 1/3/5 session windows and date groups.","Feature comparisons descriptive, overlapping stock-days, not independent validation or investment returns.","Stored technical factors are not independently recomputed from provider prices.","Prior-to-hit low excludes hit-day low because intraday order is unknown.","No stock identifiers or raw quotes in artifact."]};
 }
@@ -110,6 +126,9 @@ function selfTest(){
  const ev={day:DAYS[8],code:base.code,base,full:true,features:{X:"YES"}};
  const r=buildReport({coverage:[],events:[ev],barAt:()=>b(115)});
  t(r.windows.ASOF.all_recorded.hits===1&&r.windows[1].all_recorded.hits===1&&r.windows[3].all_recorded.unknown===1);
+ t(r.screen_metric.observed_hits===1&&r.screen_metric.unique_hit_stocks===1);
+ const gap=buildReport({coverage:[],events:[{...ev,day:DAYS[0]}],barAt:(day)=>day===DAYS[2]?b(115):undefined});
+ t(gap.screen_metric.observed_hits===1&&gap.screen_metric.incomplete_hits===1&&gap.windows.ASOF.all_recorded.unknown===1);
  t(!JSON.stringify(r).includes(base.code));
  return count;
 }
