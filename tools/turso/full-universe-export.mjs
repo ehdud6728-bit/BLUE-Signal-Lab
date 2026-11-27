@@ -5,7 +5,7 @@ import {dirname} from 'node:path';
 import {reconstructVerifiedDay} from './research-v2-eod-export.mjs';
 const fail=(ok,code)=>{if(!ok)throw Error(code);};
 const int=x=>{const n=Number(x);fail(x!==null&&x!==undefined&&Number.isSafeInteger(n)&&n>=0,'FULL_BAD_COUNT');return n;};
-export async function exportUniverse(db,{sessions=60,cutoff}){
+export async function exportUniverse(db,{sessions=60,cutoff,includeCaseFields=false}){
  fail([30,60].includes(sessions)&&/^20\d{2}-\d{2}-\d{2}$/.test(cutoff)&&Number.isFinite(Date.parse(cutoff))&&new Date(cutoff+'T00:00:00Z').toISOString().slice(0,10)===cutoff,'FULL_BAD_REQUEST');
  const audit=(await db.execute({sql:'SELECT trade_day,row_count,source,day_sha256 FROM blue_eod_ingest_audit_v1 WHERE trade_day<=? ORDER BY trade_day DESC LIMIT ?',args:[cutoff,sessions]})).rows.reverse();
  fail(audit.length>0&&audit.length<=sessions,'FULL_NO_AUDIT');
@@ -18,7 +18,7 @@ export async function exportUniverse(db,{sessions=60,cutoff}){
   const codes=new Set(rows.map(x=>x.code));
   for(const r of rows){
    const values={};for(const k of ['open','high','low','close','amount']){values[k]=int(r[k]);fail(values[k]>0,'FULL_BAD_VALUE');}
-   bars.push({day,code:r.code,market:r.market,...values});
+   bars.push({day,code:r.code,market:r.market,...values,...(includeCaseFields?{name:String(r.name??''),volume:int(r.volume)}:{})});
   }
   const sa=(await db.execute({sql:'SELECT trade_day,row_count,observed_stocks,signal_events,source_payload_sha256 FROM blue_research_signal_audit_v1 WHERE trade_day=?',args:[day]})).rows;
   fail(sa.length<=1,'FULL_DUP_SIGNAL_AUDIT');
@@ -49,7 +49,7 @@ async function main(){
  fail(/^(libsql|https):\/\//.test(url)&&authToken,'FULL_CONFIG_MISSING');
  const db=createClient({url,authToken,intMode:'string'});
  try{
-  const data=await exportUniverse(db,{sessions:60,cutoff});
+  const data=await exportUniverse(db,{sessions:60,cutoff,includeCaseFields:process.env.BLUE_CASE_FIELDS==='true'});
   const out='output/full-universe/source.json';await mkdir(dirname(out),{recursive:true});await writeFile(out,JSON.stringify(data)+'\n');
   console.log('BLUE_FULL_UNIVERSE_SOURCE',JSON.stringify({days:data.days.length,first:data.days[0].day,last:data.days.at(-1).day,bars:data.bars.length,signal_rows:data.signals.length,hash_recomputed:true,writes:0}));
  }finally{db.close();}
