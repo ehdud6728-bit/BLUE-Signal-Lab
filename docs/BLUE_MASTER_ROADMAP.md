@@ -206,3 +206,13 @@
 - 기존 blue_pattern_performance_audited.yml의 명시적 수동 실행에서만 저장 snapshot을 읽어 all-pattern-landmark.json 집계 산출. 기존 schedule·publish 조건/추천/UI/DB 불변, 원시 개별종목 자료·차트는 공개 artifact에 추가하지 않음. 현재 스냅샷으로 과거를 나눈 탐색이며 당시 추천 또는 독립 전진 검증으로 주장하지 않음.
 - 검증: pattern_performance 회귀52 + ENV20 case7/landmark4/chart4 = 67개 통과. YAML 파싱 및 diff 공백 검사 통과, 실제 게시목록 inventory 30개 확인. 신규 전체 패턴 실데이터 경로/성과·독립 가격·외부 달력·기업행동·운영화면은 미검증.
 - 다음: PR CI/병합 → BLUE Audited Pattern Performance 수동 sessions60 → all-pattern-landmark.json의 30 cohort 누락/표본/실패 확인, 패턴별 실제 사례의 인증된 조회·차트 연결 순서. 현재 ENV20 실검증과 전체 확장 실행전 상태를 구분해 보고. 발견된 recent-match.ts의 거래대금 조건 미매칭은 기존 제약으로 보존, 가격·특징 검증 후 별도 앱 연결 필요.
+
+
+## 2026-11-27 — 전체 패턴 첫 실데이터 실행 검토 및 추천 기준일 동기화
+- 실행 [45960803461](https://github.com/ehdud6728-bit/BLUE-Signal-Lab/actions/runs/45960803461) study/publish 성공. artifact15179924775 ZIP SHA256 f5aad4c9aec70f2ead7c7a6153280a7852368c2adde75adaa3b547ef538a67ce 실제 다운로드 일치. 결과 asof11/26, 선택 snapshot11/25, 고정split11/09, 고유 종목/일7996, 집계427952행. 원래30 cohort 모두 COMPUTED_SAME_SOURCE, 30×20 coverage 합과 모든 집계 hit/n 비율 재검산 일치. 이는 저장 집계 검사이며 원본 OHLC 전체 독립 재계산 아님.
+- 추천 누락 발견: 같은 실행에서 11/26 새 추천30행 게시, 분석은11/25 추천25행 기준. 기간별10추가/5제외. 새 cohort 4개(ENV20_LOWER_TOUCH|LONG_BULL, BULL|CLOSE_HIGH, BULL|AMOUNT_20|0_5_1, BULL|AMOUNT_20|LT_0_5) 이번 분석에 없음. 전체 최신 추천 검증 완료로 보고하지 않음.
+- 수정: 기존 수동 전체 패턴 단계가 같은 source.json으로 최근28관측 보고서/추천snapshot을 먼저 생성한 후 landmark 분석. all-pattern-selection.json 및 선택 근거 집계보고서도 artifact 보존. sessions60/120/250 수동 모두 동일 순서 적용, schedule·publish 조건/DB/UI/추천 정책 불변. 원시 개별 종목 공개 추가 없음.
+- 실제 검증: 기존 recent-report.json에서 snapshot 재생성해 이번 게시 web-snapshot.json과 완전 일치. YAML 수동조건/명령순서/과거snapshot 미참조 검사, 관련 단위6개 및 diff 검사 통과. 수정 workflow 원격 실행·최신30추천 전체 결과는 아직 미검증.
+- 원천 한계: 49개 감사 일봉 관측은2024-10-28~2026-11-26에 걸쳐 있어 연속49거래일로 해석 금지. 4일(11/10,13,16,17)의 연구 종목수와 EOD수 불일치로 신호 연구에서 제외. 종목 수 차이는 해당4일 각50건, 누락원인/코드 정합성은 미확인. 기록된 감사일봉 N개 간격이며 독립 거래일 달력/기업행동/외부가격 검증 전 확정 전략 결론 금지.
+- 별도 계산 감사: profitability1040행 일치/범위외9181, high-return217행 일치/범위외2098, 실패0. 범위외를 검증 완료로 간주하지 않음. 저장소 게시 성공과 운영 웹 배포·인증기기 화면 검증은 구분.
+- 다음: CI/병합→동일 BLUE Audited Pattern Performance 수동sessions60→선택asof==결과asof·동일실행 게시 추천과 exact inventory/horizon 비교. 후속 실제 차트는 인증된 자료 연결 필요, calendar/누락 데이터 검증 미완료 상태를 유지.

@@ -80,9 +80,6 @@ jobs:
           python3 research/pattern_performance_discovery.py --input output/pattern/source.json --output output/pattern/discovery.json
           python3 research/pattern_performance_high_returns.py --input output/pattern/source.json --output output/pattern/high-return-profiles.json
           python3 research/pattern_performance_high_returns_audit.py --source output/pattern/source.json --report output/pattern/high-return-profiles.json --output output/pattern/high-return-audit.json
-      - name: All saved basic and recommended pattern evolution (manual only)
-        if: github.ref == 'refs/heads/main' && github.event_name == 'workflow_dispatch'
-        run: python3 research/pattern_performance_landmark.py --source output/pattern/source.json --snapshot research/adaptive-history/latest.json --out output/pattern/all-pattern-landmark.json
       - name: Generate short-window web snapshot candidate
         if: github.ref == 'refs/heads/main' && (github.event_name == 'workflow_dispatch' || (github.event_name == 'schedule' && vars.BLUE_ADAPTIVE_AUTO_ENABLED == 'true')) && (inputs.sessions == '60' || github.event_name == 'schedule')
         run: |
@@ -92,6 +89,12 @@ jobs:
           python3 research/pattern_performance_web_export.py --input output/pattern/web-snapshot.json --output output/pattern/recent-pattern-data.ts
           python3 research/pattern_performance_profitability_export.py --input output/pattern/recent-report.json --snapshot output/pattern/web-snapshot.json --audit output/pattern/profitability-audit.json --output output/pattern/research-profitability-data.ts
           python3 research/pattern_performance_archive.py --input output/pattern/web-snapshot.json --archive output/pattern/archive
+      - name: All same-run basic and recommended pattern evolution (manual only)
+        if: github.ref == 'refs/heads/main' && github.event_name == 'workflow_dispatch'
+        run: |
+          python3 research/pattern_performance_audited.py --input output/pattern/source.json --output output/pattern/all-pattern-selection-report.json --recent-window 28
+          python3 research/pattern_performance_web_snapshot.py --input output/pattern/all-pattern-selection-report.json --output output/pattern/all-pattern-selection.json
+          python3 research/pattern_performance_landmark.py --source output/pattern/source.json --snapshot output/pattern/all-pattern-selection.json --out output/pattern/all-pattern-landmark.json
       - uses: actions/upload-artifact@v4
         if: github.ref == 'refs/heads/main' && (github.event_name == 'workflow_dispatch' || (github.event_name == 'schedule' && vars.BLUE_ADAPTIVE_AUTO_ENABLED == 'true'))
         with:
@@ -99,6 +102,8 @@ jobs:
           path: |
             output/pattern/report.json
             output/pattern/all-pattern-landmark.json
+            output/pattern/all-pattern-selection.json
+            output/pattern/all-pattern-selection-report.json
             output/pattern/price-path-readiness.json
             output/pattern/windows.json
             output/pattern/market-regime.json
