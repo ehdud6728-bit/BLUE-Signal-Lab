@@ -195,3 +195,14 @@
 - 실제 새 포함 사례 캔들 시각 대조(날짜순 도달/미도달 예시, 대표성 주장 없음): 000880 2026-11-20 신호, D1시가 63900·이후 3일 HIGH 69000, +5 도달. 005870 같은 신호일, D1시가 3440·이후 HIGH3490, +5 미도달. 새 경로는 11/23~26 네 세션. 임의 종목명 보충 없음.
 - 검증: 관련 Python 회귀 32개 통과. 실제 539 exact 경로·1617 해시 연결·1840 성과 구간 감사 통과, diff 공백 검사 통과. 예시 차트 PNG 육안 검토. 원격 새 CI/고정 split 원본 재실행/HTML 브라우저 렌더/외부 가격·수정주가·기업행동 독립 확인은 미완료.
 - 다음: PR CI/병합 → 동일 수동 ENV20 연구 → split 11-09·ALL/개별성과 보존·차트 감사 확인. 운영 DB/API/UI/수집·스케줄·추천 변경 및 배포 없음. G03/G04 자동 수집/공유 호출량·실운영 저장 부하 검증은 여전히 별도 미완료.
+
+
+## 2026-11-27 — 전체 상위·추천 패턴 발생 이후 분석으로 범위 복원
+- 사용자 명확화: ENV20 한 패턴 연구가 아니라 기존 상위·추천 패턴 전체의 발생 후 상태·위험 분석이 목표. ENV20 추가 실험보다 공통 분석 연결을 우선한다. 중단/폐기 연구 브랜치 재개는 하지 않으며 기존 운영 목록의 신호명을 그대로 사용한다.
+- 저장소 최신 게시 snapshot(2026-11-25) 및 web RECENT_RECOMMENDATIONS JSON이 동일함을 실제 확인. 기본16종, SHORT_RECOMMENDATION 기간별25행, WATCH691행. 현재 추천25행은 ENV20_LOWER_TOUCH 계열만 해당하나 나머지 기본15종을 분석에서 제외하지 않는다. 이는 해당 게시본 현황이며 실시간 목록 조회가 아님.
+- 기간 중복 통합 시 30개 cohort: 기본16, 캔들1, 세부7, 거래대금6. 기본 목록 ENV20_LOWER_TOUCH/BB30/BB40_ALT/BB20_ALT/BB40/BB20_LOWER/BB30_LOWER/BB30_LOWER_RECLAIM/BB40_LOWER_ALT/BB30_ALT/BB30_LOWER_ALT/BB40_LOWER/BB20/ENV40/BB20_LOWER_ALT/ENV20. WATCH는 집계해 명시하되 추천 승격하지 않음.
+- `pattern_performance_audited.analyze`에 선택적 cohort_sink 추가. 기존 출력 불변 테스트 통과. 새 pattern_performance_landmark.py는 기본/캔들/복합/거래대금/시장 원래 분석기가 생성한 정확한 cohort를 재사용, 고유 code/day 가격 경로 공유, 패턴별 표본·누락·기간·고정 split11/09·후속 특징/목표·하방 통계를 분리. 다중 패턴 중복 사건은 독립 아님. 신호 뒤20개 감사 세션 경로만 사용, 누락/시장변경/시가40% 불연속 중단.
+- 기존 ENV20 landmark 엔진에 일반 case schema를 허용하되 V6 기존 schema/출력 경로 유지. 패턴별 실제 지지/저항 계산이 준비되지 않았으므로 UNKNOWN 유지. 추천 선별 기준(신호일 종가→종가)과 새 상태 연구(다음 시가/미래 HIGH)는 다른 지표이며 순위를 자동 교체하지 않음. 캔들 정의도 기존 선별70%+꼬리와 상태연구60% 몸통을 혼합하지 않도록 limits에 기록.
+- 기존 blue_pattern_performance_audited.yml의 명시적 수동 실행에서만 저장 snapshot을 읽어 all-pattern-landmark.json 집계 산출. 기존 schedule·publish 조건/추천/UI/DB 불변, 원시 개별종목 자료·차트는 공개 artifact에 추가하지 않음. 현재 스냅샷으로 과거를 나눈 탐색이며 당시 추천 또는 독립 전진 검증으로 주장하지 않음.
+- 검증: pattern_performance 회귀52 + ENV20 case7/landmark4/chart4 = 67개 통과. YAML 파싱 및 diff 공백 검사 통과, 실제 게시목록 inventory 30개 확인. 신규 전체 패턴 실데이터 경로/성과·독립 가격·외부 달력·기업행동·운영화면은 미검증.
+- 다음: PR CI/병합 → BLUE Audited Pattern Performance 수동 sessions60 → all-pattern-landmark.json의 30 cohort 누락/표본/실패 확인, 패턴별 실제 사례의 인증된 조회·차트 연결 순서. 현재 ENV20 실검증과 전체 확장 실행전 상태를 구분해 보고. 발견된 recent-match.ts의 거래대금 조건 미매칭은 기존 제약으로 보존, 가격·특징 검증 후 별도 앱 연결 필요.

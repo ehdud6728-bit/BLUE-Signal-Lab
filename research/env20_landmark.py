@@ -41,7 +41,7 @@ def metrics(rows):
       future_high_pct=stat([z["high"] for z in rows]),future_low_pct=stat([z["low"] for z in rows]),future_close_pct=stat([z["close"] for z in rows]),
       hold_vs_exit_next_open_pct=stat([z["close"] for z in rows]))
 def study(report,cases,outcomes):
-    if report["schema"]!="BLUE_ENV20_CASE_FEATURES_V6":raise ValueError("BAD_CASE_SOURCE")
+    if report["schema"] not in ("BLUE_ENV20_CASE_FEATURES_V6","BLUE_PATTERN_CASE_FEATURES_V1"):raise ValueError("BAD_CASE_SOURCE")
     lookup={c["id"]:c for c in cases};results={o["id"]:o for o in outcomes}
     if len(lookup)!=len(cases) or len(results)!=len(outcomes) or set(lookup)!=set(results):raise ValueError("CASE_ID_MISMATCH")
     split=report["split_day"];coverage=Counter();groups=defaultdict(list);baseline=defaultdict(list)
@@ -72,7 +72,7 @@ def study(report,cases,outcomes):
         d,h,t,cohort,phase=key;out.append(dict(landmark=d,future_sessions=h,target_pct=t,cohort=cohort,phase=phase,feature="BASELINE",value="ALL",**metrics(a)))
     for key,a in sorted(groups.items()):
         d,h,t,cohort,phase,k,v=key;out.append(dict(landmark=d,future_sessions=h,target_pct=t,cohort=cohort,phase=phase,feature=k,value=v,**metrics(a)))
-    return dict(schema="BLUE_ENV20_LANDMARK_V2",path_basis="EXACT_CONTIGUOUS_PREFIX" if all(o.get("landmark_path_version")==1 for o in outcomes) else "LEGACY_OR_MIXED_PREFIX",asof=report["asof"],split_day=split,split_policy=report.get("split_policy","LEGACY_UNSPECIFIED"),case_count=len(cases),coverage=[dict(landmark=d,future_sessions=h,status=s,n=n) for (d,h,s),n in sorted(coverage.items())],rows=out,limits=["SAME_V6_SOURCE_NOT_INDEPENDENT","FUTURE_HIGH_NOT_REALIZED_RETURN","EXIT_NEXT_OPEN_VS_HOLD_CLOSE_NO_COSTS","NO_RECOMMENDATION","NO_INDEPENDENT_PRICE_OR_CORPORATE_ACTION_VALIDATION","MISSING_PATHS_NOT_ZERO","FIXED_STRATA_MULTIPLE_COMPARISONS","NOT_IMMUTABLE_FORWARD_CAPTURE","NO_INTRADAY_ORDER"])
+    return dict(schema="BLUE_PATTERN_LANDMARK_V1" if report["schema"]=="BLUE_PATTERN_CASE_FEATURES_V1" else "BLUE_ENV20_LANDMARK_V2",path_basis="EXACT_CONTIGUOUS_PREFIX" if all(o.get("landmark_path_version")==1 for o in outcomes) else "LEGACY_OR_MIXED_PREFIX",asof=report["asof"],split_day=split,split_policy=report.get("split_policy","LEGACY_UNSPECIFIED"),case_count=len(cases),coverage=[dict(landmark=d,future_sessions=h,status=s,n=n) for (d,h,s),n in sorted(coverage.items())],rows=out,limits=["SAME_V6_SOURCE_NOT_INDEPENDENT","FUTURE_HIGH_NOT_REALIZED_RETURN","EXIT_NEXT_OPEN_VS_HOLD_CLOSE_NO_COSTS","NO_RECOMMENDATION","NO_INDEPENDENT_PRICE_OR_CORPORATE_ACTION_VALIDATION","MISSING_PATHS_NOT_ZERO","FIXED_STRATA_MULTIPLE_COMPARISONS","NOT_IMMUTABLE_FORWARD_CAPTURE","NO_INTRADAY_ORDER"])
 def main():
     p=argparse.ArgumentParser()
     for k in ("report","cases","outcomes","out"):p.add_argument("--"+k,type=Path,required=True)
