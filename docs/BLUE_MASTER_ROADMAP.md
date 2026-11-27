@@ -248,3 +248,7 @@
 - 기본 snapshot은 위의 검증저장ID, main/repository guard, PR에서는자격증명없이암호화테스트만 실행. 운영DB SELECT1회, 새테이블/행쓰기/자동스케줄/가격수집/앱권한 변경없음.
 - 로컬 Node 관련5개 통과(암호화roundtrip·무작위성·평문필드비노출·변조AAD/잘못된수신키거부·SELECT-only·원본해시변조거부 및기존private보관검사). YAML main/manual/암호문단일artifact검사, 저장소비밀키없음, diff검사통과. 원격실제암호화회수·복호화·파일전달은아직미실행.
 - 다음: PR CI/병합→BLUE Private Chart Encrypted Export 수동main/기본snapshot실행→암호문다운로드/수신키복호화/원본SHA및102사례재검증→HTML/대표이미지파일저장·전달. 이미전달한539사례V6파일은전체패턴102사례와다른모집단으로구분.
+
+### 2026-11-27 KIS 자동 복구 보완
+- [x] 유효 Turso 토큰이 있어도 실제 Worker D1 토큰을 매 issuer 점검에 대조/자동 동기화하는 코드 및 로컬 24검사.
+- [ ] 실제 자동 issuer 활성/최근실행 확인, 운영 저장본 복구·시세 수집·사용자 화면 검증. 코드 준비와 운영 성공은 구분.

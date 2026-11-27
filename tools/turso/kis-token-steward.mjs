@@ -100,6 +100,26 @@ async function syncBackup(client,key,secret,scope,backup,now){
     return {status:'D1_BACKUP_VERIFIED',expires_at_utc:String(row.expires_at_utc)};
   }catch{return {status:'D1_BACKUP_SYNC_FAILED'};}
 }
+// Reconcile the vault actually read by Workers even when the issuance ledger
+// says SAVED_DUAL. A later D1 loss/expiry must not require manual --sync.
+async function ensureWorkerToken(client,key,secret,scope,backup,now){
+  try{
+    const result=await client.execute({sql:`SELECT ciphertext,expires_at_utc,saved_at_utc
+      FROM blue_turso_kis_vault_v1 WHERE scope=? LIMIT 1`,args:[scope]});
+    const row=result.rows?.[0];
+    if(!row)return {status:'D1_BACKUP_NO_PRIMARY_TOKEN'};
+    const token=decryptKisToken(String(row.ciphertext),key,secret);
+    const current=await backup.inspect({key,secret,now});
+    if(current.status==='VALID'&&current.token===token&&
+       current.expiresAt===String(row.expires_at_utc)&&
+       current.savedAt===String(row.saved_at_utc))return {status:'D1_BACKUP_CURRENT'};
+    // Do not overwrite a newer or unrecognized standby; mirror also guards
+    // timestamps and performs readback. Inspection failure is never absence.
+    if(!['VALID','MISSING','EXPIRED'].includes(current.status))
+      return {status:'D1_BACKUP_SYNC_FAILED'};
+    return syncBackup(client,key,secret,scope,backup,now);
+  }catch{return {status:'D1_BACKUP_SYNC_FAILED'};}
+}
 export async function steward(client,env,now=new Date(),{mode='check',issuer=issueOnce,backup=null}={}){
   if(!['check','issue','sync'].includes(mode))throw Error('INVALID_MODE');
   const key=String(env.KIS_APP_KEY||''),secret=String(env.KIS_APP_SECRET||'');
@@ -118,7 +138,7 @@ export async function steward(client,env,now=new Date(),{mode='check',issuer=iss
     // Missing table, permissions, or connectivity are not evidence of a missing
     // token. Fail closed without leaking database/credential error details.
     if(mode==='check')return {status:'TOKEN_VAULT_READ_UNAVAILABLE'};
-    throw error;
+    throw Error("TOKEN_VAULT_READ_UNAVAILABLE");
   }
   const existing=result.rows?.[0];
   const expires=existing?Date.parse(String(existing.expires_at_utc)):NaN;
@@ -166,15 +186,13 @@ export async function steward(client,env,now=new Date(),{mode='check',issuer=iss
     if(!['MISSING','EXPIRED'].includes(standby.status))
       return {status:'D1_BACKUP_INSPECTION_FAILED_NO_ISSUE'};
   }
-  if(!renewalDue){
-    const prior=await client.execute({sql:`SELECT status FROM blue_turso_kis_issuance_v1
-      WHERE scope=? LIMIT 1`,args:[scope]});
-    if(prior.rows?.[0]?.status==='D1_SYNC_PENDING')
-      return syncBackup(client,key,secret,scope,backup,now);
-    return {status:'TOKEN_VALID',expires_at_utc:String(existing.expires_at_utc)};
+  if(tokenValid){
+    const health=await ensureWorkerToken(client,key,secret,scope,backup,now);
+    if(health.status!=='D1_BACKUP_CURRENT')return health;
+    if(!renewalDue)return {status:'TOKEN_VALID',expires_at_utc:String(existing.expires_at_utc)};
   }
-  // The previous saved token may remain usable during the renewal window.
-  // No new tokenP call is allowed until 24 hours after that saved token.
+  // Keep the single issuer's existing 24h guard; repair standby first while
+  // the current token is still usable, without another provider issuance.
   if(existing&&now.getTime()-saved<DAY_MS)return {
     status:tokenValid?'TOKEN_VALID_RENEWAL_WAIT_24H':'WAIT_24H_FROM_LAST_SAVED',
     expires_at_utc:String(existing.expires_at_utc)};
