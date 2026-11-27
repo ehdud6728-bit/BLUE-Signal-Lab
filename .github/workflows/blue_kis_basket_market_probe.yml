@@ -2,6 +2,11 @@ name: BLUE KIS Basket Market Probe (READ ONLY)
 on:
   workflow_dispatch:
     inputs:
+      mode:
+        description: 'shape: 조회 성능 / repeat: 마감된 60분 구간 반복 검증 (10:02 이후)'
+        type: choice
+        options: ['shape','repeat']
+        default: 'shape'
       count:
         description: "정밀 분봉 테스트 종목 수 (10부터)"
         type: choice
@@ -37,4 +42,5 @@ jobs:
           KIS_APP_KEY: ${{ secrets.KIS_APP_KEY }}
           KIS_APP_SECRET: ${{ secrets.KIS_APP_SECRET }}
           PROBE_COUNT: ${{ inputs.count }}
+          PROBE_MODE: ${{ inputs.mode }}
         run: node tools/turso/basket-market-probe.mjs
