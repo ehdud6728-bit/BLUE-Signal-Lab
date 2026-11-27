@@ -1,0 +1,39 @@
+name: BLUE KIS Basket Market Probe (READ ONLY)
+on:
+  workflow_dispatch:
+    inputs:
+      count:
+        description: "정밀 분봉 테스트 종목 수 (10부터)"
+        type: choice
+        options: ['10','20']
+        default: '10'
+  pull_request:
+    paths:
+      - 'tools/turso/basket-market-probe*.mjs'
+      - '.github/workflows/blue_kis_basket_market_probe.yml'
+permissions:
+  contents: read
+concurrency:
+  group: blue-kis-basket-market-probe
+  cancel-in-progress: false
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm install --prefix tools/turso --no-audit --no-fund --ignore-scripts --no-package-lock
+      - run: npm install --prefix collector --no-audit --no-fund --ignore-scripts --no-package-lock
+      - run: node --test tools/turso/basket-market-probe.test.mjs
+      - name: Bounded manual KIS read-only probe (09:35–15:20 KST)
+        if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.repository == 'ehdud6728-bit/BLUE-Signal-Lab'
+        env:
+          TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
+          TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
+          KIS_APP_KEY: ${{ secrets.KIS_APP_KEY }}
+          KIS_APP_SECRET: ${{ secrets.KIS_APP_SECRET }}
+          PROBE_COUNT: ${{ inputs.count }}
+        run: node tools/turso/basket-market-probe.mjs
