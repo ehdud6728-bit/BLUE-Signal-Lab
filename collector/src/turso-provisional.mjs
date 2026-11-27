@@ -142,7 +142,29 @@ export async function collectTursoProvisional(env,now=new Date(),deps={}){
     const minute=Math.floor((kst.seconds-9*3600)/60);
     const page=minute%pages;
     const base=await client.execute({sql:`SELECT code,name,close FROM blue_eod_daily_v1
-      WHERE trade_day=? ORDER BY code LIMIT ? OFFSET ?`,args:[day,batchCap,page*pageWidth]});
+      WHERE trade_day=? ORDER BY code LIMIT ? OFFSET ?`,args:[day,pageWidth,page*pageWidth]});
+    let marketRows = base.rows || [];
+    if (mode === 'FULL' && marketRows.length) {
+      // Only inspect this page. Prioritize symbols without a stored price for
+      // this session, then the oldest receipt. A shortened KIS batch leaves
+      // the unserved tail eligible on the next visit, including after restart.
+      const pageCodes = marketRows.map(row => String(row.code));
+      try {
+        const saved = await client.execute({sql:`SELECT code,observed_at_utc
+          FROM blue_kis_provisional_daily_v1 WHERE trade_day=? AND market='J'
+          AND source=? AND code IN (${pageCodes.map(() => '?').join(',')})`,
+          args:[kst.date, afterClose ? 'KIS_REST_INQUIRE_DAILY_PRICE_PROVISIONAL' :
+            'KIS_REST_INQUIRE_PRICE_PROVISIONAL', ...pageCodes]});
+        const receipts = new Map(saved.rows.map(row => [String(row.code), String(row.observed_at_utc)]));
+        marketRows = [...marketRows].sort((left, right) =>
+          (receipts.get(String(left.code)) || '').localeCompare(receipts.get(String(right.code)) || ''));
+      } catch {
+        // First run can precede creation of the provisional table. Rotate
+        // the starting symbol on repeat visits while receipts are unavailable.
+        const offset = Math.floor(minute / pages) % marketRows.length;
+        marketRows = marketRows.slice(offset).concat(marketRows.slice(0, offset));
+      }
+    }
     // Every fifth minute, refresh a few recently audited pattern candidates
     // before the rotating market sweep. Never use unaudited/D1 candidates.
     let priority=[];
@@ -204,7 +226,7 @@ export async function collectTursoProvisional(env,now=new Date(),deps={}){
       }
     }
     const seen=new Set();
-    const selected={rows:[...tracking,...priority,...(base.rows||[])].filter(row=>{
+    const selected={rows:[...tracking,...priority,...marketRows].filter(row=>{
       const code=String(row.code||'');
       if(seen.has(code))return false;seen.add(code);return true;
     }).slice(0,batchCap)};
