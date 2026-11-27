@@ -1,6 +1,7 @@
 import {useState} from 'react';
 type Row={code:string;precise:boolean};
-type Remote={revision:number;items:Row[];updated_at:string|null;auto_tracking:false};
+type SavedQuote={code:string;price:number;day:string;observed_at:string};
+type Remote={quotes?:SavedQuote[];quotes_available?:boolean;revision:number;items:Row[];updated_at:string|null;auto_tracking:false};
 const path='/api/basket/tracking';
 function canonical(a:Row[]){return JSON.stringify([...a].sort((x,y)=>x.code.localeCompare(y.code)))}
 export default function BasketTrackingRegistry({items}:{items:Row[]}){
@@ -25,10 +26,16 @@ export default function BasketTrackingRegistry({items}:{items:Row[]}){
   }catch(e){setMessage(e instanceof Error?e.message:'등록 실패');}finally{setBusy(false);}
  }
  return <details className="r152-data-management"><summary>서버 추적 대상 등록</summary>
- <p>현재 브라우저의 종목코드와 정밀 지정만 계정별 서버에 등록합니다. 발견 가격·메모·장기 보호·연구 이력은 변경하지 않습니다. 자동 수집과 30/120분 분석은 아직 시작되지 않습니다.</p>
+ <p>현재 브라우저의 종목코드와 정밀 지정만 계정별 서버에 등록합니다. 발견 가격·메모·장기 보호·연구 이력은 변경하지 않습니다. 서버 목록을 확인하면 최근 수집일의 저장 시세를 볼 수 있습니다.</p>
  <div className="basket-actions"><button type="button" disabled={busy} onClick={()=>void load()}>서버 목록 확인</button>
  <button type="button" disabled={busy||!remote||!allowed||matching&&remote.revision>0} onClick={()=>void register()}>현재 목록 등록</button></div>
  {remote&&<p>서버 {remote.items.length}종목 · 정밀 {remote.items.filter(r=>r.precise).length}종목 · 버전 {remote.revision} · {matching?'현재 목록과 일치':'현재 목록과 다름'}{remote.updated_at?' · '+new Date(remote.updated_at).toLocaleString('ko-KR'):''}</p>}
+ {remote?.quotes_available===false&&<p>저장 시세 조회가 일시적으로 어렵습니다.</p>}
+ {remote?.quotes_available===true&&remote.items.length>0&&<details open><summary>최근 수집일 KIS 잠정 시세</summary>
+ <ul>{remote.items.map(item=>{
+   const q=remote.quotes?.find(row=>row.code===item.code);
+   return <li key={item.code}>{item.code} · {q ? q.price.toLocaleString('ko-KR')+'원 · '+q.day+' · 수신 '+new Date(q.observed_at).toLocaleTimeString('ko-KR',{timeZone:'Asia/Seoul'})+' KST' : '최근 수집일 저장값 없음'}</li>;
+ })}</ul></details>}
  {remote&&remote.items.length>0&&<details><summary>서버 종목코드 보기</summary><p>{remote.items.map(r=>r.code+(r.precise?'(정밀)':'')).join(' · ')}</p></details>}
  {!allowed&&<p>전체 50종목·정밀 10종목 이내로 정리해야 등록할 수 있습니다.</p>}
  {message&&<p role="status">{message}</p>}

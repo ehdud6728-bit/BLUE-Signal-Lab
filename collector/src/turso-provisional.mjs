@@ -165,8 +165,46 @@ export async function collectTursoProvisional(env,now=new Date(),deps={}){
         }
       }catch{ /* An optional priority cannot block the full-market sweep. */ }
     }
+    // Share the existing full-market request budget. Assign each registered
+    // code to one of five minute slots and retain at least half for the sweep.
+    let tracking = [];
+    if (mode === 'FULL' && !afterClose) {
+      try {
+        const rosters = await client.execute(`SELECT r.roster_json FROM blue_tracking_roster_v1 r
+          JOIN (SELECT owner, MAX(revision) AS revision FROM blue_tracking_roster_v1
+                GROUP BY owner ORDER BY owner LIMIT 101) latest
+          ON r.owner=latest.owner AND r.revision=latest.revision`);
+        const codes = new Set(), precise = new Set();
+        if (rosters.rows.length <= 100) {
+          for (const row of rosters.rows) {
+            const items = JSON.parse(row.roster_json);
+            if (!Array.isArray(items) || items.length > 50) throw Error('INVALID_ROSTER');
+            for (const item of items) {
+              if (!/^\d{6}$/.test(item.code) || typeof item.precise !== 'boolean')
+                throw Error('INVALID_ROSTER');
+              codes.add(item.code);
+              if (item.precise) precise.add(item.code);
+            }
+          }
+        }
+        if (codes.size <= 50 && precise.size <= 10) {
+          const slot = [...codes].sort().filter((_, index) => index % 5 === minute % 5);
+          const cap = Math.floor(batchCap / 2);
+          const start = slot.length ? Math.floor(minute / 5) * cap % slot.length : 0;
+          const due = slot.slice(start).concat(slot.slice(0, start)).slice(0, cap);
+          if (due.length) {
+            tracking = (await client.execute({sql:`SELECT code,name,close FROM blue_eod_daily_v1
+              WHERE trade_day=? AND code IN (${due.map(() => '?').join(',')}) ORDER BY code`,
+              args:[day,...due]})).rows;
+          }
+        }
+      } catch {
+        // An absent registry or unavailable optional source leaves the market sweep running.
+        tracking = [];
+      }
+    }
     const seen=new Set();
-    const selected={rows:[...priority,...(base.rows||[])].filter(row=>{
+    const selected={rows:[...tracking,...priority,...(base.rows||[])].filter(row=>{
       const code=String(row.code||'');
       if(seen.has(code))return false;seen.add(code);return true;
     }).slice(0,batchCap)};
