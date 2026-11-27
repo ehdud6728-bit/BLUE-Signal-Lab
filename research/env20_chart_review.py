@@ -45,9 +45,13 @@ def verify(cases,outcomes):
             checked+=1
     return dict(cases=len(cases),exact_paths_checked=exact_count,hash_links_checked=linked,hash_check='LINKAGE_ONLY_NOT_RAW_SOURCE_REHASH',observed_horizons_checked=checked,source='SAME_STORED_OHLC_ARITHMETIC_CHECK_NOT_INDEPENDENT_MARKET_SOURCE',recommendation=False)
 
-def candles(bars,signal):
+def candles(bars,signal,*,entry_day=None,entry=None,goal=None):
     if not bars:return '<p>후속 가격 자료 없음</p>'
-    lo=min(b['low'] for b in bars);hi=max(b['high'] for b in bars);span=max(hi-lo,1)
+    lo=min(b['low'] for b in bars);hi=max(b['high'] for b in bars);levels = [(entry, '기준 시가', '#405777'), (goal, '+5% 목표', '#895800')] if entry_day and entry and goal else []
+    if levels:
+        lo = min(lo, entry, goal)
+        hi = max(hi, entry, goal)
+    span=max(hi-lo,1)
     y=lambda v:25+180*(hi-v)/span
     step=760/len(bars);parts=['<svg viewBox="0 0 800 235" role="img" aria-label="실제 저장 일봉 차트">']
     for i,b in enumerate(bars):
@@ -55,6 +59,10 @@ def candles(bars,signal):
         tip=html.escape(f"{b['day']} O {b['open']} H {b['high']} L {b['low']} C {b['close']}")
         parts.append(f'<g><title>{tip}</title><line x1="{x}" x2="{x}" y1="{y(b["high"])}" y2="{y(b["low"])}" stroke="{color}"/><rect x="{x-step*.28}" y="{min(y(b["open"]),y(b["close"]))}" width="{step*.56}" height="{max(1,abs(y(b["open"])-y(b["close"])))}" fill="{color}"/></g>')
         if b['day']==signal:parts.append(f'<text x="{x}" y="225" text-anchor="middle" font-size="11">신호일</text>')
+    if levels:
+        start = next(i for i, bar in enumerate(bars) if bar['day'] == entry_day)
+        for price, label, color in levels:
+            parts.append(f'<line x1="{25+start*step}" x2="785" y1="{y(price)}" y2="{y(price)}" stroke="{color}" stroke-dasharray="6 4"><title>{label} {price:,.2f}원</title></line>')
     parts.append(f'<text x="5" y="15" font-size="11">{hi:,}</text><text x="5" y="212" font-size="11">{lo:,}</text>')
     return ''.join(parts)+'</svg><small>'+html.escape(bars[0]['day']+' ~ '+bars[-1]['day'])+'</small>'
 

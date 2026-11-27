@@ -260,3 +260,8 @@
 - Official context checked: KIS portal documents 24h token validity / daily issuance principle and reuse within 6h; https://apiportal.koreainvestment.com/apiservice and official https://github.com/koreainvestment/open-trading-api/blob/main/examples_user/kis_auth.py . The 23h guard is our implementation choice, not a quoted provider requirement.
 - Real SQLite test added for pre-expiry renewal, early/concurrent/same-day duplicate refusal; prior failure retry and standby repair tests retained. Current execution environment cannot start shell processes, so this revision's complete tests must run in PR CI. Earlier intermediate revision had 24/25 pass with one stale expectation; expectation corrected, no claim of final local pass.
 - Pending: CI, merge, actual automatic issuer execution and quote persistence/UI recovery. No live token issue, DB operation, variable change or Worker deployment performed here.
+
+## 2026-11-27 KST — B06/D06 전체 패턴 실제 차트 검토
+- 45972526203의 암호화 ZIP 해시와 복호화 snapshot a7c6ac3c… 일치. 31조건, 고유 102사례(도달32/미도달37/불완전33), 조건 중복 포함 표시 186건. 원시 가격 Git 미포함.
+- 목표선과 기준 시가는 결과 펼침에서 첫 관측 시가부터 표시. 5개 관측봉 미만은 판정 보류. 원천 고가를 정수식으로 다시 판정해 102/102 일치, HTML 186건 신호선 비노출/펼침 후 선 개수 점검, 기존 차트 테스트 9개 통과. 외부 시세 대조, 모바일 앱 인증 화면, 장중 도달 순서 미검증.
+- 남은 기능: G03–G11 실제 추적 수집·저장·상태·부하, C02/C05–C09 장기 추천/비교/재평가, B12 실현손익, D04/D07 종목 설명, E/F 시장·업종 연계, H 장중 종가 후보, I04 앱 결과 연결. B09/B10 기초분석은 실행됨. 운영 KIS 토큰 자동갱신·시세 저장은 별도 검증.
