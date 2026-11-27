@@ -4,6 +4,7 @@ on:
     paths:
       - 'tools/turso/kis-token-steward*'
       - 'tools/turso/d1-token-backup*'
+      - '.github/workflows/blue_turso_kis_token_steward.yml'
       - '.github/workflows/blue_kis_token_reconcile_tests.yml'
 permissions:
   contents: read

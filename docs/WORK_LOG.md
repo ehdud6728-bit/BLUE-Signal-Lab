@@ -828,3 +828,11 @@
 - 기존 단일 자동 issuer의 issue 실행마다 유효 primary와 실제 D1 standby의 복호화 토큰/발급·만료 시각을 비교. 같으면 쓰기 없음, 누락/만료/상이하면 기존 mirror의 타임스탬프 방어·readback으로 복구. 검사 실패는 재발급하지 않고 실패 상태 반환. 24h/중복발급/전환 gate 유지. read-only check 유지. 잘못된 미정의 error 참조도 정형 오류로 수정.
 - 로컬 Node 관련 24개 통과(실제 메모리 SQLite, 동기화 후 D1 유실→자동 복구→다음 점검 무쓰기, 검사 장애 시 무발급 포함), diff check 통과. PR 전용 무비밀 CI 추가. 실제 계정/토큰/운영 DB 접근·발급·배포는 미실행.
 - 운영 자동 발급 workflow는 기존 schedule 존재. 활성 repo 변수, 실제 최근 실행·D1 읽기/쓰기 가능 여부는 미확인. 본 변경만으로 현재 화면 복구 완료라고 보고하지 않음. 병합 후 자동 issuer 실행 로그/동기화 성공 및 실제 시세 저장을 별도로 검증해야 함.
+
+## 2026-11-27 KST — Token renewal window correction
+- Last observed shared issuer run 45947820039 returned TOKEN_VALID_RENEWAL_WAIT_24H at 14:47 KST for a token expiring 15:16 KST. A full 24h save/attempt wait conflicts with the existing one-hour pre-expiry renewal window.
+- Allow renewal only when expiry is due and at least 23h after save/last normal attempt; preserve atomic reservation, one normal attempt per KST day, one failed-provider retry after 30m, all issuer cutover gates and encrypted dual-vault readback. Successful standby repair must not postpone an otherwise eligible renewal.
+- Shared issuer schedule: every ten minutes at off-hour minutes in the existing service window. This reduces scheduling opportunities missed; GitHub timing remains best-effort, not a continuous availability guarantee. Legacy issuer remains unchanged and paused after approved cutover.
+- Official context checked: KIS portal documents 24h token validity / daily issuance principle and reuse within 6h; https://apiportal.koreainvestment.com/apiservice and official https://github.com/koreainvestment/open-trading-api/blob/main/examples_user/kis_auth.py . The 23h guard is our implementation choice, not a quoted provider requirement.
+- Real SQLite test added for pre-expiry renewal, early/concurrent/same-day duplicate refusal; prior failure retry and standby repair tests retained. Current execution environment cannot start shell processes, so this revision's complete tests must run in PR CI. Earlier intermediate revision had 24/25 pass with one stale expectation; expectation corrected, no claim of final local pass.
+- Pending: CI, merge, actual automatic issuer execution and quote persistence/UI recovery. No live token issue, DB operation, variable change or Worker deployment performed here.

@@ -83,10 +83,13 @@ test('metadata check distinguishes missing, expired and soon-to-expire tokens',a
   assert.equal((await steward(soon,base,NOW,{mode:'check'})).status,'TOKEN_EXPIRES_SOON');
 });
 
-test('06:00 renewal window never bypasses the 24h saved-token guard',async()=>{
-  const c=client({saved_at_utc:'2026-11-18T00:20:00.000Z',expires_at_utc:'2026-11-19T00:20:00.000Z'});
-  const result=await steward(c,base,NOW,{mode:'issue',backup:standby,issuer:async()=>{throw Error('UNEXPECTED_TOKENP');}});
-  assert.equal(result.status,'D1_BACKUP_VERIFIED');
+test('one-hour renewal window permits a guarded issue before expiry',async()=>{
+ const c=client({saved_at_utc:'2026-11-18T00:20:00.000Z',expires_at_utc:'2026-11-19T00:20:00.000Z'});
+ let calls=0;
+ const result=await steward(c,base,NOW,{mode:'issue',backup:standby,issuer:async()=>{
+  calls++;return {token:'fixture-renewal',expires:+NOW+86400000};
+ }});
+ assert.equal(result.status,'TOKEN_SAVED_DUAL');assert.equal(calls,1);
 });
 
 test('one provider failure retries only after 30m, never a third time',async()=>{
@@ -232,5 +235,26 @@ test('healthy issuance ledger repairs a lost Worker standby, then makes no repea
   current={status:'UNAVAILABLE'};
   assert.equal((await steward(db,base,new Date(+NOW+180000),{mode:'issue',issuer,backup})).status,'D1_BACKUP_SYNC_FAILED');
   assert.equal(writes,2);assert.equal(calls,1);
+ }finally{db.close();}
+});
+
+test('real ledger renews once at 23h and blocks early, concurrent and same-day duplicate issuance',async()=>{
+ const db=createClient({url:'file::memory:'});let calls=0,current={status:'MISSING'},clock=NOW;
+ const backup={inspect:async()=>current,mirror:async v=>{
+  current={status:'VALID',token:v.token,expiresAt:v.expiresAt,savedAt:v.savedAt};
+ }};
+ const issuer=async()=>{calls++;return {token:'fixture-'+calls,expires:+clock+86400000};};
+ const run=()=>steward(db,base,clock,{mode:'issue',issuer,backup});
+ try{
+  assert.equal((await run()).status,'TOKEN_SAVED_DUAL');
+  clock=new Date(+NOW+23*3600000-1000);
+  assert.equal((await run()).status,'TOKEN_VALID');assert.equal(calls,1);
+  clock=new Date(+NOW+23*3600000);
+  const outcomes=await Promise.all([run(),run()]);
+  assert.ok(outcomes.some(r=>r.status==='TOKEN_SAVED_DUAL'));assert.equal(calls,2);
+  assert.equal((await run()).status,'TOKEN_VALID');assert.equal(calls,2);
+  await db.execute({sql:'UPDATE blue_turso_kis_vault_v1 SET saved_at_utc=?,expires_at_utc=?',
+   args:[new Date(+clock-25*3600000).toISOString(),new Date(+clock-1000).toISOString()]});
+  assert.equal((await run()).status,'ALREADY_ATTEMPTED_KST_DAY_OR_24H');assert.equal(calls,2);
  }finally{db.close();}
 });

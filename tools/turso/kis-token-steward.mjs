@@ -9,6 +9,7 @@ const KIS_TOKEN_URL='https://openapi.koreainvestment.com:9443/oauth2/tokenP';
 const DAY_MS=86_400_000;
 const GRACE_MS=5*60_000;
 const RENEW_BEFORE_MS=60*60_000;
+const MIN_RENEW_INTERVAL_MS=DAY_MS-RENEW_BEFORE_MS;
 const RETRY_DELAY_MS=30*60_000;
 const hash=s=>createHash('sha256').update(s).digest('hex');
 export const scopeFor=key=>'KIS_PROD_READONLY_V1_'+hash(key).slice(0,20);
@@ -188,17 +189,19 @@ export async function steward(client,env,now=new Date(),{mode='check',issuer=iss
   }
   if(tokenValid){
     const health=await ensureWorkerToken(client,key,secret,scope,backup,now);
-    if(health.status!=='D1_BACKUP_CURRENT')return health;
-    if(!renewalDue)return {status:'TOKEN_VALID',expires_at_utc:String(existing.expires_at_utc)};
+    if(!['D1_BACKUP_CURRENT','D1_BACKUP_VERIFIED'].includes(health.status))return health;
+    if(!renewalDue)return health.status==='D1_BACKUP_VERIFIED'?health:
+      {status:'TOKEN_VALID',expires_at_utc:String(existing.expires_at_utc)};
   }
-  // Keep the single issuer's existing 24h guard; repair standby first while
-  // the current token is still usable, without another provider issuance.
-  if(existing&&now.getTime()-saved<DAY_MS)return {
-    status:tokenValid?'TOKEN_VALID_RENEWAL_WAIT_24H':'WAIT_24H_FROM_LAST_SAVED',
+  // Only renew inside the existing one-hour expiry window, after at least
+  // 23h since save. Waiting 24h would forbid renewal until after expiry.
+  // The atomic reservation retains one normal attempt per KST day.
+  if(existing&&now.getTime()-saved<MIN_RENEW_INTERVAL_MS)return {
+    status:tokenValid?'TOKEN_VALID_RENEWAL_WAIT_INTERVAL':'WAIT_RENEWAL_INTERVAL',
     expires_at_utc:String(existing.expires_at_utc)};
   const stamp=utc(now);
   // Persist the reservation before tokenP. The only exception to the usual
-  // 24-hour/KST-day attempt guard is ONE retry after a failed provider call,
+  // rolling renewal-interval/KST-day attempt guard is ONE retry after a failed provider call,
   // at least 30 minutes later on that same KST day.
   const claimed=await client.execute({sql:`INSERT INTO blue_turso_kis_issuance_v1
     (scope,last_attempt_at_utc,last_attempt_day_kst,status,last_success_at_utc)
@@ -210,7 +213,7 @@ export async function steward(client,env,now=new Date(),{mode='check',issuer=iss
       last_attempt_at_utc=excluded.last_attempt_at_utc,
       last_attempt_day_kst=excluded.last_attempt_day_kst
     WHERE (last_attempt_day_kst<excluded.last_attempt_day_kst
-      AND (julianday(excluded.last_attempt_at_utc)-julianday(last_attempt_at_utc))>=1.0)
+      AND (julianday(excluded.last_attempt_at_utc)-julianday(last_attempt_at_utc))>=(${MIN_RENEW_INTERVAL_MS}/86400000.0))
       OR (last_attempt_day_kst=excluded.last_attempt_day_kst AND status='ISSUE_FAILED'
       AND (julianday(excluded.last_attempt_at_utc)-julianday(last_attempt_at_utc))>=(${RETRY_DELAY_MS}/86400000.0))
     RETURNING last_attempt_at_utc,status`,args:[scope,stamp,kstDay(now)]});

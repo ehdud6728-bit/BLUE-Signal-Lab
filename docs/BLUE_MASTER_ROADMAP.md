@@ -252,3 +252,11 @@
 ### 2026-11-27 KIS 자동 복구 보완
 - [x] 유효 Turso 토큰이 있어도 실제 Worker D1 토큰을 매 issuer 점검에 대조/자동 동기화하는 코드 및 로컬 24검사.
 - [ ] 실제 자동 issuer 활성/최근실행 확인, 운영 저장본 복구·시세 수집·사용자 화면 검증. 코드 준비와 운영 성공은 구분.
+
+## 2026-11-27 KST — Token renewal window correction
+- Last observed shared issuer run 45947820039 returned TOKEN_VALID_RENEWAL_WAIT_24H at 14:47 KST for a token expiring 15:16 KST. A full 24h save/attempt wait conflicts with the existing one-hour pre-expiry renewal window.
+- Allow renewal only when expiry is due and at least 23h after save/last normal attempt; preserve atomic reservation, one normal attempt per KST day, one failed-provider retry after 30m, all issuer cutover gates and encrypted dual-vault readback. Successful standby repair must not postpone an otherwise eligible renewal.
+- Shared issuer schedule: every ten minutes at off-hour minutes in the existing service window. This reduces scheduling opportunities missed; GitHub timing remains best-effort, not a continuous availability guarantee. Legacy issuer remains unchanged and paused after approved cutover.
+- Official context checked: KIS portal documents 24h token validity / daily issuance principle and reuse within 6h; https://apiportal.koreainvestment.com/apiservice and official https://github.com/koreainvestment/open-trading-api/blob/main/examples_user/kis_auth.py . The 23h guard is our implementation choice, not a quoted provider requirement.
+- Real SQLite test added for pre-expiry renewal, early/concurrent/same-day duplicate refusal; prior failure retry and standby repair tests retained. Current execution environment cannot start shell processes, so this revision's complete tests must run in PR CI. Earlier intermediate revision had 24/25 pass with one stale expectation; expectation corrected, no claim of final local pass.
+- Pending: CI, merge, actual automatic issuer execution and quote persistence/UI recovery. No live token issue, DB operation, variable change or Worker deployment performed here.
