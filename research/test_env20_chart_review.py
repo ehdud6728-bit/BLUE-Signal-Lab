@@ -11,4 +11,23 @@ class Charts(unittest.TestCase):
         c,o=self.fixture();o[0]['horizons']['1']['peak_pct']=7
         with self.assertRaisesRegex(ValueError,'OUTCOME_PRICE_MISMATCH'):verify(c,o)
         with self.assertRaisesRegex(ValueError,'CASE_ID_MISMATCH'):verify(c,[])
+    def test_dates_ohlc_and_divergent_exact_path_rejected(self):
+        from copy import deepcopy
+        for mode in ('same_day','duplicate','ohlc','diverge','hash'):
+            c,o=self.fixture();a=o[0];b=a['post_bars'][0]
+            if mode=='same_day':b['day']=c[0]['day']
+            elif mode=='duplicate':a['post_bars'].append(deepcopy(b))
+            elif mode=='ohlc':b['low']=200
+            else:
+                a.update(landmark_path_version=1,landmark_bars=[deepcopy(b)],landmark_source_hashes={b['day']:'a'*64})
+                if mode=='diverge':a['landmark_bars'][0]['close']=102
+                else:a['landmark_source_hashes']={}
+            with self.subTest(mode=mode),self.assertRaises(ValueError):verify(c,o)
+    def test_exact_prefix_links_and_legacy_status(self):
+        from copy import deepcopy
+        c,o=self.fixture();a=o[0];b=a['post_bars'][0]
+        a.update(landmark_path_version=1,landmark_bars=[deepcopy(b)],landmark_source_hashes={b['day']:'a'*64})
+        self.assertEqual(verify(c,o)['exact_paths_checked'],1)
+        a['source_hashes']={b['day']:'b'*64}
+        with self.assertRaisesRegex(ValueError,'CHART_OUTCOME_HASH_MISMATCH'):verify(c,o)
 if __name__=='__main__':unittest.main()

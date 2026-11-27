@@ -55,6 +55,20 @@ class Cases(unittest.TestCase):
             _,_,out=study(src,bench,f);a=out[0]
             self.assertEqual(len(a["landmark_bars"]),1,mode)
             self.assertEqual(a["landmark_end_status"],dict(calendar="DATE_WINDOW_MISSING",symbol="MISSING_PATH",jump="DISCONTINUITY_REVIEW")[mode])
+    def test_split_stays_fixed_when_history_expands(self):
+        from copy import deepcopy
+        src,bench=fixture();d=src["days"][21]["day"]
+        src["signals"]=[dict(day=d,code="000001",names=["ENV20_LOWER_TOUCH"])]
+        f=dict(schema="BLUE_ENV20_PULLBACK_FACTORS_V1",cutoff=src["cutoff"],rows=[dict(day=d,code="000001",ma_down=True,ma_chart_consistent=True,record_sha256="a"*64)])
+        before=study(src,bench,f)[0]
+        prior="2026-09-30";row=deepcopy(src["days"][0]);row["day"]=prior;src["days"].insert(0,row)
+        bar=deepcopy(src["bars"][0]);bar["day"]=prior;src["bars"].insert(0,bar)
+        for m in bench["markets"]:m["days"].insert(0,dict(day=prior,state="DOWN_CONFIRMED",index_trend="DOWN"))
+        after=study(src,bench,f)[0]
+        self.assertEqual(after["source_days"],before["source_days"]+1)
+        self.assertEqual(before["split_day"],"2026-11-09");self.assertEqual(after["split_day"],before["split_day"])
+        self.assertEqual(study(src,bench,f,split_day="2026-10-20")[0]["split_day"],"2026-10-20")
+        with self.assertRaises(ValueError):study(src,bench,f,split_day="2026-02-30")
     def test_preserve_success_opportunities(self):
         a=[dict(id=str(i),day="d",code=str(i),phase="TRAIN",outcome=dict(hit5=i<3,peak_pct=6 if i<3 else 2,trough_pct=-4,label="TARGET_BEFORE_SUPPORT" if i<3 else "MISS")) for i in range(5)]
         r=aggregate(a[:2],a);self.assertEqual(r["hit_pct"],100);self.assertEqual(r["retained_hits_pct"],66.667);self.assertEqual(r["excluded_misses_pct"],100)

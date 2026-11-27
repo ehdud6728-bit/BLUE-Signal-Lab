@@ -12,6 +12,13 @@ from pattern_performance_forward import indexed,history
 from pattern_performance_full_universe import check
 FROZEN_AFTER="2026-11-27"
 PRIMARY=5
+# Preserve the original V6 comparison boundary as source history expands.
+# This is a previously inspected historical split, never fresh OOS.
+FIXED_SPLIT_DAY="2026-11-09"
+def comparison_split(value=FIXED_SPLIT_DAY):
+    from datetime import date
+    check(isinstance(value,str) and date.fromisoformat(value).isoformat()==value,"BAD_SPLIT_DAY")
+    return value
 def pct(p,q):return 100*(F(p)/q-1)
 def direction(a,b):return "UP" if a>b else "DOWN" if a<b else "FLAT"
 def pivots(a):
@@ -132,14 +139,14 @@ def select_cases(rows):
             selected.append(dict(id=z["id"],phase=phase,label=label));used.add(z["code"])
             if len(used)==3:break
     return selected
-def study(src,bench,factors):
+def study(src,bench,factors,split_day=FIXED_SPLIT_DAY):
     days,meta,bars,indexes,states,old=indexed(src,bench)
     check(factors["schema"]=="BLUE_ENV20_PULLBACK_FACTORS_V1" and factors["cutoff"]==src["cutoff"],"BAD_FACTOR_SOURCE")
     wanted={k for k,v in old.items() if "ENV20_LOWER_TOUCH" in v};lookup={}
     for x in factors["rows"]:
         k=x["day"],x["code"];check(k in wanted and k not in lookup and re.fullmatch(r"[a-f0-9]{64}",x["record_sha256"]),"BAD_FACTOR_ROW");lookup[k]=x
     check(set(lookup)==wanted,"FACTOR_COUNT_MISMATCH")
-    split=days[len(days)*7//10];cases=[];outcomes=[];rows=[];coverage=Counter();cohort=0
+    split=comparison_split(split_day);cases=[];outcomes=[];rows=[];coverage=Counter();cohort=0
     for (d,c),x in sorted(lookup.items()):
         if x["ma_down"] is not True or x["ma_chart_consistent"] is not True:continue
         cohort+=1;b=bars[d,c];market=b["market"];ds=indexes[market]
@@ -203,7 +210,7 @@ def study(src,bench,factors):
             for k,v in z["features"].items():groups[k,v].append(z)
         for (k,v),a in sorted(groups.items()):
             contrasts.append(dict(phase=phase,feature=k,value=v,**aggregate(a,base)))
-    return dict(schema="BLUE_ENV20_CASE_FEATURES_V6",asof=days[-1],source_days=len(days),inverse_chart_match_signals=cohort,split_day=split,post_freeze_after=FROZEN_AFTER,
+    return dict(schema="BLUE_ENV20_CASE_FEATURES_V6",asof=days[-1],source_days=len(days),inverse_chart_match_signals=cohort,split_day=split,split_policy="FIXED_EXPLICIT_DAY",split_reference="HISTORICAL_V6_NOT_FRESH_OOS",post_freeze_after=FROZEN_AFTER,
         coverage=[dict(key=list(k) if isinstance(k,tuple) else [k],count=n) for k,n in sorted(coverage.items(),key=lambda x:str(x[0]))],summary=summary,contrasts=contrasts,representative_cases=select_cases(rows),
         limits=["HIGH_NOT_REALIZED_RETURN","ALL_SIGNAL_DAY_FEATURES","HISTORICAL_SPLIT_NOT_FRESH_OOS","POST_FREEZE_DATES_NOT_IMMUTABLE_FORWARD_CAPTURE","FIXED_SINGLE_FEATURE_STRATA_NOT_FITTED_FILTER","DEPENDENT_CASES_MULTIPLE_COMPARISONS","RAW_PRICES_CORPORATE_ACTIONS_UNVERIFIED","NO_LOWER_VOLUME_PROFILE","STORED_TAGS_NOT_RECOMPUTED_RSI_DIVERGENCE","NO_PROMOTION"]),cases,outcomes
 def encode(x):
@@ -212,8 +219,9 @@ def encode(x):
 def main():
     p=argparse.ArgumentParser()
     for k in ("source","benchmark","factors","out"):p.add_argument("--"+k,type=Path,required=True)
+    p.add_argument("--split-day",default=FIXED_SPLIT_DAY)
     a=p.parse_args();read=lambda p:json.loads(p.read_text())
-    r,c,o=study(read(a.source),read(a.benchmark),read(a.factors))
+    r,c,o=study(read(a.source),read(a.benchmark),read(a.factors),a.split_day)
     def write(p,x):p.write_text(json.dumps(x,ensure_ascii=False,allow_nan=False,default=encode,separators=(",",":"))+"\n")
     write(a.out,r);write(a.out.with_name("case-signals.json"),c);write(a.out.with_name("case-outcomes.json"),o)
     print("BLUE_ENV20_CASE_FEATURES",json.dumps({k:v for k,v in r.items() if k not in ("contrasts","representative_cases")},ensure_ascii=False))
