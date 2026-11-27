@@ -154,7 +154,7 @@ test('FULL mode ramps from 20 to 25 per minute without raising the 10-symbol pil
   assert.equal(result.status,'SAVED');
   assert.equal(result.batch_cap,20);
   const select=state.queries.find(q=>q.sql.includes('SELECT code,name,close'));
-  assert.deepEqual(select.args,['2026-11-18',20,1760]); // 20:44 KST, page 44 of 66
+  assert.deepEqual(select.args,['2026-11-18',40,1760]); // read full page; only the KIS batch is capped. 20:44 KST, page 44 of 66
   const ramp=state.queries.find(q=>q.sql.includes('INSERT INTO blue_kis_provisional_pacing_v1'));
   assert.equal(ramp.args[1],25);
   assert.equal(state.batches.length,1);
@@ -367,3 +367,46 @@ test('registered quote joins the same bounded request list and provisional write
  assert.ok(calls.length<=result.batch_cap);
  assert.ok(state.batches.some(b=>b.statements.some(q=>q.sql.includes('INSERT INTO blue_kis_provisional_daily_v1')&&q.args[1]==='028050')));
 });
+
+
+for (const rosterSize of [10, 20, 50]) {
+  test('full collector covers market with '+rosterSize+' tracked symbols at normal and reduced capacity', async()=>{
+    for (const cap of [20, 10]) {
+      const market=Array.from({length:1703},(_,i)=>({code:String(i+1).padStart(6,'0'),name:'test',close:66000}));
+      const roster=market.slice(0,rosterSize).map((r,i)=>({code:r.code,precise:i<10}));
+      const receipts=new Map(),last=new Map(),gaps=[];
+      for(let minute=0;minute<380;minute++){
+        const now=new Date(Date.UTC(2026,10,19,0,minute));
+        const {db}=mockDb({count:market.length,expected:market.length,pacing:{batch_cap:cap,cooldown_until_utc:'2026-11-18T00:00:00Z'}});
+        const execute=db.execute.bind(db);
+        db.execute=async query=>{
+          const sql=typeof query==='string'?query:query.sql;
+          if(sql.startsWith('SELECT r.roster_json'))return {rows:[{roster_json:JSON.stringify(roster)}]};
+          if(sql.includes('SELECT code,observed_at_utc'))return {rows:query.args.slice(2).filter(code=>receipts.has(code)).map(code=>({code,observed_at_utc:receipts.get(code)}))};
+          if(sql.includes('SELECT code,name,close')){
+            if(sql.includes('OFFSET'))return {rows:market.slice(query.args[2],query.args[2]+query.args[1])};
+            return {rows:market.filter(r=>query.args.slice(1).includes(r.code))};
+          }
+          return execute(query);
+        };
+        db.batch=async statements=>{
+          for(const q of statements)if(q.sql.includes('INSERT INTO blue_kis_provisional_daily_v1'))
+            receipts.set(q.args[1],q.args[10]);
+        };
+        const calls=[];
+        const run=await collectTursoProvisional(env({TURSO_PROVISIONAL_QUOTES_ENABLED:'true'}),now,deps(db,{
+          receivedAt:now,quote:async(_env,_token,_market,code)=>{calls.push(code);return quote();}
+        }));
+        assert.equal(run.status,'SAVED');assert.ok(calls.length<=cap);assert.equal(new Set(calls).size,calls.length);
+        for(const {code} of roster)if(calls.includes(code)){
+          gaps.push(minute-(last.get(code)??-1)); last.set(code,minute);
+        }
+      }
+      assert.equal(receipts.size,market.length);assert.equal(last.size,rosterSize);
+      for(const m of last.values())gaps.push(379-m);
+      const maxGap=Math.max(...gaps);
+      assert.ok(maxGap<=(cap===10&&rosterSize===50?10:5));
+      console.log('roster=%d budget=%d market=%d/%d max_minutes=%d',rosterSize,cap,receipts.size,market.length,maxGap);
+    }
+  });
+}
