@@ -20,4 +20,14 @@ class Landmark(unittest.TestCase):
         r=dict(schema="BLUE_ENV20_CASE_FEATURES_V6",asof="2026-10-02",split_day="2026-10-02")
         self.assertEqual(study(r,[c],[dict(id="x",post_bars=[b("2026-10-02",100,101,99,100)])])["rows"],[])
         with self.assertRaises(ValueError):study(r,[c],[])
+    def test_exact_four_day_window_and_empty_coverage(self):
+        c=dict(id="x",day="2026-10-01",code="000001",pre_bars=[b("2026-10-01",100,101,99,100)])
+        path=[b("2026-10-0"+str(i),100,101,99,100) for i in range(2,6)]
+        r=dict(schema="BLUE_ENV20_CASE_FEATURES_V6",asof="2026-10-05",split_day="2026-10-02")
+        result=study(r,[c],[dict(id="x",post_bars=path[:3],landmark_bars=path,landmark_path_version=1)])
+        self.assertEqual(result["path_basis"],"EXACT_CONTIGUOUS_PREFIX")
+        self.assertTrue(any(z["landmark"]==1 and z["future_sessions"]==3 for z in result["rows"]))
+        empty=study(r,[c],[dict(id="x",post_bars=[])])
+        self.assertEqual(len(empty["coverage"]),20)
+        self.assertTrue(all(z["n"]==1 and z["status"]=="NO_COMPLETE_PATH" for z in empty["coverage"]))
 if __name__=="__main__":unittest.main()

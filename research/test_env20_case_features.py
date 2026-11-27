@@ -31,6 +31,30 @@ class Cases(unittest.TestCase):
         self.assertEqual(o[0]["horizons"]["20"]["status"],"PENDING")
         self.assertEqual(r["summary"]["POST_FREEZE_DATES"]["n"],0)
         json.dumps([r,c,o],default=encode,allow_nan=False)
+    def test_exact_prefix_keeps_four_sessions_without_changing_horizons(self):
+        src,bench=fixture();d=src["days"][-5]["day"]
+        src["signals"]=[dict(day=d,code="000001",names=["ENV20_LOWER_TOUCH"])]
+        f=dict(schema="BLUE_ENV20_PULLBACK_FACTORS_V1",cutoff=src["cutoff"],rows=[dict(day=d,code="000001",ma_down=True,ma_chart_consistent=True,record_sha256="a"*64)])
+        r,c,o=study(src,bench,f);a=o[0]
+        self.assertEqual(len(a["landmark_bars"]),4)
+        self.assertEqual(len(a["post_bars"]),3)
+        self.assertEqual(a["horizons"]["5"]["status"],"PENDING")
+        self.assertEqual(a["landmark_end_status"],"PENDING")
+        self.assertEqual(set(a["landmark_source_hashes"]),{z["day"] for z in a["landmark_bars"]})
+    def test_exact_prefix_stops_at_missing_calendar_and_discontinuity(self):
+        for mode in ("calendar","symbol","jump"):
+            src,bench=fixture();d="2026-10-16"
+            if mode!="calendar":
+                d=src["days"][-5]["day"];q=src["days"][-3]["day"]
+                if mode=="symbol":next(z for z in src["bars"] if z["day"]==q)["code"]="000002"
+                else:
+                    z=next(z for z in src["bars"] if z["day"]==q)
+                    for key in ("open","high","low","close"):z[key]*=2
+            src["signals"]=[dict(day=d,code="000001",names=["ENV20_LOWER_TOUCH"])]
+            f=dict(schema="BLUE_ENV20_PULLBACK_FACTORS_V1",cutoff=src["cutoff"],rows=[dict(day=d,code="000001",ma_down=True,ma_chart_consistent=True,record_sha256="a"*64)])
+            _,_,out=study(src,bench,f);a=out[0]
+            self.assertEqual(len(a["landmark_bars"]),1,mode)
+            self.assertEqual(a["landmark_end_status"],dict(calendar="DATE_WINDOW_MISSING",symbol="MISSING_PATH",jump="DISCONTINUITY_REVIEW")[mode])
     def test_preserve_success_opportunities(self):
         a=[dict(id=str(i),day="d",code=str(i),phase="TRAIN",outcome=dict(hit5=i<3,peak_pct=6 if i<3 else 2,trough_pct=-4,label="TARGET_BEFORE_SUPPORT" if i<3 else "MISS")) for i in range(5)]
         r=aggregate(a[:2],a);self.assertEqual(r["hit_pct"],100);self.assertEqual(r["retained_hits_pct"],66.667);self.assertEqual(r["excluded_misses_pct"],100)
