@@ -5,6 +5,7 @@ import {createClient} from '@libsql/client';
 import {reconstructVerifiedDay} from './research-v2-eod-export.mjs';
 import {evidence} from './combined-pattern-factors.mjs';
 import {storedContext} from './env20-pullback-factors.mjs';
+import {study as conditionalStudy,conditionalTest} from './discovery-high15-conditional.mjs';
 
 const DAYS=["2026-11-16","2026-11-17","2026-11-18","2026-11-19","2026-11-20","2026-11-23","2026-11-24","2026-11-25","2026-11-26","2026-11-27"];
 function need(ok,code){if(!ok)throw Error(code)}
@@ -78,9 +79,10 @@ function features(base,record,ev,supply,market){
 
 function buildReport(data){
  const {coverage,events,barAt}=data;
- const windows={};
+ const windows={},conditional={};
  for(const h of ["ASOF",1,3,5]){
   const es=events.map(e=>{const path=DAYS.slice(DAYS.indexOf(e.day)+1);const expected=h==="ASOF"?path:path.slice(0,h);const result=h!=="ASOF"&&expected.length<h?{status:"UNKNOWN",complete:false,reason:"HORIZON_NOT_MATURE"}:outcome(e.base,expected,barAt);return {...e,result}});
+  if(h!=="ASOF")conditional[h]=conditionalStudy(es);
   windows[h]={all_recorded:summarize(es),full_universe_days_only:summarize(es.filter(e=>e.full)),
    by_discovery_day:DAYS.slice(0,-1).map(day=>{const s=summarize(es.filter(e=>e.day===day));delete s.comparisons;return {day,...s}})};
  }
@@ -100,7 +102,7 @@ function buildReport(data){
    unique_hit_stocks:new Set(rows.filter(r=>r.hit===true).map(r=>r.code)).size});
  const screen_metric={...screenSummary(screenRows),by_day:DAYS.slice(0,-1).map(day=>({day,...screenSummary(screenRows.filter(r=>r.day===day))})),
    note:"Search-style observed maximum, not a completed outcome; no path continuity or corporate-action guard."};
- return {schema:"BLUE_DISCOVERY_HIGH15_V1",screen_metric,start:DAYS[0],end:DAYS.at(-2),cutoff:DAYS.at(-1),target_pct:15,
+ return {schema:"BLUE_DISCOVERY_HIGH15_V1",conditional,screen_metric,start:DAYS[0],end:DAYS.at(-2),cutoff:DAYS.at(-1),target_pct:15,
    reference:"STORED_DISCOVERY_CLOSE_MATCHED_TO_KRX_EOD",future:"LATER_EOD_HIGH_ONLY",expected_sessions:DAYS,
    coverage,windows,limitations:["Recorded V1 discovery rows only; partial scanner universe reported separately; V2 replay not substituted.","Fixed weekday session list; independent calendar verification pending.","Corporate actions and outside-source price verification pending; gaps >=40% censored.","ASOF follow-up differs by date; compare equal 1/3/5 session windows and date groups.","Feature comparisons descriptive, overlapping stock-days, not independent validation or investment returns.","Stored technical factors are not independently recomputed from provider prices.","Prior-to-hit low excludes hit-day low because intraday order is unknown.","No stock identifiers or raw quotes in artifact."]};
 }
@@ -176,7 +178,7 @@ async function readReport(db){
     const base=barAt(day,r.code);need(base&&base.close===Number(r.close_price),'DISCOVERY_EOD_PRICE_MISMATCH');
     const record=JSON.parse(raw),ev=evidence(r,{day,code:r.code,names},base,{details:true});
     const supply=storedContext(raw,base.close).supply;
-    events.push({day,code:r.code,base,full,features:features(base,record,ev,supply,market)});
+    events.push({day,code:r.code,base,full,amountRatio:ev.amount_ratio20,features:features(base,record,ev,supply,market)});
    }
    if(rows.length<5)break;
   }
@@ -185,7 +187,7 @@ async function readReport(db){
  }
  return buildReport({coverage,events,barAt});
 }
-if(process.argv.includes('--test')){console.log('BLUE_HIGH15_SYNTHETIC_CHECKS',selfTest())}
+if(process.argv.includes('--test')){console.log('BLUE_HIGH15_SYNTHETIC_CHECKS',selfTest());console.log('BLUE_HIGH15_CONDITIONAL_CHECKS',conditionalTest())}
 else{
  let db;
  try{
