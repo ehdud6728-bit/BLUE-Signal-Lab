@@ -1,0 +1,50 @@
+name: BLUE Daily GLOBAL History Preflight (READ ONLY)
+on:
+  pull_request:
+    paths:
+      - 'scripts/daily_global_history*.py'
+      - 'tests/test_daily_global_history_scope.py'
+      - 'tools/turso/daily-global-preflight-export.mjs'
+      - '.github/workflows/blue_daily_global_history_preflight.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: blue-daily-global-preflight
+  cancel-in-progress: false
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install scanner dependencies
+        run: python -m pip install pandas numpy pyarrow requests 'cryptography>=43,<48' 'pykrx==1.2.9'
+      - name: Test bounded market scope and source parity
+        run: python -m unittest discover -s tests -p 'test_daily_global_history_scope.py' -v
+      - uses: actions/setup-node@v4
+        if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.repository == 'ehdud6728-bit/BLUE-Signal-Lab'
+        with:
+          node-version: '22'
+      - name: Install Turso reader
+        if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.repository == 'ehdud6728-bit/BLUE-Signal-Lab'
+        run: npm install --prefix tools/turso --no-audit --no-fund --ignore-scripts --no-package-lock
+      - name: Reconstitute original verified EOD locally (no writes)
+        if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.repository == 'ehdud6728-bit/BLUE-Signal-Lab'
+        env:
+          TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
+          TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
+        run: node tools/turso/daily-global-preflight-export.mjs
+      - name: Compare legacy and candidate scope on five historical dates
+        if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.repository == 'ehdud6728-bit/BLUE-Signal-Lab'
+        run: python scripts/daily_global_history_preflight.py
+      - uses: actions/upload-artifact@v4
+        if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.repository == 'ehdud6728-bit/BLUE-Signal-Lab'
+        with:
+          name: BLUE_DAILY_GLOBAL_PREFLIGHT_AGGREGATE
+          path: output/global-preflight/report.json
+          if-no-files-found: error
+          retention-days: 7
