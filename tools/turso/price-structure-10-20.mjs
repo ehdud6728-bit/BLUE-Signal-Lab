@@ -8,7 +8,7 @@ const yes=x=>x?"YES":"NO";
 const band=(x,edges,names)=>names[edges.findIndex(y=>x<y)===-1?edges.length:edges.findIndex(y=>x<y)];
 const numeric=(x)=>typeof x==="number"&&Number.isFinite(x);
 const groups=Object.freeze({
- "prior_5d_return_ge5":21,"prior_10d_return_ge10":21,"prior_20d_return_ge15":21,
+ "prior_5d_return_ge5":21,"prior_10d_return_ge10":21,"prior_d20_to_d1_return_ge15":21,
  "higher_high_and_low_5v5":21,"lower_high_and_low_5v5":21,"prior10_high_break_close":21,
  "prior20_high_break_close":21,"prior20_low_distance_ge10":21,
  "ma5_10_20_spread_le2":21,"ma5_gt_ma10_gt_ma20":21,
@@ -40,7 +40,7 @@ function classifyHistory(chart,day,calendar,code,barAt,n){
   if(b.o!==q.open||b.h!==q.high||b.l!==q.low||b.c!==q.close)return {status:"OHLC_MISMATCH"};
   checked++;
  }
- if(checked<21)return {status:"INSUFFICIENT_AUDIT_OVERLAP"};
+ if(checked<21||(n===21&&checked!==21))return {status:"INSUFFICIENT_AUDIT_OVERLAP"};
  return {status:checked===n?"ALL_KRX_MATCH":"PINNED_SOURCE_WITH_KRX_OVERLAP",bars:a,checked};
 }
 function stochastic(a,n,k,d){
@@ -61,7 +61,7 @@ function structure(event,record,calendar,barAt){
   const ret5=pct(p.at(-1).c,a.at(-7).c),ret10=pct(p.at(-1).c,a.at(-12).c);
   // Twenty prior closes span 19 intervals. Use D-20 to D-1 explicitly, not claim 20 full returns.
   const ret20=pct(p.at(-1).c,p[0].c);
-  put("prior_5d_return_ge5",ret5>=5,ret5);put("prior_10d_return_ge10",ret10>=10,ret10);put("prior_20d_return_ge15",ret20>=15,ret20);
+  put("prior_5d_return_ge5",ret5>=5,ret5);put("prior_10d_return_ge10",ret10>=10,ret10);put("prior_d20_to_d1_return_ge15",ret20>=15,ret20);
   put("higher_high_and_low_5v5",highest(p5)>highest(old5)&&lowest(p5)>lowest(old5),pct(lowest(p5),lowest(old5)));
   put("lower_high_and_low_5v5",highest(p5)<highest(old5)&&lowest(p5)<lowest(old5),pct(lowest(p5),lowest(old5)));
   put("prior10_high_break_close",c>highest(p10),pct(c,highest(p10)));
