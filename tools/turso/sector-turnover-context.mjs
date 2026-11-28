@@ -34,6 +34,53 @@ function aggregateDay(day,records,map){
   return {day,market,universe:a.length,total_amount_krw:String(total),matched,matched_amount_krw:String(matchAmount),missing,unclassified,price_mismatch:priceMismatch,market_mismatch:marketMismatch,coverage_count_pct:a.length?100*matched/a.length:null,coverage_amount_pct:pct(matchAmount,total),status:a.length&&total>0n&&!priceMismatch&&!marketMismatch&&5*matched>=4*a.length&&5n*matchAmount>=4n*total?'USABLE':'UNKNOWN',groups:[...groups].map(([industry,g])=>({industry,n:g.n,amount_krw:String(g.amount),share_pct:pct(g.amount,total)}))};
  });
 }
+// Independent additive report: never change V1 grouping or its thresholds.
+function concentrationDay(day,records,map,previous,prevDay,aggregate){
+ const prev=new Map(previous.map(r=>[r.code,r])),out=[];
+ for(const a of aggregate){
+  for(const g of a.groups){
+   const stocks=records.filter(r=>{const c=map.get(key(day,r.code));return r.market===a.market&&c?.market===a.market&&c.industry===g.industry&&BigInt(c.close)===BigInt(r.close)});
+   const total=stocks.reduce((n,r)=>n+BigInt(r.amount),0n);
+   need(stocks.length===g.n&&String(total)===g.amount_krw,'CONCENTRATION_PARTITION');
+   const ordered=stocks.slice().sort((x,y)=>BigInt(x.amount)>BigInt(y.amount)?-1:BigInt(x.amount)<BigInt(y.amount)?1:x.code.localeCompare(y.code));
+   const valid=a.status==='USABLE'&&a.matched===a.universe&&a.matched_amount_krw===a.total_amount_krw&&g.n>=10;
+   const top=ordered.slice(0,3),topSum=top.reduce((n,r)=>n+BigInt(r.amount),0n);
+   const topCodes=new Set(top.map(r=>r.code));
+   let matched=0,up=0,down=0,upAmount=0n,restMatched=0,restUp=0;
+   for(const r of stocks){
+    const p=prev.get(r.code),c=map.get(key(prevDay,r.code));
+    if(!p||p.market!==r.market||c?.market!==r.market||c.industry!==g.industry||BigInt(c.close)!==BigInt(p.close))continue;
+    const pc=BigInt(p.close),rc=BigInt(r.close),delta=rc-pc;
+    if(5n*(delta<0n?-delta:delta)>=2n*pc)continue;
+    matched++;if(delta>0n){up++;upAmount+=BigInt(r.amount)}else if(delta<0n)down++;
+    if(!topCodes.has(r.code)){restMatched++;if(delta>0n)restUp++}
+   }
+   const eligible=valid&&matched>=10&&5*matched>=4*g.n;
+   const restEligible=eligible&&restMatched>0&&5*restMatched>=4*(g.n-3);
+   out.push({day,market:a.market,industry:g.industry,stocks:g.n,total_amount_krw:String(total),
+     concentration_status:valid?'DESCRIPTIVE_ONLY':'UNKNOWN',
+     top1_pct:valid?pct(BigInt(ordered[0].amount),total):null,top3_pct:valid?pct(topSum,total):null,
+     top3_amount_krw:valid?String(topSum):null,
+     top3_majority:valid?2n*topSum>=total:null,
+     breadth_status:eligible?'DESCRIPTIVE_ONLY':'UNKNOWN',matched,up,down,
+     up_pct:eligible?100*up/matched:null,up_amount_share_pct:eligible?pct(upAmount,total):null,
+     rest_matched:restMatched,rest_up:restUp,rest_up_pct:restEligible?100*restUp/restMatched:null,
+     rest_broad_up:restEligible?5*restUp>=3*restMatched:null});
+  }
+ }
+ return out;
+}
+function concentrationContext(rows,turnover){
+ const map=new Map(rows.map(x=>[key(x.day,x.market,x.industry),x]));
+ need(map.size===rows.length,'CONCENTRATION_DUPLICATE');
+ return turnover.map(t=>{
+  const k=key(t.day,t.market,t.industry),r=map.get(k);need(r,'CONCENTRATION_MISSING');
+  const i=DAYS.indexOf(t.day),prior=DAYS.slice(i-5,i).map(d=>map.get(key(d,t.market,t.industry)));
+  const ok=r.concentration_status==='DESCRIPTIVE_ONLY'&&prior.every(x=>x?.concentration_status==='DESCRIPTIVE_ONLY');
+  const mean=ok?prior.reduce((n,x)=>n+x.top3_pct,0)/5:null;
+  return {...r,turnover_state:t.concentration,prior5_top3_mean_pct:mean,top3_change_pp:ok?r.top3_pct-mean:null};
+ });
+}
 function context(daily){
  const lookup=new Map(daily.map(d=>[key(d.day,d.market),d]));need(lookup.size===daily.length,'DAY_DUPLICATE');
  return DAYS.slice(5).flatMap((day,i)=>MARKETS.flatMap(market=>{
@@ -60,20 +107,31 @@ function selfTest(){
  f[0].status='UNKNOWN';t(context(f)[0].status==='UNKNOWN'&&context(f)[0].share_change_pp===null);
  f[0].status='USABLE';f[0].groups[0].n=9;t(context(f)[0].status==='UNKNOWN');
  const future=JSON.parse(JSON.stringify(f));future.at(-1).groups[0].share_pct=999;t(JSON.stringify(context(future)[0])===JSON.stringify(context(f)[0]));
+ const ten=Array.from({length:10},(_,i)=>rec(String(i+1).padStart(6,'0'),'KOSPI',i===0?91:1));
+ const yesterday=DAYS[4],prev=ten.map(r=>({...r,trade_day:yesterday,close:'99'}));
+ const cm=new Map([...ten.map(r=>[key(d,r.code),{market:r.market,close:100,industry:'A'}]),...prev.map(r=>[key(yesterday,r.code),{market:r.market,close:99,industry:'A'}])]);
+ const ca=aggregateDay(d,ten,cm),cr=concentrationDay(d,ten,cm,prev,yesterday,ca)[0];
+ t(cr.top1_pct===91&&cr.top3_pct===93&&cr.top3_majority===true&&cr.rest_up_pct===100&&cr.rest_broad_up===true);
+ t(concentrationDay(d,ten,cm,[],yesterday,ca)[0].breadth_status==='UNKNOWN');
+ const nine=ten.slice(0,9);t(concentrationDay(d,nine,cm,prev,yesterday,aggregateDay(d,nine,cm))[0].top3_pct===null);
+ t(concentrationDay(d,ten.slice().reverse(),cm,prev,yesterday,ca)[0].top3_pct===cr.top3_pct);
  return n;
 }
 async function main(){
  const files=[['output/turnover/classification/source.json','aba6c30280ab4f8aa580388ba91efc0073e66ca502438b8d6610ff02e577c170'],['output/turnover/context/market-context.json','cc40c9fb40b08c6831662638dc69f74364e888f94ab6a74210c0478f7771e134']],sources=[];
  for(const [file,hash] of files){const raw=await readFile(file);need(sha(raw)===hash,'FROZEN_CLASSIFICATION_FILE_MISMATCH');sources.push(JSON.parse(raw))}
- const mapping=classifications(sources),daily=[],proof=[];
+ const mapping=classifications(sources),daily=[],proof=[],concentrations=[];let prev=[],prevDay=null;
  for(const day of DAYS){
   const root='output/global-preflight/private-eod/'+day,man=JSON.parse(await readFile(root+'/manifest.json','utf8')),raw=await readFile(root+'/daily.jsonl');
   need(man.origin==='IMMUTABLE_TURSO_KRX_EOD_READBACK_HASH_EQUAL'&&man.start_day===day&&man.end_day===day&&man.days.length===1&&man.days[0].day===day&&sha(raw)===man.data_sha256&&man.data_sha256===man.days[0].sha256,'EOD_HASH');
   const rows=raw.toString('utf8').trimEnd().split('\n').map(JSON.parse);need(rows.length===man.total_rows&&rows.length===man.days[0].rows,'EOD_COUNT');
-  proof.push({day,rows:rows.length,sha256:man.data_sha256});daily.push(...aggregateDay(day,rows,mapping));
+  proof.push({day,rows:rows.length,sha256:man.data_sha256});const agg=aggregateDay(day,rows,mapping);daily.push(...agg);concentrations.push(...concentrationDay(day,rows,mapping,prev,prevDay,agg));prev=rows;prevDay=day;
  }
  const result={schema:'BLUE_SECTOR_TURNOVER_CONTEXT_V1',primary_horizon:10,classification_hashes:files.map(x=>x[1]),proof,daily,context:context(daily),writes:0,limitations:['Gross turnover, not net buying; denominator is verified eligible EOD universe, not all listings.','Requested-date industry classification not independently verified. Any close/market mismatch blocks that market-day.','>=80% matched count AND turnover, >=10 stocks per group each day; prior five sessions, 1.5x gross turnover and 1.2x share exploratory thresholds.','No outcomes or leader predictions; no promotion.']};
  await mkdir('output/turnover/public',{recursive:true});await writeFile('output/turnover/public/report.json',JSON.stringify(result)+'\n');
+ const concentration={schema:'BLUE_SECTOR_LEADER_CONCENTRATION_V1',proof,classification_hashes:result.classification_hashes,rows:concentrationContext(concentrations,result.context),writes:0,limitations:['Top3 is turnover rank on discovery close, not prior price leader. No ticker-level raw data exported.','>=10 stocks and full market-day matched; breadth >=80% exact previous-day same-industry positive close matches and no 40% discontinuity; rest breadth excludes top3.','Top3 >=50% and rest up >=60% are exploratory descriptors; no net flow or confirmed outcomes.']};
+ await writeFile('output/turnover/public/concentration.json',JSON.stringify(concentration)+'\n');
+ console.log('BLUE_SECTOR_CONCENTRATION_RESULT',JSON.stringify({rows:concentration.rows.length,usable:concentration.rows.filter(x=>x.concentration_status==='DESCRIPTIVE_ONLY').length,breadth:concentration.rows.filter(x=>x.breadth_status==='DESCRIPTIVE_ONLY').length,writes:0}));
  console.log('BLUE_SECTOR_TURNOVER_RESULT',JSON.stringify({days:proof.length,markets:daily.length,usable:daily.filter(x=>x.status==='USABLE').length,context:result.context.length,usable_context:result.context.filter(x=>x.status==='DESCRIPTIVE_ONLY').length,writes:0}));
 }
 if(process.argv.includes('--test'))console.log('BLUE_SECTOR_TURNOVER_TESTS',selfTest());

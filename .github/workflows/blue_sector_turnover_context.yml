@@ -53,3 +53,10 @@ jobs:
           path: output/turnover/public/report.json
           if-no-files-found: error
           retention-days: 7
+      - uses: actions/upload-artifact@v4
+        if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.repository == 'ehdud6728-bit/BLUE-Signal-Lab'
+        with:
+          name: BLUE_SECTOR_LEADER_CONCENTRATION
+          path: output/turnover/public/concentration.json
+          if-no-files-found: error
+          retention-days: 7
