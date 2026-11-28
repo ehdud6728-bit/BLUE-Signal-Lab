@@ -1,0 +1,100 @@
+name: BLUE GLOBAL Corrected High15 Replay (READ ONLY)
+on:
+  pull_request:
+    paths:
+      - 'tools/turso/global-corrected-high15-replay.mjs'
+      - 'tools/turso/discovery-high15.mjs'
+      - '.github/workflows/blue_global_corrected_high15_replay.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: blue-global-corrected-high15-replay
+  cancel-in-progress: false
+jobs:
+  replay:
+    runs-on: ubuntu-latest
+    timeout-minutes: 100
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install isolated Turso dependencies
+        run: npm install --prefix tools/turso --no-audit --no-fund --ignore-scripts --no-package-lock
+      - name: Test replay membership and unchanged original study
+        run: |
+          node tools/turso/global-corrected-high15-replay.mjs --test
+          node tools/turso/discovery-high15.mjs --test
+      - uses: actions/setup-python@v5
+        if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.repository == 'ehdud6728-bit/BLUE-Signal-Lab'
+        with:
+          python-version: '3.11'
+      - name: Install scanner dependencies
+        if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.repository == 'ehdud6728-bit/BLUE-Signal-Lab'
+        run: python -m pip install pandas numpy pyarrow requests 'cryptography>=43,<48' 'pykrx==1.2.9'
+      - name: Recover 35 immutable KRX days to runner only
+        if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.repository == 'ehdud6728-bit/BLUE-Signal-Lab'
+        env:
+          TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
+          TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
+        run: node tools/turso/daily-global-preflight-export.mjs
+      - name: Download MARCAP once, retain identical source bytes for all nine dates
+        if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.repository == 'ehdud6728-bit/BLUE-Signal-Lab'
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import hashlib, requests
+          root = Path('output/global-replay/marcap')
+          root.mkdir(parents=True, exist_ok=True)
+          for year in (2025, 2026):
+              url = f'https://raw.githubusercontent.com/FinanceData/marcap/master/data/marcap-{year}.parquet'
+              response = requests.get(url, timeout=120)
+              response.raise_for_status()
+              data = response.content
+              if not data.startswith(b'PAR1') or not data.endswith(b'PAR1'):
+                  raise ValueError('INVALID_MARCAP_PARQUET')
+              (root / f'marcap-{year}.parquet').write_bytes(data)
+              print('BLUE_GLOBAL_REPLAY_SOURCE', year, hashlib.sha256(data).hexdigest())
+          PY
+      - name: Recalculate all nine discovery dates with corrected production scope
+        if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.repository == 'ehdud6728-bit/BLUE-Signal-Lab'
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import sys
+          sys.path.insert(0, 'scripts')
+          from market_scan import load_marcap, normalise
+          raw, _ = load_marcap([2025, 2026], 'output/global-replay/marcap')
+          if normalise(raw).date.max().strftime('%Y-%m-%d') < '2026-11-26':
+              raise ValueError('REPLAY_BASELINE_TOO_STALE')
+          PY
+          for DAY in 2026-11-16 2026-11-17 2026-11-18 2026-11-19 2026-11-20 2026-11-23 2026-11-24 2026-11-25 2026-11-26; do
+            ROOT="output/global-replay/$DAY"
+            python scripts/market_scan_r11.py --date "$DAY" --years 2025,2026 \
+              --local-data-dir output/global-replay/marcap \
+              --reuse-target-eod-dir "output/global-preflight/private-eod/$DAY" \
+              --daily-global-scope --scan-workers 2 --scan-chunk-size 500 --out "$ROOT/source"
+            python scripts/export_turso_signal_snapshot.py --input-dir "$ROOT/source" --out "$ROOT/snapshot"
+            node tools/turso/signal-snapshot-import.mjs --mode=dry_run --input-dir="$ROOT/snapshot"
+          done
+      - name: Compare immutable original discoveries and corrected replay
+        if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.repository == 'ehdud6728-bit/BLUE-Signal-Lab'
+        env:
+          TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
+          TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
+        run: node tools/turso/global-corrected-high15-replay.mjs
+      - uses: actions/upload-artifact@v4
+        if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.repository == 'ehdud6728-bit/BLUE-Signal-Lab'
+        with:
+          name: BLUE_GLOBAL_CORRECTED_REPLAY_AGGREGATE
+          path: output/global-replay/public/report.json
+          if-no-files-found: error
+          retention-days: 7
+      - uses: actions/upload-artifact@v4
+        if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.repository == 'ehdud6728-bit/BLUE-Signal-Lab'
+        with:
+          name: BLUE_GLOBAL_CORRECTED_REPLAY_PRIVATE_SEALED
+          path: output/global-replay/public/cases.sealed.json
+          if-no-files-found: error
+          retention-days: 3
