@@ -1,0 +1,90 @@
+name: BLUE Stock Card Classification (EXPLICIT)
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        type: choice
+        options: [inspect, publish]
+        default: inspect
+        required: true
+      source:
+        type: choice
+        options: [seed, fresh]
+        default: seed
+        required: true
+      day:
+        description: 'fresh only: exact verified KRX trading day (YYYY-MM-DD)'
+        type: string
+        default: '2026-11-27'
+        required: false
+  pull_request:
+    paths:
+      - 'tools/turso/stock-card-classification.mjs'
+      - 'tests/test_stock_card_classification.mjs'
+      - 'scripts/collect_card_classification.py'
+      - '.github/workflows/blue_stock_card_classification.yml'
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: blue-stock-card-classification
+  cancel-in-progress: false
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm install --prefix tools/turso --no-audit --no-fund --ignore-scripts --no-package-lock
+      - run: node --test tests/test_stock_card_classification.mjs
+      - name: Restore frozen KRX industry source
+        if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.repository == 'ehdud6728-bit/BLUE-Signal-Lab' && inputs.source == 'seed'
+        uses: actions/download-artifact@v4
+        with:
+          name: BLUE_DATED_CLASSIFICATION_SOURCE
+          path: output/card-classification
+          run-id: 46152265700
+          github-token: ${{ github.token }}
+      - name: Restore frozen KRX theme members
+        if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.repository == 'ehdud6728-bit/BLUE-Signal-Lab' && inputs.source == 'seed'
+        uses: actions/download-artifact@v4
+        with:
+          name: BLUE_DATED_THEME_MEMBERS
+          path: output/card-classification
+          run-id: 46154043411
+          github-token: ${{ github.token }}
+      - uses: actions/setup-python@v5
+        if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.repository == 'ehdud6728-bit/BLUE-Signal-Lab' && inputs.source == 'fresh'
+        with:
+          python-version: '3.12'
+      - name: Collect explicitly dated new snapshot
+        if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.repository == 'ehdud6728-bit/BLUE-Signal-Lab' && inputs.source == 'fresh'
+        env:
+          KRX_ID: ${{ secrets.KRX_DATA_ID || secrets.KRX_ID }}
+          KRX_PW: ${{ secrets.KRX_DATA_PW || secrets.KRX_PW }}
+          KRX_DATA_ID: ${{ secrets.KRX_DATA_ID || secrets.KRX_ID }}
+          KRX_DATA_PW: ${{ secrets.KRX_DATA_PW || secrets.KRX_PW }}
+          DAY: ${{ inputs.day }}
+        run: |
+          pip install 'pykrx==1.2.9'
+          python scripts/research_dated_classification.py --test
+          python scripts/collect_card_classification.py --day "$DAY" --out output/card-classification
+      - name: Verify original EOD digest and classify (publish only when explicitly selected)
+        if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.repository == 'ehdud6728-bit/BLUE-Signal-Lab'
+        env:
+          TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
+          TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
+          MODE: ${{ inputs.mode }}
+          SOURCE: ${{ inputs.source }}
+          DAY: ${{ inputs.day }}
+        run: node tools/turso/stock-card-classification.mjs "$MODE" "$SOURCE" "$DAY"
+      - uses: actions/upload-artifact@v4
+        if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.repository == 'ehdud6728-bit/BLUE-Signal-Lab'
+        with:
+          name: BLUE_STOCK_CARD_CLASSIFICATION_REPORT
+          path: output/card-classification/report/report.json
+          if-no-files-found: error
+          retention-days: 14

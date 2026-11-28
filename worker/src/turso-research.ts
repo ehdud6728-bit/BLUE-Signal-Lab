@@ -6,6 +6,7 @@ import {createClient} from '@libsql/client/web';
 import {matchedRecent} from '../../web/src/recent-match.ts';
 import {RECENT_ASOF} from '../../web/src/recent-pattern-data.ts';
 import {technicalFilterWhere} from './technical-filters.ts';
+import {attachStockCardClassification} from './stock-card-classification.ts';
 
 type ResearchEnv={TURSO_DATABASE_URL?:string;TURSO_AUTH_TOKEN?:string};
 type Client=Pick<ReturnType<typeof createClient>,'execute'|'close'>;
@@ -404,6 +405,7 @@ export async function tursoResearchSearch(env:ResearchEnv,p:URLSearchParams,fact
     const aiRows=full?items.filter(matches).length:null;
     const pool=aiOnly?items.filter(matches):items;
     const ordered=sort==='recommended'?pool.map(r=>({r,k:rank(r)})).sort((a,b)=>b.k.tier-a.k.tier||b.k.rate-a.k.rate||b.r.day.localeCompare(a.r.day)||a.r.code.localeCompare(b.r.code)).slice((page-1)*limit,page*limit).map(x=>x.r):full?pool.slice((page-1)*limit,page*limit):pool;
+    if(p.get('include_classification')==='1')await attachStockCardClassification(client,ordered);
     return {storage:'TURSO',data_status:daily_counts.length?'AVAILABLE':'NOT_IMPORTED',
       mode,start,end,q,sort,total:aiOnly?pool.length:n,unfiltered_total:n,ai_count:aiCount,ai_rows:aiRows,ai_asof:RECENT_ASOF,ai_only:aiOnly,research_tip:researchTip,page,limit,items:ordered,daily_counts,
       high_complete:false,

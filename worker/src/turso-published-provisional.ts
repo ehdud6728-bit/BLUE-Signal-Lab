@@ -3,6 +3,7 @@ import {createClient} from '@libsql/client/web';
 import {InvalidProvisionalQuery} from './turso-provisional-search.ts';
 import {matchedRecent} from '../../web/src/recent-match.ts';
 import {RECENT_ASOF} from '../../web/src/recent-pattern-data.ts';
+import {attachStockCardClassification} from './stock-card-classification.ts';
 type Env={TURSO_DATABASE_URL?:string;TURSO_AUTH_TOKEN?:string};
 type Client=Pick<ReturnType<typeof createClient>,'execute'|'close'>;
 type Factory=(options:{url:string;authToken:string;intMode:'string'})=>Client;
@@ -171,6 +172,7 @@ export async function tursoPublishedProvisional(env:Env,p:URLSearchParams,factor
     });
     items.sort((a,b)=>codes.indexOf(a.code)-codes.indexOf(b.code));
     check(items.length===codes.length&&items.every((r,i)=>r.code===codes[i]));
+    if(p.get('include_classification')==='1')await attachStockCardClassification(db,items,reference);
     // EOD takes priority even if it arrived while reading this generation.
     if((await eod()).rows.length)return {...empty,data_status:'VERIFIED_EOD_AVAILABLE'};
     return {...empty,data_status:'KIS_PROVISIONAL_PATTERNS',q,sort,total:pool.length,unfiltered_total:basePool.length,history_ready:historyReady,pattern_filter_applied:appliedPattern,ai_count:aiCount,ai_only:appliedAiOnly,ai_evidence_count:evidenceCount,matched_count:matched,
