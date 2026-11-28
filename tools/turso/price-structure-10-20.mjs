@@ -141,7 +141,7 @@ function study(events,sessions,barAt,compare){
    const same10=es.filter(e=>evaluate(e,sessions,barAt,10,entry).complete);
    const same20=es.filter(e=>evaluate(e,sessions,barAt,20,entry).complete);
    const result={entry,horizon:h,overall:stats(es),same_10day_cohort:h<=10?stats(same10):null,same_20day_cohort:stats(same20),
-    by_pattern:patterns.map(p=>({pattern:p,...stats(es.filter(e=>e.signalNames.includes(p)))})),
+    by_pattern:patterns.map(p=>({pattern:p,...stats(es.filter(e=>e.signalNames.includes(p))),same_10day_cohort:h<=10?stats(same10.filter(e=>e.signalNames.includes(p))):null,same_20day_cohort:stats(same20.filter(e=>e.signalNames.includes(p)))})),
     incomplete_reasons:Object.fromEntries([...new Set(es.filter(e=>!e.result.complete).map(e=>e.result.reason))].map(k=>[k,es.filter(e=>e.result.reason===k).length]))};
    if([3,5,10,20].includes(h)&&entry==="NEXT_OPEN"&&result.overall.complete){
     const valid=es.filter(e=>e.result.complete);
@@ -156,6 +156,7 @@ function study(events,sessions,barAt,compare){
   }
  }
  const counts=k=>Object.fromEntries([...new Set(events.map(e=>e.structure[k]))].map(s=>[s,events.filter(e=>e.structure[k]===s).length]));
- return {history_quality:{recent21:counts("history21"),long61:counts("history61")},rows,privateRows};
+ const known=cohort=>Object.fromEntries(Object.keys({...groups,...extraGroups}).map(k=>[k,cohort.filter(e=>e.structure.features[k]!==undefined&&e.structure.features[k]!=="UNKNOWN").length]));
+ return {history_quality:{recent21:counts("history21"),long61:counts("history61")},feature_known_counts:known(events),feature_known_by_pattern:patterns.map(pattern=>({pattern,n:events.filter(e=>e.signalNames.includes(pattern)).length,known:known(events.filter(e=>e.signalNames.includes(pattern)))})),rows,privateRows};
 }
 export {structure,evaluate,study,groups,stochastic,classifyHistory,stats};
