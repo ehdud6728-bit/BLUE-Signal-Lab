@@ -13,6 +13,14 @@ from zoneinfo import ZoneInfo
 
 CONFIRM = 'blue-turso-eod-research'
 SCHEDULE_KST = time(22, 20)
+GLOBAL_SCOPE_START = date(2026, 11, 30)
+
+
+def use_global_scope(target, mode):
+    """All comparisons use corrected scope; writes switch only on new dates."""
+    if mode not in ('dry_run', 'apply'):
+        raise ValueError('INVALID_UNIFIED_EVENT_OR_MODE')
+    return mode == 'dry_run' or date.fromisoformat(target) >= GLOBAL_SCOPE_START
 
 
 def select_pipeline_day(raw_day, mode, event, confirmation, auto_research='',
@@ -72,11 +80,13 @@ def main():
         os.environ.get('AUTO_RESEARCH_ENABLED', '').strip(),
         os.environ.get('INPUT_INDICATORS', '').strip(),
         os.environ.get('AUTO_INDICATORS_ENABLED', '').strip())
+    day['DAILY_GLOBAL_SCOPE'] = 'true' if use_global_scope(day['TRADE_DAY'], mode) else 'false'
     with Path(os.environ['GITHUB_ENV']).open('a', encoding='utf-8') as out:
         for key, value in day.items():
             out.write(f'{key}={value}\n')
     print(f"BLUE_TURSO_UNIFIED_REQUEST day={day['TRADE_DAY']} mode={mode} "
-          f"research={day['RUN_RESEARCH']} indicators={day['RUN_INDICATORS']}")
+          f"research={day['RUN_RESEARCH']} indicators={day['RUN_INDICATORS']} "
+          f"global_scope={day['DAILY_GLOBAL_SCOPE']}")
     print('No D1 reads/writes, no KIS token issuance, no intraday EOD substitution.')
 
 
