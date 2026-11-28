@@ -104,5 +104,9 @@ async function selfTest(){
  let blocked=false;try{await adapter.execute({sql:'DELETE FROM blue_research_signals_v1',args:[]})}catch(e){blocked=e.message==='REPLAY_SELECT_ONLY'}t(blocked&&forwarded===1);
  return n;
 }
+export {loadSnapshots,replayAdapter};
+if(process.argv[1]&&import.meta.url===new URL('file://'+process.argv[1]).href){
 if(process.argv.includes('--test'))console.log('BLUE_GLOBAL_REPLAY_TESTS',await selfTest());
 else run().catch(e=>{console.error('BLUE_GLOBAL_REPLAY_FAILED',/^[A-Z_]+$/.test(e?.message||'')?e.message:'SANITIZED_FAILURE');process.exitCode=1});
+
+}

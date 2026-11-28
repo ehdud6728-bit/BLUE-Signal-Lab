@@ -4,8 +4,23 @@ on:
     paths:
       - 'tools/turso/global-corrected-high15-replay.mjs'
       - 'tools/turso/discovery-high15.mjs'
+      - 'tools/turso/price-structure-10-20.mjs'
+      - 'tools/turso/run-price-structure-10-20.mjs'
       - '.github/workflows/blue_global_corrected_high15_replay.yml'
   workflow_dispatch:
+    inputs:
+      study_kind:
+        description: 'comparison = original replay; structure = fixed-cohort price structure research'
+        type: choice
+        options: [comparison, structure]
+        default: comparison
+        required: true
+      observation_cutoff:
+        description: 'Structure only: 11/27 early; 12/10 ten sessions; 12/24 twenty sessions'
+        type: choice
+        options: ['2026-11-27', '2026-12-10', '2026-12-24']
+        default: '2026-11-27'
+        required: true
 permissions:
   contents: read
 concurrency:
@@ -26,6 +41,19 @@ jobs:
         run: |
           node tools/turso/global-corrected-high15-replay.mjs --test
           node tools/turso/discovery-high15.mjs --test
+          node tools/turso/run-price-structure-10-20.mjs --test
+      - name: Reject premature structure cutoff before fetching data
+        if: github.event_name == 'workflow_dispatch' && inputs.study_kind == 'structure'
+        env:
+          CUTOFF: ${{ inputs.observation_cutoff }}
+        run: |
+          python3 - <<'PY'
+          import os
+          from datetime import datetime, timezone
+          cutoff=os.environ['CUTOFF']
+          assert cutoff in ('2026-11-27','2026-12-10','2026-12-24')
+          assert datetime.now(timezone.utc) >= datetime.fromisoformat(cutoff+'T22:30:00+09:00'), 'STRUCTURE_CUTOFF_NOT_MATURE'
+          PY
       - uses: actions/setup-python@v5
         if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.repository == 'ehdud6728-bit/BLUE-Signal-Lab'
         with:
@@ -41,19 +69,26 @@ jobs:
         run: node tools/turso/daily-global-preflight-export.mjs
       - name: Download MARCAP once, retain identical source bytes for all nine dates
         if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.repository == 'ehdud6728-bit/BLUE-Signal-Lab'
+        env:
+          STUDY_KIND: ${{ inputs.study_kind }}
         run: |
           python - <<'PY'
           from pathlib import Path
-          import hashlib, requests
+          import hashlib, requests, os
+          pinned=os.environ['STUDY_KIND']=='structure'
+          ref='ad832658580379c20b8f605797afb10ecfcc690f' if pinned else 'master'
+          expected={2025:'2bfd93c217eb74263bc5020b23fa6debb6b02531c11eaccc2826639bc191559e',2026:'9d5fb93ca4d9d5527e5b15a10b0289e7b15be65353636cb62fd1a01d442536d8'}
           root = Path('output/global-replay/marcap')
           root.mkdir(parents=True, exist_ok=True)
           for year in (2025, 2026):
-              url = f'https://raw.githubusercontent.com/FinanceData/marcap/master/data/marcap-{year}.parquet'
+              url = f'https://raw.githubusercontent.com/FinanceData/marcap/{ref}/data/marcap-{year}.parquet'
               response = requests.get(url, timeout=120)
               response.raise_for_status()
               data = response.content
               if not data.startswith(b'PAR1') or not data.endswith(b'PAR1'):
                   raise ValueError('INVALID_MARCAP_PARQUET')
+              if pinned and hashlib.sha256(data).hexdigest()!=expected[year]:
+                  raise ValueError('STRUCTURE_PINNED_MARCAP_MISMATCH')
               (root / f'marcap-{year}.parquet').write_bytes(data)
               print('BLUE_GLOBAL_REPLAY_SOURCE', year, hashlib.sha256(data).hexdigest())
           PY
@@ -62,12 +97,15 @@ jobs:
         run: |
           set -euo pipefail
           python - <<'PY'
-          import sys
+          import sys, json
+          from pathlib import Path
           sys.path.insert(0, 'scripts')
           from market_scan import load_marcap, normalise
           raw, _ = load_marcap([2025, 2026], 'output/global-replay/marcap')
-          if normalise(raw).date.max().strftime('%Y-%m-%d') < '2026-11-26':
+          clean=normalise(raw)
+          if clean.date.max().strftime('%Y-%m-%d') < '2026-11-26':
               raise ValueError('REPLAY_BASELINE_TOO_STALE')
+          Path('output/global-replay/source-calendar.json').write_text(json.dumps(sorted(set(clean.date.dt.strftime('%Y-%m-%d')))),encoding='utf8')
           PY
           for DAY in 2026-11-16 2026-11-17 2026-11-18 2026-11-19 2026-11-20 2026-11-23 2026-11-24 2026-11-25 2026-11-26; do
             ROOT="output/global-replay/$DAY"
@@ -79,22 +117,43 @@ jobs:
             node tools/turso/signal-snapshot-import.mjs --mode=dry_run --input-dir="$ROOT/snapshot"
           done
       - name: Compare immutable original discoveries and corrected replay
-        if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.repository == 'ehdud6728-bit/BLUE-Signal-Lab'
+        if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.repository == 'ehdud6728-bit/BLUE-Signal-Lab' && inputs.study_kind == 'comparison'
         env:
           TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
           TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
         run: node tools/turso/global-corrected-high15-replay.mjs
       - uses: actions/upload-artifact@v4
-        if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.repository == 'ehdud6728-bit/BLUE-Signal-Lab'
+        if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.repository == 'ehdud6728-bit/BLUE-Signal-Lab' && inputs.study_kind == 'comparison'
         with:
           name: BLUE_GLOBAL_CORRECTED_REPLAY_AGGREGATE
           path: output/global-replay/public/report.json
           if-no-files-found: error
           retention-days: 7
       - uses: actions/upload-artifact@v4
-        if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.repository == 'ehdud6728-bit/BLUE-Signal-Lab'
+        if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.repository == 'ehdud6728-bit/BLUE-Signal-Lab' && inputs.study_kind == 'comparison'
         with:
           name: BLUE_GLOBAL_CORRECTED_REPLAY_PRIVATE_SEALED
           path: output/global-replay/public/cases.sealed.json
+          if-no-files-found: error
+          retention-days: 3
+      - name: Analyze pinned price structure and mature holding horizons (read only)
+        if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.repository == 'ehdud6728-bit/BLUE-Signal-Lab' && inputs.study_kind == 'structure'
+        env:
+          TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
+          TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
+          OBSERVATION_CUTOFF: ${{ inputs.observation_cutoff }}
+        run: node tools/turso/run-price-structure-10-20.mjs --cutoff="$OBSERVATION_CUTOFF"
+      - uses: actions/upload-artifact@v4
+        if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.repository == 'ehdud6728-bit/BLUE-Signal-Lab' && inputs.study_kind == 'structure'
+        with:
+          name: BLUE_PRICE_STRUCTURE_AGGREGATE
+          path: output/global-replay/structure/report.json
+          if-no-files-found: error
+          retention-days: 7
+      - uses: actions/upload-artifact@v4
+        if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.repository == 'ehdud6728-bit/BLUE-Signal-Lab' && inputs.study_kind == 'structure'
+        with:
+          name: BLUE_PRICE_STRUCTURE_PRIVATE_SEALED
+          path: output/global-replay/structure/cases.sealed.json
           if-no-files-found: error
           retention-days: 3
