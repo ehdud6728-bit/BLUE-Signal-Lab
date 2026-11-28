@@ -959,4 +959,8 @@
 ## 2026-11-29 — 사용자 승인: 연구 중인 유망 조건 검색 카드 팁
 - 10일 독립 검증 전이라도 긍정적 초기 결과를 연구 중 표시로 실제 검색에 제공. 기존 검색 결과/정렬/추천/골드·토마토/장바구니/DB/수집 변경 금지.
 - 최초 Stoch 12·5·5 GC만 적용. frozen 1676개 보정 발견 기록, 11/27 cutoff, 다음 시가 기준 5일 성숙798개, GC68 vs 미발생675 vs 미확인55; 평균 최고7.0673 vs5.9049%, 중앙4.2468 vs3.5185%, +15% 9/68 vs71/675, -10% 11/68 vs270/675. 기존 raw replay와 구조 payload SHA 확인 후 798개 최고가·도달 건수 재계산 일치. 10일 성숙0, 독립기간 미검증.
-- 기존 R08 EOD 저장 extras의 GC 명시적 true와 last_gc==day 및 diagnostic_status 일치만 사용. 잠정/누락/다른 날짜는 표시하지 않음. 동일 oscillator 정의이지만 연구의 61일 history gate와 운영 역사 자료 전수 parity 미확인. 연구 수치 확정 확률 아님; 이전 날짜에는 사후 참고 표시. PC/모바일 동일 중립색 팁, 기존 추천과 별개. 신규 테스트4개 작성, 원격 CI/빌드/배포/실제 기기 검증 전. BB 폭 등은 일치 자료 확보 뒤 검토. 
+- 기존 R08 EOD 저장 extras의 GC 명시적 true와 last_gc==day 및 diagnostic_status 일치만 사용. 잠정/누락/다른 날짜는 표시하지 않음. 동일 oscillator 정의이지만 연구의 61일 history gate와 운영 역사 자료 전수 parity 미확인. 연구 수치 확정 확률 아님; 이전 날짜에는 사후 참고 표시. PC/모바일 동일 중립색 팁, 기존 추천과 별개. 신규 테스트4개 작성, 원격 CI/빌드/배포/실제 기기 검증 전. BB 폭 등은 일치 자료 확보 뒤 검토.
+
+## 2026-11-29 — 사용자 요청: 연구 중 패턴 검색 필터
+- PR282 표시-only 연구 팁의 조건과 동일한 선택형 필터. 현재 allowlist Stoch 12·5·5 GC 한 개. 기본 OFF, 기존 기술패턴/GC/거래대금/추세/AI/토마토와 AND. 전체 감사 완료 Turso 확정 신호 SQL에서 COUNT/ORDER/LIMIT 이전 적용, 페이지1로 이동. 서버 research_tip echo 확인, 필터 요청시 D1 fallback 금지, KIS 잠정 결과는 명시적 미지원; 체크 해제 후 정상 검색. 기존 추천/점수/수집/DB 쓰기 불변.
+- API JSON boolean true / numeric 1 / text '1','true','True', exact day last_gc, R08_RESEARCH_EOD로 UI와 동일. 알 수 없는/중복 파라미터 거부. 신규 SQLite fixture API 테스트2개(12종 flag/날짜/출처, 전체14개 중5개 일치, 4페이지 및 AND 비교)와 UI 계약 테스트1개 작성. CI 실행/빌드/실제 운영 확인 전. API와 Web 양쪽 배포 필요. 운영 게이트웨이는 기존 Access 설정 보존, 새 인증 변경 금지.

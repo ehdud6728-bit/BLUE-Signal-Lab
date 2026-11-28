@@ -5,11 +5,12 @@ import {InvalidResearchQuery,tursoResearchDates,tursoResearchSearch,tursoResearc
   tursoResearchCoverage,tursoPatternPulse,tursoExitStudyReport} from '../worker/src/turso-research.ts';
 
 import {RECENT_ASOF} from '../web/src/recent-pattern-data.ts';
+import {exploratorySearchTip} from '../web/src/exploratory-search-tip.ts';
 const nextDay=new Date(Date.parse(RECENT_ASOF+'T00:00:00Z')+86400000).toISOString().slice(0,10);
 const env={TURSO_DATABASE_URL:'libsql://unit.invalid',TURSO_AUTH_TOKEN:'dummy'};
 const day='2026-11-18';
 function setup({partial=false,backendError=false,wrongSource=false,additionalDays=false,
-  publishedReport=false,unsafeReport=false,pathReport=false,invalidPath=false,recentCandles=false,recentCandleDay=nextDay}={}){
+  publishedReport=false,unsafeReport=false,pathReport=false,invalidPath=false,recentCandles=false,recentCandleDay=nextDay,researchTips=false}={}){
   const db=new DatabaseSync(':memory:');
   db.exec(`CREATE TABLE blue_research_signal_audit_v1 (
     trade_day TEXT,row_count INT,observed_stocks INT,signal_events INT,source_payload_sha256 TEXT);
@@ -36,6 +37,29 @@ function setup({partial=false,backendError=false,wrongSource=false,additionalDay
     db.prepare(`INSERT INTO blue_research_signals_v1 VALUES (?,?,?,?,?,?,?,?)`)
       .run(day,code,'blue_market_20261118',names,close,'hash',wrongSource&&code==='000660'?'wrong':'abc',
         make(code,close,names,extras,up));
+  }
+  if(researchTips){
+    const valid={diagnostic_status:'R08_RESEARCH_EOD',slow_12_5_5_last_gc:day};
+    const cases=[
+      {...valid,slow_12_5_5_gc:true},
+      {...valid,slow_12_5_5_gc:1},
+      {...valid,slow_12_5_5_gc:'True'},
+      {...valid,slow_12_5_5_gc:'true'},
+      {...valid,slow_12_5_5_gc:'1'},
+      {...valid,slow_12_5_5_gc:'TRUE'},
+      {...valid,slow_12_5_5_gc:false},
+      {...valid,slow_12_5_5_gc:true,slow_12_5_5_last_gc:'2026-11-17'},
+      {...valid,slow_12_5_5_gc:true,diagnostic_status:'NO_PRICE_HISTORY'},
+      {slow_12_5_5_gc:true},
+      {...valid,slow_12_5_5_gc:['true']},
+      {...valid,slow_12_5_5_gc:'1.0'}
+    ];
+    for(const [i,extras] of cases.entries()){
+      const code=String(100000+i).padStart(6,'0');
+      db.prepare('INSERT INTO blue_research_signals_v1 VALUES (?,?,?,?,?,?,?,?)')
+        .run(day,code,'blue_market_20261118','BB20',10000,'hash','abc',make(code,10000,'BB20',extras,75));
+    }
+    db.prepare('UPDATE blue_research_signal_audit_v1 SET row_count=? WHERE trade_day=?').run(2+cases.length,day);
   }
   if(additionalDays){
     const dates=['2026-11-17','2026-11-16','2026-11-13','2026-11-12',
@@ -308,4 +332,31 @@ test('explicit retrospective summary retains exact candle checks at the research
  assert.deepEqual(out.items.filter(r=>r.extras.recent_candle_match).map(r=>r.code),['000001']);
  assert.ok(out.items.find(r=>r.code==='000001').extras.audited_candle_features.includes('CLOSE_MID'));
  assert.equal(db.closed,1);
+});
+
+test('research tip filter exactly matches display predicate across pages and composes with existing conditions',async()=>{
+ const p=new URLSearchParams({date:day,sort:'recent',limit:'100'});
+ const all=await tursoResearchSearch(env,p,setup({researchTips:true}).factory);
+ assert.equal(all.total,14);
+ assert.equal(all.research_tip,'off');
+ const expected=all.items.filter(r=>exploratorySearchTip(r.day,r.extras,false)).map(r=>r.code);
+ assert.equal(expected.length,5);
+ const found=[];
+ for(let page=1;page<=4;page++){
+   const query=new URLSearchParams({date:day,sort:'recent',limit:'2',page:String(page),research_tip:'stoch12_5_5_gc'});
+   const out=await tursoResearchSearch(env,query,setup({researchTips:true}).factory);
+   assert.equal(out.total,5);
+   assert.equal(out.research_tip,'stoch12_5_5_gc');
+   found.push(...out.items.map(r=>r.code));
+ }
+ assert.deepEqual(found,expected);
+ const excluded=await tursoResearchSearch(env,new URLSearchParams({date:day,research_tip:'stoch12_5_5_gc',signals:'BB30'}),setup({researchTips:true}).factory);
+ assert.equal(excluded.total,0);
+});
+test('unknown or repeated research tip parameter rejects rather than falling back',async()=>{
+ for(const value of ['','unverified','stoch12_5_5_gc&research_tip=off']){
+   const db=setup();
+   await assert.rejects(()=>tursoResearchSearch(env,new URLSearchParams('date='+day+'&research_tip='+value),db.factory),InvalidResearchQuery);
+   assert.equal(db.calls.length,0);
+ }
 });

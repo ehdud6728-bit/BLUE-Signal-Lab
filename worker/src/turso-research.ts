@@ -241,6 +241,9 @@ export async function tursoResearchSearch(env:ResearchEnv,p:URLSearchParams,fact
   const gcNames=(p.get('gc')||'').split(',').map(s=>s.trim()).filter(Boolean);
   if(gcNames.length>5||new Set(gcNames).size!==gcNames.length||gcNames.some(k=>!GC[k]))bad();
   const tech=technicalFilterWhere(p.get('tech')||'',techLogic);if(tech===null)bad();
+  // Explicit allowlist; unknown filters fail closed rather than broaden results.
+  const researchTip=p.get('research_tip')??'off';
+  if(p.getAll('research_tip').length>1||!['off','stoch12_5_5_gc'].includes(researchTip))bad();
   const amount=intParam(p.get('min_amount_eok')||'0',0,50000);
   const onlyPattern=p.get('only_pattern')||'0';if(!['0','1'].includes(onlyPattern))bad();
   const threshold=intParam(p.get('min_pattern_up')||'70',60,90);
@@ -263,6 +266,16 @@ export async function tursoResearchSearch(env:ResearchEnv,p:URLSearchParams,fact
     `LOWER(CAST(json_extract(extras_json,'$.${GC[k]}') AS TEXT)) IN ('true','1')`)
     .join(gcLogic==='all'?' AND ':' OR ')+')');}
   if(tech)filters.push(tech);
+  if(researchTip==='stoch12_5_5_gc'){
+    // Mirror exploratorySearchTip's strict archived EOD and exact-day predicate.
+    // json_type is important: JSON true, numeric 1, and allowed strings only.
+    const flag="json_extract(extras_json,'$.slow_12_5_5_gc')";
+    const kind="json_type(extras_json,'$.slow_12_5_5_gc')";
+    filters.push(`(json_extract(extras_json,'$.diagnostic_status')='R08_RESEARCH_EOD'
+      AND json_extract(extras_json,'$.slow_12_5_5_last_gc')=day
+      AND (${kind}='true' OR (${kind} IN ('integer','real') AND ${flag}=1)
+        OR (${kind}='text' AND ${flag} IN ('1','true','True'))))`);
+  }
   if(amount>0){filters.push(`CAST(json_extract(extras_json,'$.traded_amount_krw') AS REAL)>=?`);
     args.push(amount*100000000);}
   const setupRows=`json_each(CASE WHEN json_valid(stats_json) THEN stats_json
@@ -392,7 +405,7 @@ export async function tursoResearchSearch(env:ResearchEnv,p:URLSearchParams,fact
     const pool=aiOnly?items.filter(matches):items;
     const ordered=sort==='recommended'?pool.map(r=>({r,k:rank(r)})).sort((a,b)=>b.k.tier-a.k.tier||b.k.rate-a.k.rate||b.r.day.localeCompare(a.r.day)||a.r.code.localeCompare(b.r.code)).slice((page-1)*limit,page*limit).map(x=>x.r):full?pool.slice((page-1)*limit,page*limit):pool;
     return {storage:'TURSO',data_status:daily_counts.length?'AVAILABLE':'NOT_IMPORTED',
-      mode,start,end,q,sort,total:aiOnly?pool.length:n,unfiltered_total:n,ai_count:aiCount,ai_rows:aiRows,ai_asof:RECENT_ASOF,ai_only:aiOnly,page,limit,items:ordered,daily_counts,
+      mode,start,end,q,sort,total:aiOnly?pool.length:n,unfiltered_total:n,ai_count:aiCount,ai_rows:aiRows,ai_asof:RECENT_ASOF,ai_only:aiOnly,research_tip:researchTip,page,limit,items:ordered,daily_counts,
       high_complete:false,
       note:'Turso 감사 완료 연구 신호만 조회합니다. 이후 최고·최저가는 현재 저장된 후속 KRX 일봉의 부분 관측이며, 장중 시세가 아닙니다.'};
   },factory);

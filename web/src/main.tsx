@@ -162,6 +162,9 @@ function App(){
   const [appliedSort,setAppliedSort]=useState<ResultSort>('recommended');
   const [gcFields,setGcFields]=useState<GcKey[]>([]);
   const [gcLogic,setGcLogic]=useState<'any'|'all'>('any');
+  const [researchTipOnly,setResearchTipOnly]=useState(false);
+  const researchTipOnlyRef=useRef(false);
+  const [appliedResearchTip,setAppliedResearchTip]=useState(false);
   const [techFields,setTechFields]=useState<TechKey[]>([]);
   const [techLogic,setTechLogic]=useState<'any'|'all'>('any');
   // R1599 shared options: search outlines, detail chart and basket use same threshold.
@@ -525,6 +528,8 @@ function App(){
     }
     // Today's source is authoritative Turso, even if the cached date/backend is stale.
     const source=todaySearch||confirmedReadOnly?'turso':patternBackend;
+    const selectedResearchTip=researchTipOnlyRef.current;
+    const researchTip=selectedResearchTip?'stoch12_5_5_gc':'off';
     let confirmedTodayReady=confirmedReadOnly;
     const serial=++searchVersion.current;
     const effectiveAiOnly=(source==='turso'||todaySearch)&&(queryOverride?.aiOnly??aiOnly);
@@ -539,7 +544,10 @@ function App(){
     const queryMode=requestedDay?'single':mode,queryDate=requestedDay||date;
     if(requestedDay){setMode('single');setDate(requestedDay);}
     try{
+      if(selectedResearchTip&&(source!=='turso'||storageMode!=='turso'||searchSource!=='patterns'))
+        throw Error('연구 중 패턴 필터는 Turso 확정 기술 패턴 검색에서만 지원됩니다. 필터를 해제하거나 확정 자료를 선택해 주세요.');
       const u=new URL(API+(source==='turso'?'/api/research/search':'/api/search'));
+      if(selectedResearchTip)u.searchParams.set('research_tip',researchTip);
       u.searchParams.set('mode',queryMode);
       if(queryMode==='single')u.searchParams.set('date',queryDate);
       else {u.searchParams.set('start',start);u.searchParams.set('end',end);}
@@ -581,6 +589,8 @@ function App(){
           !['KIS_PROVISIONAL_PATTERNS','NOT_PUBLISHED','VERIFIED_EOD_AVAILABLE'].includes(live.data_status))
           throw Error('당일 잠정 패턴 응답 검증 실패');
         if(live.data_status==='KIS_PROVISIONAL_PATTERNS'){
+          if(selectedResearchTip)throw Error('연구 중 패턴 필터는 확정 일봉 전용입니다. 장중 잠정 검색은 필터를 해제해 주세요.');
+          setAppliedResearchTip(false);
           // Reuse the normal search-card data model, without confirmed outcomes.
           setRows(live.items.map(r=>({code:r.code,name:r.name===r.code?null:r.name,day:live.day,
             signals:r.signals,close_price:r.price,supply_distance_pct:null,extras:r.extras||{},
@@ -627,7 +637,7 @@ function App(){
       let r=await fetch(u.toString(),{credentials:'include',cache:'no-store'});
       // D1 is only a secondary path. An HTTP 400 means the query was invalid
       // and must not silently turn into a different source/result.
-      if(!todaySearch&&!confirmedReadOnly&&source==='turso'&&r.status>=500&&querySort!=='recommended'&&!effectiveAiOnly){
+      if(!selectedResearchTip&&!todaySearch&&!confirmedReadOnly&&source==='turso'&&r.status>=500&&querySort!=='recommended'&&!effectiveAiOnly){
         u.pathname='/api/search';
         r=await fetch(u.toString(),{credentials:'include',cache:'no-store'});
         if(r.ok){setPatternBackend('d1');setPatternSourceError('Turso 패턴 검색 불가 · D1 보조 DB로 전환됨');}
@@ -641,6 +651,9 @@ function App(){
       if(serial!==searchVersion.current)return;
       // No imported daily candles is NOT a genuine zero-signal scan.
       if(effectiveAiOnly&&d.ai_only!==true)throw Error('AI 추천 필터 API 배포가 필요합니다.');
+      if(selectedResearchTip&&(d.storage!=='TURSO'||d.research_tip!==researchTip))
+        throw Error('연구 중 패턴 필터 API 배포가 필요합니다. 기존 검색 결과로 대체하지 않습니다.');
+      setAppliedResearchTip(selectedResearchTip);
       setAiCount(d.ai_asof===RECENT_ASOF&&typeof d.ai_count==='number'?d.ai_count:null);setAllCount(d.unfiltered_total??d.total);setAiOnly(d.ai_only===true);
       if(source==='turso'&&d.storage==='TURSO'&&queryMode==='single'&&d.data_status==='AVAILABLE'){
         tursoReadyDays.current.add(queryDate);
@@ -870,6 +883,10 @@ function App(){
     setTechFields(next);setTechLogic(mode);
     // Rerun server-side search before pagination; not just the visible 100 rows.
     if(total!==null)void search(1,false,gcFields,gcLogic,undefined,undefined,next,mode);
+  };
+  const changeResearchTip=(next:boolean)=>{
+    researchTipOnlyRef.current=next;setResearchTipOnly(next);
+    void search(1,false);
   };
   const flip=(t:string)=>setSignals(a=>a.includes(t)?a.filter(s=>s!==t):[...a,t]);
   const basketAtLimit=(code:string)=>basketRegularCount>=100||(!basketIds.some(id=>id.split(':')[1]===code)&&new Set(basketIds.map(id=>id.split(':')[1])).size>=50);
@@ -1134,7 +1151,7 @@ function App(){
 
         {storageMode==='turso'&&searchSource==='daily'&&<TursoEodRecovery key={eodRefresh} api={API} dates={tursoDays} onUnavailable={onTursoUnavailable}/>}
         <div className={"stats "+(storageMode==="turso"?"ai-summary-four":"")} ref={summaryRef} id="summary-panel">
-          <button type="button" className={'metric ai-summary-all '+(!aiOnly?'active':'')} disabled={busy||total===null} aria-pressed={!aiOnly} onClick={()=>{if(aiOnly)void search(1,false,gcFields,gcLogic,undefined,undefined,techFields,techLogic,{aiOnly:false});}}><span>검색 결과</span><strong>{total==null?'—':(allCount??total).toLocaleString()}</strong><small>{activeProvisional?'잠정 패턴':'전체 종목'}</small></button>
+          <button type="button" className={'metric ai-summary-all '+(!aiOnly?'active':'')} disabled={busy||total===null} aria-pressed={!aiOnly} onClick={()=>{if(aiOnly)void search(1,false,gcFields,gcLogic,undefined,undefined,techFields,techLogic,{aiOnly:false});}}><span>검색 결과</span><strong>{total==null?'—':(allCount??total).toLocaleString()}</strong><small>{activeProvisional?'잠정 패턴':total!==null&&appliedResearchTip?'연구 조건 일치':'전체 종목'}</small></button>
           {storageMode==='turso'&&<button type="button" className={'metric ai-summary-metric '+(aiOnly?'active':'')} disabled={busy||aiCount===null} aria-pressed={aiOnly} onClick={()=>void search(1,false,gcFields,gcLogic,undefined,undefined,techFields,techLogic,{aiOnly:!aiOnly})}><span>AI 추천</span><strong>{total===null||aiCount===null?'—':aiCount}</strong><small>{activeProvisional?'잠정 일치':'일치 종목'}</small></button>}
           <div className="metric"><span>검색 거래일</span><strong>{activeProvisional?1:total==null?'—':days.length}</strong><small>{activeProvisional?'잠정 분석일':'저장된 날짜'}</small></div>
           <div className="metric"><span>최신 저장일</span><strong className="smallnum">{latest?.slice(5)||'—'}</strong><small>종가 데이터</small></div>
@@ -1167,6 +1184,7 @@ function App(){
           {activeProvisional&&<p className="r1599-active-filters">KIS 수집 {activeProvisional.observed_count.toLocaleString()} · 분석 {activeProvisional.eligible_count.toLocaleString()} · 검출 {activeProvisional.matched_count.toLocaleString()}종목 · 최근 수신 {observedKst(activeProvisional.latest_observed_utc||undefined)} · 패턴 계산 {observedKst(activeProvisional.scan_asof_utc||undefined)} · 미확정 일봉</p>}
           <p className="r1599-active-filters">검색 결과 기준 · 거래대금 {(appliedAmountEok??amountEok)>0?(appliedAmountEok??amountEok).toLocaleString('ko-KR')+'억원 이상':'전체'} {activeProvisional?' · AI 조건 일치 '+(aiCount===null?'판정 대기':'적용')+' · 토마토 강조 ':' · 토마토 강조 '}{activeProvisional&&!activeProvisional.history_ready?'판정 대기':highlightMin===null?'꺼짐':highlightMin+'% 이상 · 표본 '+patternSampleMin+'건 이상'}{onlyPattern&&highlightMin!==null?' · 해당 종목만 보기':''}{appliedAmountEok!==null&&appliedAmountEok!==amountEok?' · 거래대금 변경 미적용(검색 버튼을 누르세요)':''}</p>
           <details className="ai-search-help"><summary>검색 기준 안내 ⓘ</summary><p>{activeProvisional?'KIS 잠정 시세 기준입니다. 골드 테두리는 이전 AI 연구 조건의 잠정 일치이며 독립 검증 전입니다. 토마토는 전 거래일까지 종료된 과거 사례 기준이며 장바구니는 최초 KIS 관측가를 보존합니다. ':'확정 일봉 기준이며 후속 관측 기간은 불완전할 수 있습니다. '} 골드: 연구 추천 · 토마토: 과거 10일 성과 · 대각선: 두 조건 충족. AI 추천 집계에는 최신 연구 조건의 과거 일치 사례가 포함되며 당시 추천을 뜻하지 않습니다. — 표시는 집계 불가입니다.</p></details>
+          {total!==null&&appliedResearchTip&&<p className="r1599-active-filters">연구 중 패턴 필터 적용 · Stoch 12·5·5 GC · {total}건 (기존 검색 조건과 교집합)</p>}
           {aiOnly&&<p className="r1599-active-filters">AI 조건 일치 종목만 표시 · {activeProvisional?'잠정 신호':'과거 사례 포함'}</p>}
           {basketNotice&&<p className="r1595-request-status" role="status">{basketNotice}</p>}
           {total===0&&(appliedAmountEok??amountEok)>0&&<p className="r15125-result-scope" role="status">현재 거래대금 최소 {(appliedAmountEok??amountEok).toLocaleString('ko-KR')}억원 조건으로는 검색 대상이 없습니다. 저거래대금 하단 터치 종목도 찾으려면 거래대금을 ‘전체(0억원)’로 바꾸고 검색해 보세요.</p>}
@@ -1206,6 +1224,17 @@ function App(){
                 </div>}
                 <small className="r15116-tech-note">이동평균선 값이나 돌파 신호가 저장되지 않은 과거 종목은 해당 조건에 포함하지 않습니다. GC·거래대금 조건과 함께 적용됩니다.</small>
               </div>
+            {(researchTipOnly||storageMode==='turso'&&searchSource==='patterns'&&patternBackend==='turso')&&
+              <div className="r15116-technical-filter" role="group" aria-label="연구 중 패턴 필터">
+                <div className="r15116-tech-heading"><strong>연구 중 패턴 필터</strong><small>확정 일봉 · 전체 검색 결과에 적용</small></div>
+                <div className="gc-filter-options">
+                  <label className={'gc-filter-chip '+(researchTipOnly?'selected':'')}>
+                    <input type="checkbox" checked={researchTipOnly} disabled={busy||(!researchTipOnly&&!!activeProvisional)} onChange={e=>changeResearchTip(e.target.checked)}/>
+                    Stoch 12·5·5 GC · 연구 중
+                  </label>
+                </div>
+                <small className="r15116-tech-note">기존 조건과 AND 결합 · 연구 팁과 같은 조건 · 10일 및 독립 검증 전 · 장중 잠정/D1 미지원</small>
+              </div>}
             {(!activeProvisional||activeProvisional.history_ready)&&<div className="r15102-tomato-inline" role="group" aria-label="토마토색 과거 패턴 기준">
               <label htmlFor="r1599-pattern">토마토 기준</label>
               <select id="r1599-pattern" value={patternThreshold} onChange={e=>{
