@@ -2,6 +2,7 @@ import {matchedRecent} from './recent-match';
 import {RECENT_ASOF,RECENT_RECOMMENDATIONS} from './recent-pattern-data';
 import RecentPatternReference from './RecentPatternReference';
 import StockResearchReference from './StockResearchReference';
+import ExploratorySearchTip from './ExploratorySearchTip';
 import RecentPatternRanking from './RecentPatternRanking';
 import ResearchCenter, {ResearchProfitability, type ResearchTab} from './ResearchCenter';
 import HighReturnProfiles from './HighReturnProfiles';
@@ -1300,6 +1301,7 @@ function App(){
                   <div className="r15125-amount-change">{amountChange(r)}{sortedPercent(r)&&<span> · {sortedPercent(r)}</span>}</div>
                   <div className="blue-pc-stock-signals">{r.signals.map(s=><span className="tag" key={s}>{showSignal(s)}</span>)}{techBadges(r).map(t=><span className="r1591-search-tech" key={t}>{t}</span>)}{supplyTag(r)}</div>
                   {goldEvidenceBlock(r)}
+                  {storageMode==='turso'&&searchSource==='patterns'&&patternBackend==='turso'&&<ExploratorySearchTip day={r.day} extras={r.extras} provisional={r.provisional}/>}
                 </section>
                 <section className="blue-pc-stock-price r1593-price-cell" aria-label="가격 정보">
                   <strong>{money(r.close_price)}원</strong><small> · {r.provisional?'KIS 관측가':'검색일 종가'}</small>
@@ -1338,6 +1340,7 @@ function App(){
                 aria-label={`${displayName(r)} 상세 분석 보기`}>
               <div className="stock-top"><div className="stock-identity"><strong>{displayName(r)}</strong><span>{r.code} <span className="stock-dot">·</span> {r.day}</span></div><div className="stock-price"><b>{money(r.close_price)}<small>원</small></b><span>{r.provisional?'KIS 관측가':'종가'}</span></div><ChevronRight size={19} className="stock-chevron"/></div>
               {goldEvidenceBlock(r)}
+              {storageMode==='turso'&&searchSource==='patterns'&&patternBackend==='turso'&&<ExploratorySearchTip day={r.day} extras={r.extras} provisional={r.provisional}/>}
               {(!r.provisional||recentMatch(r))&&<RecentPatternReference provisional={r.provisional} day={r.day} signals={r.signals} matched={recentMatch(r)} features={researchFeatures(r)} onDetails={storageMode==="turso"?()=>{setAiResearchTab(recentMatch(r)?"recommend":"ranking");nav("ai");}:undefined}/>}
               {storageMode==="turso"&&searchSource==="patterns"&&(r.provisional?activeProvisional?.ai_asof===RECENT_ASOF:patternBackend==="turso")&&<StockResearchReference key={r.code+":"+r.day} code={r.code} day={r.day} signals={r.signals} features={researchFeatures(r)} provisional={r.provisional} tomato={tomatoResearch(r)} recent={recentMatch(r)?matchedRecent(r.day,r.signals,researchFeatures(r),!r.provisional)[0]??null:null} validated={goldSignal(r)} extras={r.extras} referencePrice={r.close_price} onCombined={()=>{setAiResearchTab("combined");nav("ai");}} onProfit={()=>{setAiResearchTab("profit");nav("ai");}} onHigh={()=>{setAiResearchTab("highreturn");nav("ai");}}/>}
               {patternEvidenceBlock(r)}
