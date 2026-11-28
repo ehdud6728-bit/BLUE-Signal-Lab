@@ -32,3 +32,14 @@ test('only search card display wiring, no promotion or provisional match',()=>{
  assert.match(component,/10일\/독립기간 검증 전/);
  assert.match(component,/5일 최고수익 평균/);
 });
+
+test('research tip selection travels to full server search and cannot silently fall back',()=>{
+ const main=readFileSync(new URL('../web/src/main.tsx',import.meta.url),'utf8');
+ assert.match(main,/researchTipOnlyRef\.current=next;setResearchTipOnly\(next\)/);
+ assert.match(main,/u\.searchParams\.set\('research_tip',researchTip\)/);
+ assert.match(main,/!selectedResearchTip&&!todaySearch&&!confirmedReadOnly/);
+ assert.match(main,/d\.research_tip!==researchTip/);
+ assert.match(main,/if\(selectedResearchTip\)throw Error\('연구 중 패턴 필터는 확정 일봉 전용/);
+ assert.match(main,/연구 중 패턴 필터 적용/);
+ assert.match(main,/const visibleRows=rows\.filter\(r=>!r\.provisional\|\|activeProvisional!==null\)/);
+});
