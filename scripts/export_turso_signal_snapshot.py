@@ -126,6 +126,12 @@ def export_snapshot(source, destination):
         'signals_csv_sha256': digest(csv_bytes),
         'chart_snapshots_sha256': digest(chart_bytes), 'payload_sha256': digest(payload),
     }
+    if audit.get('scope') == 'DAILY_KRX_TARGET_KOSDAQ_GLOBAL_COPY_V1':
+        if (audit.get('target_ohlcva_exact') is not True or audit.get('unaffected_history_exact') is not True or
+                audit.get('target_rows') != audit['observed_stocks'] or
+                any(r['extras'].get('history_scope') != audit['scope'] for r in normalized)):
+            raise ValueError('INVALID_GLOBAL_SCOPE_PROVENANCE')
+        manifest['history_scope'] = audit['scope']
     destination.mkdir(parents=True, exist_ok=True)
     (destination / 'manifest.json').write_text(json.dumps(manifest, ensure_ascii=False,
                                              indent=2) + '\n', encoding='utf-8')
