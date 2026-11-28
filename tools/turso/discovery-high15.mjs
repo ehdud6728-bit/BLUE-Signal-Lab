@@ -7,8 +7,11 @@ import {evidence} from './combined-pattern-factors.mjs';
 import {storedContext} from './env20-pullback-factors.mjs';
 import {study as conditionalStudy,conditionalTest,compare} from './discovery-high15-conditional.mjs';
 import {historicalFeatures,withinSignalStudy,withinTest} from './discovery-high15-within-signal.mjs';
+import {amountEvidence,frozenStudy,collectCases,caseTest} from './discovery-high15-case-study.mjs';
+import {seal,sealTest} from './discovery-high15-case-seal.mjs';
 
 const DAYS=["2026-11-16","2026-11-17","2026-11-18","2026-11-19","2026-11-20","2026-11-23","2026-11-24","2026-11-25","2026-11-26","2026-11-27"];
+const HOLDOUT_DAYS=["2026-11-30","2026-12-01","2026-12-02","2026-12-03","2026-12-04","2026-12-07","2026-12-08","2026-12-09","2026-12-10","2026-12-11","2026-12-14","2026-12-15","2026-12-16","2026-12-17","2026-12-18"];
 function need(ok,code){if(!ok)throw Error(code)}
 
 function band(v,edges,labels){return Number.isFinite(v)?labels[edges.findIndex(x=>v<x)===-1?edges.length:edges.findIndex(x=>v<x)]:"UNKNOWN"}
@@ -79,11 +82,14 @@ function features(base,record,ev,supply,market){
 }
 
 function buildReport(data){
- const {coverage,events,barAt,historyCoverage=[]}=data;
- const windows={},conditional={},within_signal={};
+ const {coverage,events,barAt,historyCoverage=[],runDays=DAYS,holdout=false}=data;
+ const windows={},conditional={},within_signal={},frozen={};
+ const withHistory=es=>es.map(e=>({...e,features:{...e.features,...e.historyFeatures}}));
+ const evaluate=h=>events.map(e=>{const path=runDays.slice(runDays.indexOf(e.day)+1),expected=h==="ASOF"?path:path.slice(0,h);const result=h!=="ASOF"&&expected.length<h?{status:"UNKNOWN",complete:false,reason:"HORIZON_NOT_MATURE"}:outcome(e.base,expected,barAt);return {...e,result}});
+ if(holdout){for(const h of [1,3,5])frozen[h]=frozenStudy(withHistory(evaluate(h)),compare);return {schema:"BLUE_HIGH15_FROZEN_HOLDOUT_V1",start:runDays[0],end:"2026-12-11",cutoff:runDays.at(-1),primary_horizon:3,coverage,history_coverage:historyCoverage,frozen_study:frozen,notes:["Prospective fixed date window. No exploratory feature scans. Full audited dates required before analysis; independent provider and corporate actions remain unverified."]}}
  for(const h of ["ASOF",1,3,5]){
-  const es=events.map(e=>{const path=DAYS.slice(DAYS.indexOf(e.day)+1);const expected=h==="ASOF"?path:path.slice(0,h);const result=h!=="ASOF"&&expected.length<h?{status:"UNKNOWN",complete:false,reason:"HORIZON_NOT_MATURE"}:outcome(e.base,expected,barAt);return {...e,result}});
-  if(h!=="ASOF"){conditional[h]=conditionalStudy(es);within_signal[h]=withinSignalStudy(es.map(e=>({...e,features:{...e.features,...e.historyFeatures}})),compare)}
+  const es=evaluate(h);
+  if(h!=="ASOF"){conditional[h]=conditionalStudy(es);within_signal[h]=withinSignalStudy(withHistory(es),compare);frozen[h]=frozenStudy(withHistory(es),compare)}
   windows[h]={all_recorded:summarize(es),full_universe_days_only:summarize(es.filter(e=>e.full)),
    by_discovery_day:DAYS.slice(0,-1).map(day=>{const s=summarize(es.filter(e=>e.day===day));delete s.comparisons;return {day,...s}})};
  }
@@ -103,7 +109,8 @@ function buildReport(data){
    unique_hit_stocks:new Set(rows.filter(r=>r.hit===true).map(r=>r.code)).size});
  const screen_metric={...screenSummary(screenRows),by_day:DAYS.slice(0,-1).map(day=>({day,...screenSummary(screenRows.filter(r=>r.day===day))})),
    note:"Search-style observed maximum, not a completed outcome; no path continuity or corporate-action guard."};
- return {schema:"BLUE_DISCOVERY_HIGH15_V1",conditional,within_signal,history_coverage:historyCoverage,screen_metric,start:DAYS[0],end:DAYS.at(-2),cutoff:DAYS.at(-1),target_pct:15,
+ const amount_audit_issue_counts={};for(const e of events)if(e.amountAudit!=="MATCH")for(const issue of e.amountEvidence?.issues??[])amount_audit_issue_counts[issue]=(amount_audit_issue_counts[issue]||0)+1;
+ return {schema:"BLUE_DISCOVERY_HIGH15_V1",conditional,within_signal,frozen_study:frozen,amount_audit_issue_counts,history_coverage:historyCoverage,screen_metric,start:DAYS[0],end:DAYS.at(-2),cutoff:DAYS.at(-1),target_pct:15,
    reference:"STORED_DISCOVERY_CLOSE_MATCHED_TO_KRX_EOD",future:"LATER_EOD_HIGH_ONLY",expected_sessions:DAYS,
    coverage,windows,limitations:["Recorded V1 discovery rows only; partial scanner universe reported separately; V2 replay not substituted.","Fixed weekday session list; independent calendar verification pending.","Corporate actions and outside-source price verification pending; gaps >=40% censored.","ASOF follow-up differs by date; compare equal 1/3/5 session windows and date groups.","Feature comparisons descriptive, overlapping stock-days, not independent validation or investment returns.","Stored technical factors are not independently recomputed from provider prices.","Prior-to-hit low excludes hit-day low because intraday order is unknown.","No stock identifiers or raw quotes in artifact."]};
 }
@@ -137,8 +144,9 @@ function selfTest(){
 }
 
 const sha=x=>createHash('sha256').update(x).digest('hex');
-async function readReport(db){
- const allDays=['2026-11-13',...DAYS],bars=new Map(),coverage=[],events=[];
+async function readReport(db,holdout=false){
+ const runDays=holdout?HOLDOUT_DAYS:DAYS,discoveryDays=holdout?runDays.slice(0,10):runDays.slice(0,-1);
+ const allDays=[holdout?'2026-11-27':'2026-11-13',...runDays],bars=new Map(),coverage=[],events=[];
  const select=async(sql,args)=>{need(/^SELECT\b/i.test(sql),'NON_SELECT');return (await db.execute({sql,args})).rows};
  for(const day of allDays){
   const a=await select('SELECT trade_day,row_count,source,day_sha256 FROM blue_eod_ingest_audit_v1 WHERE trade_day=?',[day]);
@@ -146,7 +154,7 @@ async function readReport(db){
   const raw=await select('SELECT trade_day,code,market,name,open,high,low,close,volume,amount,source FROM blue_eod_daily_v1 WHERE trade_day=? ORDER BY code',[day]);
   reconstructVerifiedDay(day,a[0],raw);
   for(const row of raw){
-   const r={day,code:row.code,market:row.market};
+   const r={day,code:row.code,market:row.market,name:row.name??null};
    for(const k of ['open','high','low','close','amount']){r[k]=Number(row[k]);need(Number.isSafeInteger(r[k])&&r[k]>0,'BAD_NUMBER')}
    bars.set(day+'/'+r.code,r);
   }
@@ -154,7 +162,7 @@ async function readReport(db){
  }
  const barAt=(day,code)=>bars.get(day+'/'+code);
  // Pre-discovery history is read independently; never change the original window or its coverage.
- const historyDays=[];for(let d=new Date('2026-10-12T00:00:00Z');d.toISOString().slice(0,10)<=DAYS.at(-1);d.setUTCDate(d.getUTCDate()+1))if(d.getUTCDay()>=1&&d.getUTCDay()<=5)historyDays.push(d.toISOString().slice(0,10));
+ const historyDays=[];for(let d=new Date('2026-10-12T00:00:00Z');d.toISOString().slice(0,10)<=runDays.at(-1);d.setUTCDate(d.getUTCDate()+1))if(d.getUTCDay()>=1&&d.getUTCDay()<=5)historyDays.push(d.toISOString().slice(0,10));
  const historyCoverage=[];
  for(const day of historyDays.filter(d=>d<allDays[0])){
   const a=await select('SELECT trade_day,row_count,source,day_sha256 FROM blue_eod_ingest_audit_v1 WHERE trade_day=?',[day]);
@@ -164,7 +172,7 @@ async function readReport(db){
   for(const row of raw){const r={day,code:row.code,market:row.market};for(const k of ['open','high','low','close','amount']){r[k]=Number(row[k]);need(Number.isSafeInteger(r[k])&&r[k]>0,'BAD_HISTORY_NUMBER')}bars.set(day+'/'+r.code,r)}
   historyCoverage.push({day,eod:'HASH_MATCH',eod_rows:raw.length,eod_sha256:a[0].day_sha256});
  }
- for(const day of DAYS.slice(0,-1)){
+ for(const day of discoveryDays){
   const c=coverage.find(x=>x.day===day);
   if(c.eod!=='HASH_MATCH')continue;
   const audits=await select('SELECT row_count,observed_stocks,signal_events,source_payload_sha256 FROM blue_research_signal_audit_v1 WHERE trade_day=?',[day]);
@@ -191,23 +199,33 @@ async function readReport(db){
     const record=JSON.parse(raw),ev=evidence(r,{day,code:r.code,names},base,{details:true});
     const supply=storedContext(raw,base.close).supply;
     const hist=historicalFeatures(base,historyDays,barAt,ev.amount_ratio20);
-    events.push({day,code:r.code,base,full,signalNames:names,amountRatio:ev.amount_ratio20,amountAudit:hist.audit,features:features(base,record,ev,supply,market),historyFeatures:{...hist.features,supply_grade_stored:supply.status==="STORED_ESTIMATE"&&supply.grade?supply.grade:"UNKNOWN"}});
+    const extras=record.extras??{};
+    const event={day,code:r.code,base,full,signalNames:names,amountRatio:ev.amount_ratio20,amountAudit:hist.audit,storedAmount:extras.traded_amount_krw,chartDates:record.chart?.bars?.slice(-21).map(b=>b.t),
+      indicatorValues:Object.fromEntries(["rsi","rsi_signal","rsi_gc","slow_12_5_5_k","slow_12_5_5_d","slow_12_5_5_gc","slow_20_12_12_k","slow_20_12_12_d","slow_20_12_12_gc","macd_12_26_9","macd_signal_9","ma20","ma40","ma60"].map(k=>[k,extras[k]??null])),
+      features:features(base,record,ev,supply,market),historyFeatures:{...hist.features,supply_grade_stored:supply.status==="STORED_ESTIMATE"&&supply.grade?supply.grade:"UNKNOWN"}};
+    event.amountEvidence=amountEvidence(event,historyDays,barAt);events.push(event);
    }
    if(rows.length<5)break;
   }
   need(count===n&&nEvents===signalEvents&&hash.digest('hex')===a.source_payload_sha256,'SIGNAL_PAYLOAD_AUDIT_MISMATCH');
   c.payload_hash_recomputed=true;
  }
- return buildReport({coverage,events,barAt,historyCoverage});
+ if(holdout){need(coverage.every(c=>c.eod==="HASH_MATCH"),"HOLDOUT_EOD_NOT_COMPLETE");need(discoveryDays.every(d=>coverage.find(c=>c.day===d)?.signals==="FULL_RECORDED_UNIVERSE"),"HOLDOUT_SIGNAL_UNIVERSE_NOT_COMPLETE");need(events.length>0,"HOLDOUT_EMPTY");}
+ return {report:buildReport({coverage,events,barAt,historyCoverage,runDays,holdout}),cases:holdout?null:collectCases(events,runDays,barAt,outcome)};
 }
-if(process.argv.includes('--test')){console.log('BLUE_HIGH15_SYNTHETIC_CHECKS',selfTest());console.log('BLUE_HIGH15_CONDITIONAL_CHECKS',conditionalTest());console.log('BLUE_HIGH15_WITHIN_CHECKS',withinTest(compare))}
+if(process.argv.includes('--test')){console.log('BLUE_HIGH15_SYNTHETIC_CHECKS',selfTest());console.log('BLUE_HIGH15_CONDITIONAL_CHECKS',conditionalTest());console.log('BLUE_HIGH15_WITHIN_CHECKS',withinTest(compare));console.log('BLUE_HIGH15_CASE_CHECKS',caseTest(compare));console.log('BLUE_HIGH15_CRYPTO_CHECKS',sealTest())}
 else{
  let db;
  try{
   need(/^(libsql|https):\/\//.test(process.env.TURSO_DATABASE_URL||'')&&process.env.TURSO_AUTH_TOKEN,'MISSING_CONFIG');
   db=createClient({url:process.env.TURSO_DATABASE_URL,authToken:process.env.TURSO_AUTH_TOKEN,intMode:'string'});
-  const report=await readReport(db),out=process.argv.find(x=>x.startsWith('--out='))?.slice(6)||'output/high15/report.json';
+  const mode=process.argv.find(x=>x.startsWith('--mode='))?.slice(7)||'discovery';need(["discovery","holdout"].includes(mode),"BAD_STUDY_MODE");
+  const holdout=mode==="holdout";if(holdout)need(Date.now()>=Date.parse("2026-12-18T22:30:00+09:00"),"HOLDOUT_NOT_MATURE");
+  const {report,cases}=await readReport(db,holdout),out=process.argv.find(x=>x.startsWith('--out='))?.slice(6)||'output/high15/report.json';
+  const caseOut=process.argv.find(x=>x.startsWith('--cases='))?.slice(8);
+  if(!holdout&&caseOut){need(caseOut.endsWith('.sealed.json')&&caseOut!==out,"BAD_CASE_OUTPUT");const bundle=seal(JSON.stringify(cases));await mkdir(dirname(caseOut),{recursive:true});await writeFile(caseOut,JSON.stringify(bundle)+'\n');console.log('BLUE_HIGH15_PRIVATE_CASES',JSON.stringify({records:cases.cases.length,screen_hits:cases.cases.filter(x=>x.screen.hit===true).length,payload_sha256:bundle.payload_sha256,recipient_sha256:bundle.recipient_sha256,writes:0}));}
   await mkdir(dirname(out),{recursive:true});await writeFile(out,JSON.stringify(report,null,2)+'\n');
-  const s=report.windows.ASOF.all_recorded;console.log('BLUE_HIGH15_AGGREGATE',JSON.stringify({n:s.n,complete:s.complete,hits:s.hits,partial_hits:s.partial_hits,misses:s.misses,unknown:s.unknown,unique_hit_stocks:s.unique_hit_stocks,writes:0}));
+  if(holdout){console.log('BLUE_HIGH15_HOLDOUT',JSON.stringify({eligible_n:report.frozen_study[3].eligible_n,rules:report.frozen_study[3].rules.length,writes:0}))}
+  else{const s=report.windows.ASOF.all_recorded;console.log('BLUE_HIGH15_AGGREGATE',JSON.stringify({n:s.n,complete:s.complete,hits:s.hits,partial_hits:s.partial_hits,misses:s.misses,unknown:s.unknown,unique_hit_stocks:s.unique_hit_stocks,writes:0}));}
  }catch(e){console.error('BLUE_HIGH15_FAILED',/^[A-Z_]+$/.test(e?.message||'')?e.message:'SANITIZED_FAILURE');process.exitCode=1}finally{db?.close()}
 }
