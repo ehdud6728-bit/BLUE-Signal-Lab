@@ -1,0 +1,55 @@
+name: BLUE Sector Turnover Context (READ ONLY)
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'tools/turso/sector-turnover-context.mjs'
+      - '.github/workflows/blue_sector_turnover_context.yml'
+permissions:
+  contents: read
+  actions: read
+jobs:
+  context:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: node tools/turso/sector-turnover-context.mjs --test
+      - name: Restore frozen nine-date classification
+        if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.repository == 'ehdud6728-bit/BLUE-Signal-Lab'
+        uses: actions/download-artifact@v4
+        with:
+          name: BLUE_DATED_CLASSIFICATION_SOURCE
+          path: output/turnover/classification
+          run-id: 46152265700
+          github-token: ${{ github.token }}
+      - name: Restore frozen five preceding dates
+        if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.repository == 'ehdud6728-bit/BLUE-Signal-Lab'
+        uses: actions/download-artifact@v4
+        with:
+          name: BLUE_MARKET_CONTEXT_SOURCE
+          path: output/turnover/context
+          run-id: 46157432878
+          github-token: ${{ github.token }}
+      - name: Install isolated dependencies
+        if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.repository == 'ehdud6728-bit/BLUE-Signal-Lab'
+        run: npm install --prefix tools/turso --no-audit --no-fund --ignore-scripts --no-package-lock
+      - name: Recover existing immutable EOD (SELECT only, no scanner)
+        if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.repository == 'ehdud6728-bit/BLUE-Signal-Lab'
+        env:
+          TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
+          TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
+        run: node tools/turso/daily-global-preflight-export.mjs
+      - name: Verify frozen industry source and compute turnover shares
+        if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.repository == 'ehdud6728-bit/BLUE-Signal-Lab'
+        run: node tools/turso/sector-turnover-context.mjs
+      - uses: actions/upload-artifact@v4
+        if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.repository == 'ehdud6728-bit/BLUE-Signal-Lab'
+        with:
+          name: BLUE_SECTOR_TURNOVER_CONTEXT
+          path: output/turnover/public/report.json
+          if-no-files-found: error
+          retention-days: 7
