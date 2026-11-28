@@ -25,6 +25,24 @@ const START='2026-11-16',INITIAL='2026-11-27',CUTOFFS=[INITIAL,'2026-12-10','202
 const need=(x,code)=>{if(!x)throw Error(code)};
 const sha=x=>createHash('sha256').update(x).digest('hex');
 function weekdays(start,end){const a=[];for(let d=new Date(start+'T00:00:00Z');d.toISOString().slice(0,10)<=end;d.setUTCDate(d.getUTCDate()+1))if(d.getUTCDay()>=1&&d.getUTCDay()<=5)a.push(d.toISOString().slice(0,10));return a}
+const AUDIT_START='2026-10-12';
+function reconcileCalendar(source,coverage){
+ // The provider is deliberately pinned to the original replay bytes.
+ // Exact-date audited KRX days take precedence over a stale source calendar,
+ // but only after the complete expected date set has been proved.
+ const validDate=d=>typeof d==="string"&&/^20\d{2}-\d{2}-\d{2}$/.test(d)&&Number.isFinite(Date.parse(d+'T00:00:00Z'))&&new Date(d+'T00:00:00Z').toISOString().slice(0,10)===d;
+ need(Array.isArray(source)&&source.length>100&&source.every((d,i)=>validDate(d)&&(!i||d>source[i-1])),"STRUCTURE_BAD_SOURCE_CALENDAR");
+ const expected=weekdays(AUDIT_START,INITIAL);
+ const days=coverage.map(c=>c.day);
+ need(coverage.length===expected.length&&new Set(days).size===days.length&&coverage.every(c=>validDate(c.day)&&c.eod==="HASH_MATCH"&&/^[a-f0-9]{64}$/.test(c.eod_sha256)&&Number.isSafeInteger(c.eod_rows)&&c.eod_rows>=1700)&&expected.every(d=>days.includes(d)),"STRUCTURE_AUDIT_CALENDAR_INCOMPLETE");
+ const recent=source.filter(d=>d>=AUDIT_START&&d<=INITIAL),auditSet=new Set(expected);
+ const sourceOnly=recent.filter(d=>!auditSet.has(d));
+ // A provider-only session requires reconciliation; don't silently erase it.
+ need(sourceOnly.length===0,"STRUCTURE_UNEXPECTED_SOURCE_SESSION");
+ const krxOnly=expected.filter(d=>!recent.includes(d));
+ const calendar=[...source.filter(d=>d<AUDIT_START),...expected];
+ return {calendar,proof:{method:"PINNED_PRE_AUDIT_PLUS_EXACT_KRX_AUDITED_SESSIONS_V2",audit_start:AUDIT_START,audit_end:INITIAL,audited_days:expected.length,source_days_in_audit_range:recent.length,source_missing_dates_replaced_by_audited_krx:krxOnly,source_only_dates:sourceOnly,source_last_day:source.at(-1)}};
+}
 function guardCutoff(cutoff,now=Date.now()){
  need(CUTOFFS.includes(cutoff),"STRUCTURE_BAD_CUTOFF");
  need(now>=Date.parse(cutoff+'T22:30:00+09:00'),"STRUCTURE_CUTOFF_NOT_MATURE");
@@ -39,10 +57,9 @@ async function run(cutoff){
   }
   const replay=await readReport(replayAdapter(db,snapshots)),data=replay.data;
   need(data.events.length===1676&&data.coverage.every(c=>c.eod==="HASH_MATCH")&&data.historyCoverage.every(c=>c.eod==="HASH_MATCH")&&Object.keys(PINNED_PAYLOADS).every(day=>data.coverage.find(c=>c.day===day)?.signals==="FULL_RECORDED_UNIVERSE"),"STRUCTURE_BASE_UNIVERSE_MISMATCH");
-  const calendar=JSON.parse(await readFile(join(root,'source-calendar.json'),'utf8'));
-  need(Array.isArray(calendar)&&calendar.length>100&&calendar.every((d,i)=>/^20\d{2}-\d{2}-\d{2}$/.test(d)&&(!i||d>calendar[i-1])),"STRUCTURE_BAD_SOURCE_CALENDAR");
-  const history=weekdays('2026-10-12',INITIAL);
-  need(history.every(d=>calendar.includes(d)),"STRUCTURE_CALENDAR_MISMATCH");
+  const sourceCalendar=JSON.parse(await readFile(join(root,'source-calendar.json'),'utf8'));
+  const {calendar,proof:calendarProof}=reconcileCalendar(sourceCalendar,[...data.historyCoverage,...data.coverage]);
+  console.log('BLUE_PRICE_STRUCTURE_CALENDAR',JSON.stringify(calendarProof));
   const sessions=weekdays(START,cutoff),extra=new Map(),futureCoverage=[];
   const select=async(sql,args)=>{need(/^SELECT\b/i.test(sql),"STRUCTURE_SELECT_ONLY");return (await db.execute({sql,args})).rows};
   for(const day of sessions.filter(d=>d>INITIAL)){
@@ -59,9 +76,9 @@ async function run(cutoff){
   const events=data.events.map(e=>{const r=records.get(e.day+'/'+e.code);need(r,"STRUCTURE_RECORD_MISSING");
    return {...e,name:e.base.name??r.extras?.name??null,structure:structure(e,r,calendar,data.barAt)}});
   const {privateRows,...result}=study(events,sessions,barAt,compare);
-  const report={schema:"BLUE_PRICE_STRUCTURE_10_20_V1",source:"PINNED_46131165692_CORRECTED_REPLAY_NOT_ACTUAL_DISCOVERIES",source_commit:"ad832658580379c20b8f605797afb10ecfcc690f",cohort_n:events.length,discovery_start:START,discovery_end:"2026-11-26",cutoff,primary_horizon:10,extended_horizon:20,calendar_sha256:sha(JSON.stringify(calendar)),expected_sessions:sessions,
+  const report={schema:"BLUE_PRICE_STRUCTURE_10_20_V1",source:"PINNED_46131165692_CORRECTED_REPLAY_NOT_ACTUAL_DISCOVERIES",source_commit:"ad832658580379c20b8f605797afb10ecfcc690f",cohort_n:events.length,discovery_start:START,discovery_end:"2026-11-26",cutoff,primary_horizon:10,extended_horizon:20,calendar_sha256:sha(JSON.stringify(calendar)),source_calendar_sha256:sha(JSON.stringify(sourceCalendar)),calendar_proof:calendarProof,expected_sessions:sessions,
     source_hashes:PINNED_YEARS,discovery_payload_sha256:PINNED_PAYLOADS,initial_coverage:[...data.historyCoverage,...data.coverage],future_coverage:futureCoverage,...result,writes:0,
-    limitations:["Same reconstructed November cohort; exploratory, not independent holdout. All nine corrected discovery dates are full-universe; repeated stock-days and overlapping patterns are not independent.","21-bar price features require exact dates and all OHLC from audited KRX; 61-bar features use pinned MARCAP plus audited overlap, not fully independent. Stored supply is an estimate.","Calendar before 10/12 comes from MARCAP; subsequent expected sessions use fixed weekdays and audited dates. Missing future EOD is not skipped; incomplete horizons excluded from rates.","NEXT_OPEN assumes available fill at recorded open, H-th close exit; DISCOVERY_CLOSE_REFERENCE is not a certified tradable entry. No fees, tax, slippage, intraday sequence or corporate-action certification.","Day-market-turnover-band overlap is descriptive and not a causal adjustment. Thresholds are fixed exploration candidates, not recommendations. No old strategy reactivated."]};
+    limitations:["Same reconstructed November cohort; exploratory, not independent holdout. All nine corrected discovery dates are full-universe; repeated stock-days and overlapping patterns are not independent.","21-bar price features require exact dates and all OHLC from audited KRX; 61-bar features use pinned MARCAP plus audited overlap, not fully independent. Stored supply is an estimate.","Calendar before 10/12 comes from pinned MARCAP, 10/12–11/27 from all 35 hash-verified KRX sessions; missing provider dates are explicitly reported, never guessed or filled with fabricated bars. Future expected sessions use fixed weekdays; missing future EOD is not skipped; incomplete horizons excluded from rates.","NEXT_OPEN assumes available fill at recorded open, H-th close exit; DISCOVERY_CLOSE_REFERENCE is not a certified tradable entry. No fees, tax, slippage, intraday sequence or corporate-action certification.","Day-market-turnover-band overlap is descriptive and not a causal adjustment. Thresholds are fixed exploration candidates, not recommendations. No old strategy reactivated."]};
   await mkdir(join(root,'structure'),{recursive:true});
   await writeFile(join(root,'structure','report.json'),JSON.stringify(report,null,2)+'\n');
   const sealed=seal(JSON.stringify({schema:"BLUE_PRICE_STRUCTURE_PRIVATE_V1",cutoff,source:report.source,cases:privateRows}));
@@ -101,6 +118,24 @@ function selfTest(){
  t(report.rows.find(r=>r.entry==="NEXT_OPEN"&&r.horizon===1).same_10day_cohort.complete===0);
  t(!JSON.stringify(report.rows).includes('"code"'));
  t(weekdays('2026-11-27','2026-12-10').length===10&&weekdays('2026-11-27','2026-12-24').length===20);
+ const src=weekdays('2025-01-01',INITIAL),expected=weekdays(AUDIT_START,INITIAL);
+ const proofs=expected.map(day=>({day,eod:"HASH_MATCH",eod_rows:2656,eod_sha256:"a".repeat(64)}));
+ const reconciled=reconcileCalendar(src.filter(d=>d!=="2026-11-27"&&d!=="2026-10-20"),proofs);
+ t(reconciled.proof.source_missing_dates_replaced_by_audited_krx.join(",")==="2026-10-20,2026-11-27");
+ t(reconciled.calendar.join(",")===src.join(",")&&reconciled.proof.audited_days===35);
+ t(reconcileCalendar(src,proofs).proof.source_missing_dates_replaced_by_audited_krx.length===0);
+ const rejects=(fn,error)=>{try{fn();return false}catch(e){return e.message===error}};
+ t(rejects(()=>reconcileCalendar(src,proofs.slice(0,-1)),"STRUCTURE_AUDIT_CALENDAR_INCOMPLETE"));
+ t(rejects(()=>reconcileCalendar(src,[...proofs.slice(0,-1),{...proofs.at(-1),eod:"MISSING"}]),"STRUCTURE_AUDIT_CALENDAR_INCOMPLETE"));
+ t(rejects(()=>reconcileCalendar(src,[...proofs.slice(0,-1),proofs[0]]),"STRUCTURE_AUDIT_CALENDAR_INCOMPLETE"));
+ t(rejects(()=>reconcileCalendar([...src,"2026-11-21"].sort(),proofs),"STRUCTURE_UNEXPECTED_SOURCE_SESSION"));
+ t(rejects(()=>reconcileCalendar([...src,src.at(-1)],proofs),"STRUCTURE_BAD_SOURCE_CALENDAR"));
+ t(rejects(()=>reconcileCalendar(src,[...proofs.slice(0,-1),{...proofs.at(-1),eod_sha256:"invalid"}]),"STRUCTURE_AUDIT_CALENDAR_INCOMPLETE"));
+ const mergedDays=reconciled.calendar.filter(d=>d<=day).slice(-21);
+ const mergedBars=mergedDays.map((t,i)=>({t,o:100+i,h:102+i,l:99+i,c:101+i}));
+ const mergedLookup=d=>{const b=mergedBars.find(x=>x.t===d);return b?{open:b.o,high:b.h,low:b.l,close:b.c}:null};
+ t(classifyHistory({asof:day,bars:mergedBars},day,reconciled.calendar,e.code,mergedLookup,21).status==="ALL_KRX_MATCH");
+ t(classifyHistory({asof:day,bars:mergedBars.filter(b=>b.t!==mergedDays[5])},day,reconciled.calendar,e.code,mergedLookup,21).status!=="ALL_KRX_MATCH");
  let blocked=false;try{guardCutoff('2026-12-10',Date.parse('2026-11-28T00:00Z'))}catch(e){blocked=e.message==="STRUCTURE_CUTOFF_NOT_MATURE"}t(blocked);
  return n;
 }
