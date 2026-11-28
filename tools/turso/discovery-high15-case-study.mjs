@@ -167,9 +167,9 @@ function collectCases(events,days,barAt,outcome){
   const low=observed.reduce((a,b)=>!a||b.bar.low<a.bar.low?b:a,null);
   const windows={ASOF:outcome(e.base,path,barAt)};
   for(const h of [1,3,5])windows[h]=path.length>=h?outcome(e.base,path.slice(0,h),barAt):{status:"UNKNOWN",reason:"HORIZON_NOT_MATURE",complete:false};
-  return {code:e.code,name:e.base.name??null,day:e.day,market:e.base.market,signal_names:e.signalNames,full_universe:e.full,discovery_ohlc:{open:e.base.open,high:e.base.high,low:e.base.low,close:e.base.close},amount_evidence:e.amountEvidence,features:{...e.features,...e.historyFeatures},indicator_values:e.indicatorValues,
+  return {code:e.code,name:e.base.name??null,day:e.day,market:e.base.market,signal_names:e.signalNames,full_universe:e.full,source_record_sha256:e.recordSha,source_payload_sha256:e.payloadSha,discovery_ohlc:{open:e.base.open,high:e.base.high,low:e.base.low,close:e.base.close},amount_evidence:e.amountEvidence,features:{...e.features,...e.historyFeatures},indicator_values:e.indicatorValues,
     screen:{peak_day:peak?.day??null,high:peak?.bar.high??null,low_day:low?.day??null,low:low?.bar.low??null,max_pct:peak?100*(peak.bar.high/e.base.close-1):null,min_pct:low?100*(low.bar.low/e.base.close-1):null,hit:peak?BigInt(peak.bar.high)*100n>=BigInt(e.base.close)*115n:null},windows,
-    future_bars:bars.map(x=>({day:x.day,...(x.bar?{open:x.bar.open,high:x.bar.high,low:x.bar.low,close:x.bar.close}: {missing:true})}))};
+    future_bars:bars.map(x=>({day:x.day,...(x.bar?{open:x.bar.open,high:x.bar.high,low:x.bar.low,close:x.bar.close,amount:x.bar.amount}: {missing:true})}))};
  });
  return {schema:"BLUE_HIGH15_PRIVATE_CASES_V1",start:days[0],cutoff:days.at(-1),cases,notes:["Actual original discovery records, not an investment return. Screen maximum ignores continuity; guarded windows censor gaps. No intraday order known.","Cases include successes and misses, not just selected winners."]};
 }
