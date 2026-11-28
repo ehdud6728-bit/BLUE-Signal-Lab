@@ -110,6 +110,28 @@ test('apply refuses research universe smaller than KRX EOD even when every match
   assert.equal(mock.getClosed(),1);
 });
 
+test('forward cutover rejects legacy payload before DB and permits corrected provenance',async()=>{
+  const {manifest,payload}=fixture();
+  const next='2026-11-30',scope='DAILY_KRX_TARGET_KOSDAQ_GLOBAL_COPY_V1';
+  const rows=payload.toString().trimEnd().split('\n').map(JSON.parse).map(r=>({...r,
+    trade_day:next,run_id:'blue_market_20261130',
+    chart:{...r.chart,asof:next,bars:r.chart.bars.map(b=>({...b,t:next}))}}));
+  const bytes=()=>Buffer.from(rows.map(r=>JSON.stringify(r)+'\n').join(''));
+  const nextManifest={...manifest,day:next,run_id:'blue_market_20261130',payload_sha256:sha(bytes())};
+  const opts={manifest:nextManifest,payload:bytes(),mode:'apply',
+    clientFactory:()=>{throw Error('UNEXPECTED_DB_CALL')}};
+  await assert.rejects(importSignalSnapshot(opts),/TURSO_SIGNAL_GLOBAL_SCOPE_REQUIRED/);
+  await assert.rejects(importSignalSnapshot({...opts,manifest:{...nextManifest,history_scope:scope}}),
+    /TURSO_SIGNAL_GLOBAL_SCOPE_REQUIRED/);
+  for(const r of rows)r.extras.history_scope=scope;
+  const fixed={...nextManifest,history_scope:scope,payload_sha256:sha(bytes())};
+  const mock=mockTurso();
+  const out=await importSignalSnapshot({manifest:fixed,payload:bytes(),mode:'apply',
+    env:{TURSO_DATABASE_URL:'libsql://fake.invalid',TURSO_AUTH_TOKEN:'fake'},clientFactory:()=>mock.client});
+  assert.equal(out.written,2);
+  assert.equal(mock.audits.size,1);
+});
+
 test('only explicitly selected apply mode can create or modify Turso',async()=>{
   const {manifest,payload}=fixture();
   await assert.rejects(importSignalSnapshot({manifest,payload,mode:'apply',env:{}}),

@@ -3,7 +3,7 @@ from datetime import date, datetime, timezone
 from pathlib import Path
 import unittest
 
-from scripts.turso_unified_day_guard import CONFIRM, select_pipeline_day
+from scripts.turso_unified_day_guard import CONFIRM, select_pipeline_day, use_global_scope
 
 
 SCHEDULE_NOW = datetime(2026, 11, 19, 13, 20, tzinfo=timezone.utc)
@@ -20,6 +20,19 @@ class TursoUnifiedPipelineTests(unittest.TestCase):
         self.assertEqual(result, {'TRADE_DAY': '2026-11-19',
                                   'RESEARCH_YEARS': '2025,2026', 'RUN_RESEARCH': 'true',
                                   'RUN_INDICATORS': 'false'})
+
+    def test_global_scope_forward_cutover_preserves_historical_writes(self):
+        for day, mode, expected in (('2026-11-27','dry_run',True),
+                                    ('2026-11-27','apply',False),
+                                    ('2026-11-30','apply',True),
+                                    ('2027-01-04','apply',True)):
+            with self.subTest(day=day, mode=mode):
+                self.assertIs(use_global_scope(day,mode),expected)
+        with self.assertRaises(ValueError):
+            use_global_scope('2026-11-30','auto')
+        eod=EOD.read_text(encoding='utf8')
+        self.assertIn('if [[ "$DAILY_GLOBAL_SCOPE" == "true" ]]',eod)
+        self.assertIn("if os.environ['DAILY_GLOBAL_SCOPE'] == 'true':",eod)
 
     def test_manual_apply_requires_exact_confirmation(self):
         for text in ('', 'yes', 'blue-turso-research-only', f'{CONFIRM} '):

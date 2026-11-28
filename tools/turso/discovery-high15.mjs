@@ -200,6 +200,7 @@ async function readReport(db,holdout=false){
     const raw=String(r.record_json);need(sha(raw)===r.row_sha256,'SIGNAL_ROW_HASH_MISMATCH');hash.update(raw+'\n');
     const base=barAt(day,r.code);need(base&&base.close===Number(r.close_price),'DISCOVERY_EOD_PRICE_MISMATCH');
     const record=JSON.parse(raw),ev=evidence(r,{day,code:r.code,names},base,{details:true});
+    if(holdout)need(record.extras?.history_scope==='DAILY_KRX_TARGET_KOSDAQ_GLOBAL_COPY_V1','HOLDOUT_GLOBAL_SCOPE_REQUIRED');
     const supply=storedContext(raw,base.close).supply;
     const hist=historicalFeatures(base,historyDays,barAt,ev.amount_ratio20);
     const extras=record.extras??{};
@@ -213,7 +214,7 @@ async function readReport(db,holdout=false){
   need(count===n&&nEvents===signalEvents&&hash.digest('hex')===a.source_payload_sha256,'SIGNAL_PAYLOAD_AUDIT_MISMATCH');
   c.payload_hash_recomputed=true;
  }
- if(holdout){need(coverage.every(c=>c.eod==="HASH_MATCH"),"HOLDOUT_EOD_NOT_COMPLETE");need(discoveryDays.every(d=>coverage.find(c=>c.day===d)?.signals==="FULL_RECORDED_UNIVERSE"),"HOLDOUT_SIGNAL_UNIVERSE_NOT_COMPLETE");need(events.length>0,"HOLDOUT_EMPTY");}
+ if(holdout){need(coverage.every(c=>c.eod==="HASH_MATCH"),"HOLDOUT_EOD_NOT_COMPLETE");need(discoveryDays.every(d=>coverage.find(c=>c.day===d)?.signals==="FULL_RECORDED_UNIVERSE"),"HOLDOUT_SIGNAL_UNIVERSE_NOT_COMPLETE");need(discoveryDays.every(d=>events.some(e=>e.day===d)),"HOLDOUT_SCOPE_PROOF_EMPTY_DAY");}
  return {report:buildReport({coverage,events,barAt,historyCoverage,runDays,holdout}),cases:holdout?null:collectCases(events,runDays,barAt,outcome)};
 }
 if(process.argv.includes('--test')){console.log('BLUE_HIGH15_SYNTHETIC_CHECKS',selfTest());console.log('BLUE_HIGH15_CONDITIONAL_CHECKS',conditionalTest());console.log('BLUE_HIGH15_WITHIN_CHECKS',withinTest(compare));console.log('BLUE_HIGH15_CASE_CHECKS',caseTest(compare));console.log('BLUE_HIGH15_CRYPTO_CHECKS',sealTest())}

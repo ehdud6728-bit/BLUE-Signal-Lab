@@ -10,6 +10,8 @@ const CODE=/^[0-9A-Z]{6}$/;
 const HASH=/^[a-f0-9]{64}$/;
 const MAX_BYTES=64_000_000;
 const READ_PAGE=5;
+const GLOBAL_SCOPE_START='2026-11-30';
+const GLOBAL_SCOPE='DAILY_KRX_TARGET_KOSDAQ_GLOBAL_COPY_V1';
 const WRITE_PAGE=4; // Chart evidence can be much larger than an OHLC row.
 const assert=(condition,code)=>{if(!condition)throw Error(code);};
 const sha=(buffer)=>createHash('sha256').update(buffer).digest('hex');
@@ -74,6 +76,10 @@ export async function importSignalSnapshot({manifest,payload,mode='dry_run',env=
   clientFactory=createClient}={}){
   assert(['dry_run','apply'].includes(mode),'INVALID_SIGNAL_SNAPSHOT_MODE');
   const records=verifySignalSnapshot(manifest,payload);
+  if(manifest.history_scope!==undefined || (mode==='apply'&&manifest.day>=GLOBAL_SCOPE_START)){
+    assert(manifest.history_scope===GLOBAL_SCOPE&&records.every(r=>r.extras.history_scope===GLOBAL_SCOPE),
+      'TURSO_SIGNAL_GLOBAL_SCOPE_REQUIRED');
+  }
   if(mode==='dry_run')return {status:'DRY_RUN',day:manifest.day,rows:records.length,written:0};
   const url=String(env.TURSO_DATABASE_URL||'').trim();
   const authToken=String(env.TURSO_AUTH_TOKEN||'').trim();

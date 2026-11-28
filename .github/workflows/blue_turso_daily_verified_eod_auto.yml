@@ -134,7 +134,7 @@ jobs:
         run: |
           INDICATOR_ARGS=()
           SCOPE_ARGS=()
-          if [[ "$MODE" == "dry_run" ]]; then
+          if [[ "$DAILY_GLOBAL_SCOPE" == "true" ]]; then
             SCOPE_ARGS+=(--daily-global-scope)
           fi
           if [[ "$RUN_INDICATORS" == 'true' ]]; then
@@ -156,7 +156,7 @@ jobs:
           assert audit['asof'] == os.environ['TRADE_DAY'], 'RESEARCH_DATE_MISMATCH'
           assert audit['intraday_verified'] is False, 'NOT_VERIFIED_EOD'
           assert audit['observed_stocks'] >= 1700, 'INCOMPLETE_MARKET_UNIVERSE'
-          if os.environ['MODE'] == 'dry_run':
+          if os.environ['DAILY_GLOBAL_SCOPE'] == 'true':
               assert audit.get('scope') == 'DAILY_KRX_TARGET_KOSDAQ_GLOBAL_COPY_V1', 'GLOBAL_SCOPE_MISSING'
               assert audit.get('target_ohlcva_exact') is True and audit.get('unaffected_history_exact') is True, 'GLOBAL_SCOPE_PARITY_FAILED'
               assert audit['observed_stocks'] == audit['target_rows'], 'GLOBAL_SCOPE_UNIVERSE_MISMATCH'

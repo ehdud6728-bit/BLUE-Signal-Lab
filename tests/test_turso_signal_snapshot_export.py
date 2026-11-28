@@ -73,6 +73,23 @@ class ExportDualDbSignalSnapshotTests(unittest.TestCase):
         second = export_snapshot(self.src, self.dst)
         self.assertNotEqual(first['source_audit_sha256'], second['source_audit_sha256'])
 
+    def test_corrected_scope_requires_provenance_and_marks_manifest(self):
+        scope = 'DAILY_KRX_TARGET_KOSDAQ_GLOBAL_COPY_V1'
+        self.audit.update(scope=scope, target_rows=1800,
+                          target_ohlcva_exact=True, unaffected_history_exact=True)
+        self._save_audit()
+        with self.assertRaisesRegex(ValueError, 'INVALID_GLOBAL_SCOPE_PROVENANCE'):
+            export_snapshot(self.src, self.dst)
+        csv_path = self.src / 'signals.csv'
+        lines = csv_path.read_text().splitlines()
+        csv_path.write_text(lines[0] + ',history_scope\n' +
+                            '\n'.join(line + ',' + scope for line in lines[1:]) + '\n')
+        self.assertEqual(export_snapshot(self.src, self.dst)['history_scope'], scope)
+        self.audit['unaffected_history_exact'] = False
+        self._save_audit()
+        with self.assertRaisesRegex(ValueError, 'INVALID_GLOBAL_SCOPE_PROVENANCE'):
+            export_snapshot(self.src, self.dst)
+
     def test_rejects_audit_mismatch(self):
         self.audit['matched_stocks'] = 3
         self._save_audit()
