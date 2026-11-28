@@ -7,7 +7,7 @@ import {reconstructVerifiedDay} from './research-v2-eod-export.mjs';
 import {readReport} from './discovery-high15.mjs';
 import {loadSnapshots,replayAdapter} from './global-corrected-high15-replay.mjs';
 import {compare} from './discovery-high15-conditional.mjs';
-import {structure,evaluate,study,groups,stochastic,classifyHistory,stats} from './price-structure-10-20.mjs';
+import {structure,evaluate,study,groups,stochastic,classifyHistory,stats,classifyOutcome} from './price-structure-10-20.mjs';
 import {seal} from './discovery-high15-case-seal.mjs';
 const PINNED_PAYLOADS={
  '2026-11-16':'07d98a8c245a35bd3a42acf2cfc024cd034c0d04d6cbb4412f44b77208199638',
@@ -76,12 +76,12 @@ async function run(cutoff){
   const events=data.events.map(e=>{const r=records.get(e.day+'/'+e.code);need(r,"STRUCTURE_RECORD_MISSING");
    return {...e,name:e.base.name??r.extras?.name??null,structure:structure(e,r,calendar,data.barAt)}});
   const {privateRows,...result}=study(events,sessions,barAt,compare);
-  const report={schema:"BLUE_PRICE_STRUCTURE_10_20_V1",source:"PINNED_46131165692_CORRECTED_REPLAY_NOT_ACTUAL_DISCOVERIES",source_commit:"ad832658580379c20b8f605797afb10ecfcc690f",cohort_n:events.length,discovery_start:START,discovery_end:"2026-11-26",cutoff,primary_horizon:10,extended_horizon:20,calendar_sha256:sha(JSON.stringify(calendar)),source_calendar_sha256:sha(JSON.stringify(sourceCalendar)),calendar_proof:calendarProof,expected_sessions:sessions,
+  const report={schema:"BLUE_PRICE_STRUCTURE_10_20_V2",source:"PINNED_46131165692_CORRECTED_REPLAY_NOT_ACTUAL_DISCOVERIES",source_commit:"ad832658580379c20b8f605797afb10ecfcc690f",cohort_n:events.length,discovery_start:START,discovery_end:"2026-11-26",cutoff,primary_horizon:10,extended_horizon:20,calendar_sha256:sha(JSON.stringify(calendar)),source_calendar_sha256:sha(JSON.stringify(sourceCalendar)),calendar_proof:calendarProof,expected_sessions:sessions,
     source_hashes:PINNED_YEARS,discovery_payload_sha256:PINNED_PAYLOADS,initial_coverage:[...data.historyCoverage,...data.coverage],future_coverage:futureCoverage,...result,writes:0,
-    limitations:["Same reconstructed November cohort; exploratory, not independent holdout. All nine corrected discovery dates are full-universe; repeated stock-days and overlapping patterns are not independent.","21-bar price features require exact dates and all OHLC from audited KRX; 61-bar features use pinned MARCAP plus audited overlap, not fully independent. Stored supply is an estimate.","Calendar before 10/12 comes from pinned MARCAP, 10/12–11/27 from all 35 hash-verified KRX sessions; missing provider dates are explicitly reported, never guessed or filled with fabricated bars. Future expected sessions use fixed weekdays; missing future EOD is not skipped; incomplete horizons excluded from rates.","NEXT_OPEN assumes available fill at recorded open, H-th close exit; DISCOVERY_CLOSE_REFERENCE is not a certified tradable entry. No fees, tax, slippage, intraday sequence or corporate-action certification.","Day-market-turnover-band overlap is descriptive and not a causal adjustment. Thresholds are fixed exploration candidates, not recommendations. No old strategy reactivated."]};
+    outcome_labels:{TARGET_MET_PROFIT:"달성·수익",TARGET_MET_FLAT:"달성·보합",TARGET_MET_LOSS:"달성 후 실패",TARGET_MISSED_PROFIT:"미달·수익",TARGET_MISSED_FLAT:"미달·보합",TARGET_MISSED_LOSS:"실패(목표 미달 및 종료 손실)"},limitations:["Target attainment and terminal close P/L are separate. Failure here means negative hypothetical horizon close return, not an executed trade; incomplete is excluded. Target-day low is excluded from preceding-session drawdown; same-day high/low order unknown. No new stop or take-profit trading rules.","Same reconstructed November cohort; exploratory, not independent holdout. All nine corrected discovery dates are full-universe; repeated stock-days and overlapping patterns are not independent.","21-bar price features require exact dates and all OHLC from audited KRX; 61-bar features use pinned MARCAP plus audited overlap, not fully independent. Stored supply is an estimate.","Calendar before 10/12 comes from pinned MARCAP, 10/12–11/27 from all 35 hash-verified KRX sessions; missing provider dates are explicitly reported, never guessed or filled with fabricated bars. Future expected sessions use fixed weekdays; missing future EOD is not skipped; incomplete horizons excluded from rates.","NEXT_OPEN assumes available fill at recorded open, H-th close exit; DISCOVERY_CLOSE_REFERENCE is not a certified tradable entry. No fees, tax, slippage, intraday sequence or corporate-action certification.","Day-market-turnover-band overlap is descriptive and not a causal adjustment. Thresholds are fixed exploration candidates, not recommendations. No old strategy reactivated."]};
   await mkdir(join(root,'structure'),{recursive:true});
   await writeFile(join(root,'structure','report.json'),JSON.stringify(report,null,2)+'\n');
-  const sealed=seal(JSON.stringify({schema:"BLUE_PRICE_STRUCTURE_PRIVATE_V1",cutoff,source:report.source,cases:privateRows}));
+  const sealed=seal(JSON.stringify({schema:"BLUE_PRICE_STRUCTURE_PRIVATE_V2",cutoff,source:report.source,cases:privateRows}));
   await writeFile(join(root,'structure','cases.sealed.json'),JSON.stringify(sealed)+'\n');
   console.log('BLUE_PRICE_STRUCTURE_RESULT',JSON.stringify({cohort:events.length,cutoff,history_quality:result.history_quality,complete10:result.rows.find(x=>x.entry==="NEXT_OPEN"&&x.horizon===10).overall.complete,complete20:result.rows.find(x=>x.entry==="NEXT_OPEN"&&x.horizon===20).overall.complete,private_sha256:sealed.payload_sha256,writes:0}));
  }finally{db.close()}
@@ -113,6 +113,30 @@ function selfTest(){
  t(evaluate(base,["d0","d1","d2"],d=>d==="d1"?null:look(d),2,"NEXT_OPEN").reason==="MISSING_BAR");
  t(evaluate(base,["d0","d1","d2"],d=>({...look(d),open:150}),2,"NEXT_OPEN").reason==="PRICE_DISCONTINUITY");
  t(stats([{...base,result:x},{...base,result:{complete:false}}]).targets[15].hits===1);
+ // Exactly six disjoint completed outcome categories, plus incomplete.
+ const make=(hit,exit)=>({complete:true,entry:100,exit,first:Object.fromEntries([3,5,7,10,15,20].map(t=>[t,hit?1:null]))});
+ t(classifyOutcome(make(true,101))==="TARGET_MET_PROFIT");
+ t(classifyOutcome(make(true,100))==="TARGET_MET_FLAT");
+ t(classifyOutcome(make(true,99))==="TARGET_MET_LOSS");
+ t(classifyOutcome(make(false,101))==="TARGET_MISSED_PROFIT");
+ t(classifyOutcome(make(false,100))==="TARGET_MISSED_FLAT");
+ t(classifyOutcome(make(false,99))==="TARGET_MISSED_LOSS");
+ t(classifyOutcome({complete:false})===null);
+ const riskPath=[{market:"KOSPI",open:100,high:114,low:92,close:105},{market:"KOSPI",open:105,high:120,low:90,close:110},{market:"KOSPI",open:110,high:112,low:94,close:97}];
+ const riskResult=evaluate(base,["d0","d1","d2","d3"],d=>riskPath[Number(d.slice(1))-1],3,"NEXT_OPEN");
+ t(riskResult.outcome15==="TARGET_MET_LOSS"&&riskResult.risk.target15_then_later_close_below_entry);
+ t(riskResult.risk.downside_first[5]===1&&riskResult.risk.downside_first[10]===2);
+ t(Math.abs(riskResult.risk.pre_target15_prior_sessions_low_pct+8)<1e-9);
+ t(riskResult.risk.target15_and_downside_same_session[10]===true&&riskResult.risk.first_negative_close===3);
+ const rec=stats([{...base,result:riskResult},{...base,result:x},{...base,result:{complete:false}}]);
+ t(rec.complete===2&&rec.unknown===1&&rec.outcome_summary.loss.n===1&&rec.outcome_summary.profit.n===1);
+ t(rec.outcome_summary.target15_hit_then_close_loss_given_hit.denominator===2&&rec.outcome_summary.target15_hit_then_close_loss_given_hit.rate_pct===50);
+ t(Object.values(rec.outcome_summary.by_target).every(v=>Object.values(v).reduce((n,c)=>n+c.n,0)===rec.complete));
+ t(rec.outcome_summary.downside_targets[10].n===1);
+ const empty=stats([{...base,result:{complete:false}}]);
+ t(empty.outcome_summary.loss.rate_pct===null&&empty.outcome_summary.target15_hit_then_close_loss_given_hit.rate_pct===null);
+ const sameDay=evaluate(base,["d0","d1"],()=>({market:"KOSPI",open:100,high:115,low:95,close:100}),1,"NEXT_OPEN");
+ t(sameDay.outcome15==="TARGET_MET_FLAT"&&sameDay.risk.pre_target15_prior_sessions_low_pct===null&&sameDay.risk.target15_then_later_close_below_entry===false&&sameDay.risk.target15_and_downside_same_session[5]);
  const report=study([base],["d0","d1","d2"],look,compare);
  t(report.rows.find(r=>r.entry==="NEXT_OPEN"&&r.horizon===10).overall.complete===0);
  t(report.rows.find(r=>r.entry==="NEXT_OPEN"&&r.horizon===1).same_10day_cohort.complete===0);
