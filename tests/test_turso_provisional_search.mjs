@@ -241,7 +241,8 @@ test('today transition bypasses stale date gate, keeps Turso source and refreshe
  assert.ok(web.includes("const source=todaySearch||confirmedReadOnly?'turso':patternBackend"));
  assert.ok(web.includes("if(live.data_status==='VERIFIED_EOD_AVAILABLE')confirmedTodayReady=true"));
  assert.ok(web.includes("if(!confirmedTodayReady&&queryMode==='single'"));
- assert.ok(web.includes("if(!todaySearch&&!confirmedReadOnly&&source==='turso'&&r.status>=500"));
+ // Optional research filter must additionally prohibit fallback to D1.
+ assert.ok(web.includes("if(!selectedResearchTip&&!todaySearch&&!confirmedReadOnly&&source==='turso'&&r.status>=500&&querySort!=='recommended'&&!effectiveAiOnly)"));
  assert.ok(web.includes("if(!busy&&mode==='single'&&date===todayKST())void search(1,false)"));
 });
 
