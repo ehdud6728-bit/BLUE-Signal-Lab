@@ -4,7 +4,7 @@ on:
     inputs:
       mode:
         type: choice
-        options: [classification, theme_probe]
+        options: [classification, theme_probe, theme_members]
         default: classification
         required: true
   pull_request:
@@ -16,7 +16,7 @@ permissions:
 jobs:
   source:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -33,7 +33,9 @@ jobs:
           KRX_DATA_PW: ${{ secrets.KRX_DATA_PW || secrets.KRX_PW }}
           MODE: ${{ inputs.mode }}
         run: |
-          if [ "$MODE" = theme_probe ]; then
+          if [ "$MODE" = theme_members ]; then
+            python scripts/research_dated_classification.py --theme-members --output output/classification/theme-members.json
+          elif [ "$MODE" = theme_probe ]; then
             python scripts/research_dated_classification.py --theme-probe --output output/classification/theme-probe.json
           else
             python scripts/research_dated_classification.py --output output/classification/source.json
@@ -41,7 +43,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.repository == 'ehdud6728-bit/BLUE-Signal-Lab'
         with:
-          name: ${{ inputs.mode == 'theme_probe' && 'BLUE_DATED_THEME_PROBE' || 'BLUE_DATED_CLASSIFICATION_SOURCE' }}
+          name: ${{ inputs.mode == 'theme_members' && 'BLUE_DATED_THEME_MEMBERS' || inputs.mode == 'theme_probe' && 'BLUE_DATED_THEME_PROBE' || 'BLUE_DATED_CLASSIFICATION_SOURCE' }}
           path: output/classification/*.json
           if-no-files-found: error
           retention-days: 7
