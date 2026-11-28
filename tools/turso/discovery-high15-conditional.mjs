@@ -72,4 +72,4 @@ function conditionalTest(){
  t(!JSON.stringify(s).includes("000001"));
  return n;
 }
-export {study,conditionalTest};
+export {study,conditionalTest,compare};
