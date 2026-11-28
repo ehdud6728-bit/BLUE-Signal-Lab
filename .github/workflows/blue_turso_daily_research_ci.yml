@@ -23,6 +23,8 @@ on:
       - 'scripts/market_scan_r06.py'
       - 'scripts/market_scan_r08_diagnostics.py'
       - 'scripts/market_scan_r11.py'
+      - 'scripts/daily_global_history_scope.py'
+      - 'tests/test_daily_global_history_scope.py'
       - 'scripts/turso_history_replay_source.py'
       - 'scripts/turso_verified_eod_range.py'
       - 'tests/test_market_scan.py'
@@ -65,6 +67,7 @@ jobs:
           python -m pip install --disable-pip-version-check --quiet numpy pandas requests
           python -m unittest discover -s tests -p 'test_market_scan.py' -v
           python -m unittest discover -s tests -p 'test_market_scan_r11.py' -v
+          python -m unittest discover -s tests -p 'test_daily_global_history_scope.py' -v
           python -m unittest discover -s tests -p 'test_turso_history_replay_source.py' -v
           python -m unittest discover -s tests -p 'test_turso_verified_eod_range.py' -v
           python -m unittest discover -s tests -p 'test_turso_parallel_pattern_scan.py' -v
