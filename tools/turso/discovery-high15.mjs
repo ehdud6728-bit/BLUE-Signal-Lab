@@ -215,8 +215,11 @@ async function readReport(db,holdout=false){
   c.payload_hash_recomputed=true;
  }
  if(holdout){need(coverage.every(c=>c.eod==="HASH_MATCH"),"HOLDOUT_EOD_NOT_COMPLETE");need(discoveryDays.every(d=>coverage.find(c=>c.day===d)?.signals==="FULL_RECORDED_UNIVERSE"),"HOLDOUT_SIGNAL_UNIVERSE_NOT_COMPLETE");need(discoveryDays.every(d=>events.some(e=>e.day===d)),"HOLDOUT_SCOPE_PROOF_EMPTY_DAY");}
- return {report:buildReport({coverage,events,barAt,historyCoverage,runDays,holdout}),cases:holdout?null:collectCases(events,runDays,barAt,outcome)};
+ const data={coverage,events,barAt,historyCoverage,runDays,holdout};
+ return {report:buildReport(data),cases:holdout?null:collectCases(events,runDays,barAt,outcome),data};
 }
+export {readReport,buildReport};
+if(process.argv[1]&&import.meta.url===new URL('file://'+process.argv[1]).href){
 if(process.argv.includes('--test')){console.log('BLUE_HIGH15_SYNTHETIC_CHECKS',selfTest());console.log('BLUE_HIGH15_CONDITIONAL_CHECKS',conditionalTest());console.log('BLUE_HIGH15_WITHIN_CHECKS',withinTest(compare));console.log('BLUE_HIGH15_CASE_CHECKS',caseTest(compare));console.log('BLUE_HIGH15_CRYPTO_CHECKS',sealTest())}
 else{
  let db;
@@ -232,4 +235,6 @@ else{
   if(holdout){console.log('BLUE_HIGH15_HOLDOUT',JSON.stringify({eligible_n:report.frozen_study[3].eligible_n,rules:report.frozen_study[3].rules.length,writes:0}))}
   else{const s=report.windows.ASOF.all_recorded;console.log('BLUE_HIGH15_AGGREGATE',JSON.stringify({n:s.n,complete:s.complete,hits:s.hits,partial_hits:s.partial_hits,misses:s.misses,unknown:s.unknown,unique_hit_stocks:s.unique_hit_stocks,writes:0}));}
  }catch(e){console.error('BLUE_HIGH15_FAILED',/^[A-Z_]+$/.test(e?.message||'')?e.message:'SANITIZED_FAILURE');process.exitCode=1}finally{db?.close()}
+}
+
 }
