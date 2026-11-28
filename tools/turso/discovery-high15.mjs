@@ -109,10 +109,11 @@ function buildReport(data){
    unique_hit_stocks:new Set(rows.filter(r=>r.hit===true).map(r=>r.code)).size});
  const screen_metric={...screenSummary(screenRows),by_day:DAYS.slice(0,-1).map(day=>({day,...screenSummary(screenRows.filter(r=>r.day===day))})),
    note:"Search-style observed maximum, not a completed outcome; no path continuity or corporate-action guard."};
- const amount_audit_issue_counts={};for(const e of events)if(e.amountAudit!=="MATCH")for(const issue of e.amountEvidence?.issues??[])amount_audit_issue_counts[issue]=(amount_audit_issue_counts[issue]||0)+1;
+ const issueSummary=rows=>{const statuses={},issues={};for(const e of rows){const status=e.amountAudit??"NOT_CHECKED";statuses[status]=(statuses[status]||0)+1;if(status!=="MATCH")for(const issue of e.amountEvidence?.issues??[])issues[issue]=(issues[issue]||0)+1}return {n:rows.length,statuses,issues}};
+ const amount_audit_issue_counts={all_recorded:issueSummary(events),full_universe_3d_complete:issueSummary(evaluate(3).filter(e=>e.full&&e.result.complete))};
  return {schema:"BLUE_DISCOVERY_HIGH15_V1",conditional,within_signal,frozen_study:frozen,amount_audit_issue_counts,history_coverage:historyCoverage,screen_metric,start:DAYS[0],end:DAYS.at(-2),cutoff:DAYS.at(-1),target_pct:15,
    reference:"STORED_DISCOVERY_CLOSE_MATCHED_TO_KRX_EOD",future:"LATER_EOD_HIGH_ONLY",expected_sessions:DAYS,
-   coverage,windows,limitations:["Recorded V1 discovery rows only; partial scanner universe reported separately; V2 replay not substituted.","Fixed weekday session list; independent calendar verification pending.","Corporate actions and outside-source price verification pending; gaps >=40% censored.","ASOF follow-up differs by date; compare equal 1/3/5 session windows and date groups.","Feature comparisons descriptive, overlapping stock-days, not independent validation or investment returns.","Stored technical factors are not independently recomputed from provider prices.","Prior-to-hit low excludes hit-day low because intraday order is unknown.","No stock identifiers or raw quotes in artifact."]};
+   coverage,windows,limitations:["Recorded V1 discovery rows only; partial scanner universe reported separately; V2 replay not substituted.","Fixed weekday session list; independent calendar verification pending.","Corporate actions and outside-source price verification pending; gaps >=40% censored.","ASOF follow-up differs by date; compare equal 1/3/5 session windows and date groups.","Feature comparisons descriptive, overlapping stock-days, not independent validation or investment returns.","Stored technical factors are not independently recomputed from provider prices.","Prior-to-hit low excludes hit-day low because intraday order is unknown.","No stock identifiers or raw quotes in public aggregate; separate private ciphertext only."]};
 }
 
 function selfTest(){
@@ -140,6 +141,8 @@ function selfTest(){
  const gap=buildReport({coverage:[],events:[{...ev,day:DAYS[0]}],barAt:(day)=>day===DAYS[2]?b(115):undefined});
  t(gap.screen_metric.observed_hits===1&&gap.screen_metric.incomplete_hits===1&&gap.windows.ASOF.all_recorded.unknown===1);
  t(!JSON.stringify(r).includes(base.code));
+ const hv={...ev,day:HOLDOUT_DAYS[9]};const hr=buildReport({coverage:[],events:[hv],barAt:()=>b(115),runDays:HOLDOUT_DAYS,holdout:true});
+ t(hr.frozen_study[5].eligible_n===1&&hr.end==="2026-12-11"&&!hr.windows&&!hr.within_signal);
  return count;
 }
 
@@ -200,7 +203,7 @@ async function readReport(db,holdout=false){
     const supply=storedContext(raw,base.close).supply;
     const hist=historicalFeatures(base,historyDays,barAt,ev.amount_ratio20);
     const extras=record.extras??{};
-    const event={day,code:r.code,base,full,signalNames:names,amountRatio:ev.amount_ratio20,amountAudit:hist.audit,storedAmount:extras.traded_amount_krw,chartDates:record.chart?.bars?.slice(-21).map(b=>b.t),
+    const event={day,code:r.code,base,full,recordSha:r.row_sha256,payloadSha:a.source_payload_sha256,signalNames:names,amountRatio:ev.amount_ratio20,amountAudit:hist.audit,storedAmount:extras.traded_amount_krw,chartDates:record.chart?.bars?.slice(-21).map(b=>b.t),
       indicatorValues:Object.fromEntries(["rsi","rsi_signal","rsi_gc","slow_12_5_5_k","slow_12_5_5_d","slow_12_5_5_gc","slow_20_12_12_k","slow_20_12_12_d","slow_20_12_12_gc","macd_12_26_9","macd_signal_9","ma20","ma40","ma60"].map(k=>[k,extras[k]??null])),
       features:features(base,record,ev,supply,market),historyFeatures:{...hist.features,supply_grade_stored:supply.status==="STORED_ESTIMATE"&&supply.grade?supply.grade:"UNKNOWN"}};
     event.amountEvidence=amountEvidence(event,historyDays,barAt);events.push(event);
