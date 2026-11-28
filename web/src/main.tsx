@@ -3,6 +3,7 @@ import {RECENT_ASOF,RECENT_RECOMMENDATIONS} from './recent-pattern-data';
 import RecentPatternReference from './RecentPatternReference';
 import StockResearchReference from './StockResearchReference';
 import ExploratorySearchTip from './ExploratorySearchTip';
+import StockCardClassification from './StockCardClassification';
 import RecentPatternRanking from './RecentPatternRanking';
 import ResearchCenter, {ResearchProfitability, type ResearchTab} from './ResearchCenter';
 import HighReturnProfiles from './HighReturnProfiles';
@@ -548,6 +549,7 @@ function App(){
         throw Error('연구 중 패턴 필터는 Turso 확정 기술 패턴 검색에서만 지원됩니다. 필터를 해제하거나 확정 자료를 선택해 주세요.');
       const u=new URL(API+(source==='turso'?'/api/research/search':'/api/search'));
       if(selectedResearchTip)u.searchParams.set('research_tip',researchTip);
+      if(source==='turso')u.searchParams.set('include_classification','1');
       u.searchParams.set('mode',queryMode);
       if(queryMode==='single')u.searchParams.set('date',queryDate);
       else {u.searchParams.set('start',start);u.searchParams.set('end',end);}
@@ -577,6 +579,7 @@ function App(){
         }
         const liveSort=querySort==='amount_surge'||querySort==='amount_decline'||querySort==='recommended'?querySort:'recent';
         provisionalUrl.searchParams.set('sort',liveSort);
+        provisionalUrl.searchParams.set('include_classification','1');
         if(effectiveAiOnly)provisionalUrl.searchParams.set('ai_only','1');
         provisionalUrl.searchParams.set('min_pattern_n',String(patternOverride?.minSamples??patternSampleMin));
         provisionalUrl.searchParams.set('highlight_up',effectiveHighlightMin===null?'off':String(effectiveHighlightMin));
@@ -1316,7 +1319,7 @@ function App(){
                 <section className="blue-pc-stock-id">
                   <div className="blue-pc-stock-heading">
                     <div><button type="button" className="blue-pc-stock-name" onClick={()=>openDetail(r)}>{displayName(r)} <ChevronRight size={16}/></button>
-                      <div className="blue-pc-stock-date">{r.code} · {r.day}</div></div>
+                      <div className="blue-pc-stock-date">{r.code} · {r.day}</div><StockCardClassification code={r.code} name={displayName(r)} day={r.day} extras={r.extras}/></div>
                     <button type="button" className={'r151-quick-add '+(inBasket(r)?'saved':'')}
                    title={inBasket(r)?'이미 담긴 종목':basketBlocked(r)}
                    aria-label={`${displayName(r)} ${inBasket(r)?'장바구니에 담김':basketBlocked(r)}`}
@@ -1367,7 +1370,7 @@ function App(){
               <div className="stock-card" role="button" tabIndex={0} onClick={()=>openDetail(r)}
                 onKeyDown={e=>{if(e.target===e.currentTarget&&(e.key==='Enter'||e.key===' ')){e.preventDefault();openDetail(r);}}}
                 aria-label={`${displayName(r)} 상세 분석 보기`}>
-              <div className="stock-top"><div className="stock-identity"><strong>{displayName(r)}</strong><span>{r.code} <span className="stock-dot">·</span> {r.day}</span></div><div className="stock-price"><b>{money(r.close_price)}<small>원</small></b><span>{r.provisional?'KIS 관측가':'종가'}</span></div><ChevronRight size={19} className="stock-chevron"/></div>
+              <div className="stock-top"><div className="stock-identity"><strong>{displayName(r)}</strong><span>{r.code} <span className="stock-dot">·</span> {r.day}</span><StockCardClassification code={r.code} name={displayName(r)} day={r.day} extras={r.extras}/></div><div className="stock-price"><b>{money(r.close_price)}<small>원</small></b><span>{r.provisional?'KIS 관측가':'종가'}</span></div><ChevronRight size={19} className="stock-chevron"/></div>
               {goldEvidenceBlock(r)}
               {storageMode==='turso'&&searchSource==='patterns'&&patternBackend==='turso'&&<ExploratorySearchTip day={r.day} extras={r.extras} provisional={r.provisional}/>}
               {(!r.provisional||recentMatch(r))&&<RecentPatternReference provisional={r.provisional} day={r.day} signals={r.signals} matched={recentMatch(r)} features={researchFeatures(r)} onDetails={storageMode==="turso"?()=>{setAiResearchTab(recentMatch(r)?"recommend":"ranking");nav("ai");}:undefined}/>}
