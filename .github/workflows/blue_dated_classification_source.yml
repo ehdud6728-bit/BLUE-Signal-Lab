@@ -1,0 +1,35 @@
+name: BLUE Dated Industry and Theme Source (READ ONLY)
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'scripts/research_dated_classification.py'
+      - '.github/workflows/blue_dated_classification_source.yml'
+permissions:
+  contents: read
+jobs:
+  source:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install 'pykrx==1.2.9'
+      - run: python scripts/research_dated_classification.py --test
+      - name: Retrieve requested historical classifications
+        if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.repository == 'ehdud6728-bit/BLUE-Signal-Lab'
+        env:
+          KRX_ID: ${{ secrets.KRX_DATA_ID || secrets.KRX_ID }}
+          KRX_PW: ${{ secrets.KRX_DATA_PW || secrets.KRX_PW }}
+          KRX_DATA_ID: ${{ secrets.KRX_DATA_ID || secrets.KRX_ID }}
+          KRX_DATA_PW: ${{ secrets.KRX_DATA_PW || secrets.KRX_PW }}
+        run: python scripts/research_dated_classification.py --output output/classification/source.json
+      - uses: actions/upload-artifact@v4
+        if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.repository == 'ehdud6728-bit/BLUE-Signal-Lab'
+        with:
+          name: BLUE_DATED_CLASSIFICATION_SOURCE
+          path: output/classification/source.json
+          if-no-files-found: error
+          retention-days: 7
