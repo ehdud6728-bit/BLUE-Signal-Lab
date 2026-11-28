@@ -15,11 +15,21 @@ function historicalFeatures(base,days,barAt,stored){
  // Use only exact audited KRX rows; missing calendar dates are not silently skipped.
  f.prior_3d_amount_rising=flag(three?three[2].amount<three[1].amount&&three[1].amount<three[0].amount:null);
  f.prior_5d_amount_mean_vs_previous5=flag(ten?avg(ten.slice(0,5))>=1.5*avg(ten.slice(5)):null);
- f.prior_5d_amount_surge=flag(five?five.some(b=>b.amount>=base.amount/2):null);
+ f.prior_5d_amount_at_least_half_signal=flag(five?five.some(b=>b.amount>=base.amount/2):null);
  f.ratio_ge3_recomputed=flag(audit==="MATCH"?r>=3:null);
  f.ratio_5_10_recomputed=flag(audit==="MATCH"?r>=5&&r<10:null);
  f.prior_ratio_ge1_5=flag(r1===null||r3===null||r5===null?null:r1>=1.5&&r3>=1.5&&r5>=1.5);
  f.ratio_rising_5_3_1_0=flag(audit!=="MATCH"||r1===null||r3===null||r5===null?null:r5<r3&&r3<r1&&r1<r);
+ const maNow=range(1,19),maPrior=range(5,24);
+ const meanClose=a=>a.reduce((sum,b)=>sum+b.close,0)/a.length;
+ const maSlope=maNow&&maPrior&&good(base)?100*(meanClose([base,...maNow])/meanClose(maPrior)-1):null;
+ f.ma20_slope_5d=maSlope===null?"UNKNOWN":maSlope< -0.5?"FALLING":maSlope>0.5?"RISING":"FLAT";
+ if(ten&&ten.every(b=>Number.isSafeInteger(b.high)&&Number.isSafeInteger(b.low)&&b.high>=b.close&&b.low<=b.close&&b.low>0)){
+  const hi=Math.max(...ten.map(b=>b.high)),lo=Math.min(...ten.map(b=>b.low));
+  const distHi=100*(hi/base.close-1),distLo=100*(base.close/lo-1);
+  const distance=v=>v<0?"BREAK":v<3?"LT3":v<10?"3_10":"GE10";
+  f.prior_10d_high_distance=distance(distHi);f.prior_10d_low_distance=distance(distLo);
+ }else{f.prior_10d_high_distance="UNKNOWN";f.prior_10d_low_distance="UNKNOWN"}
  for(const n of [3,5,10]){
   const a=range(1,n);
   const contiguous=a&&[base,...a].every((b,j,all)=>j===all.length-1||Math.abs(b.open/all[j+1].close-1)<.4);
@@ -46,17 +56,18 @@ function contrast(rows,key,val,compare){
 function withinSignalStudy(rows,compare){
  const valid=rows.filter(e=>e.full&&e.result.complete);
  const keys=[...new Set(valid.flatMap(e=>Object.keys(e.features)))].filter(k=>!k.startsWith("signal_")&&k!=="market"&&k!=="market_breadth").sort();
+ const featureCoverage=cohort=>Object.fromEntries(keys.map(k=>[k,cohort.filter(e=>e.features[k]!==undefined&&e.features[k]!=="UNKNOWN").length]));
  const byFeature=cohort=>keys.flatMap(key=>[...new Set(cohort.map(e=>e.features[key]).filter(v=>v!==undefined&&v!=="UNKNOWN"))].sort().map(v=>contrast(cohort,key,v,compare)));
  const result=patterns.map(p=>{
   const cohort=valid.filter(e=>e.features["signal_"+p]==="YES");
   const single=cohort.filter(e=>e.signalNames?.length===1);
-  return {pattern:p,baseline:summary(cohort),single_signal:summary(single),multiple_signal:summary(cohort.filter(e=>e.signalNames?.length>1)),additional_features:byFeature(cohort),
+  return {pattern:p,baseline:summary(cohort),single_signal:summary(single),multiple_signal:summary(cohort.filter(e=>e.signalNames?.length>1)),feature_known_counts:featureCoverage(cohort),additional_features:byFeature(cohort),
    // Keep co-occurrence out of the additional-feature section.
    co_signals:patterns.filter(q=>q!==p).map(q=>contrast(cohort,"signal_"+q,"YES",compare))};
  });
  const audit={};for(const e of valid){const k=e.amountAudit??"NOT_CHECKED";audit[k]=(audit[k]||0)+1}
  return {schema:"BLUE_HIGH15_WITHIN_SIGNAL_V1",baseline:summary(valid),excluded:rows.length-valid.length,ratio_audit:audit,
-  additional_features_all:byFeature(valid),patterns:result,notes:["Base signal membership is never used as an additional feature. All 16 search flags and signal count are excluded there.","Cohorts overlap; do not add their counts. Co-signals are separate.","Only complete outcome and full scanner-universe dates. Same-day and market overlap weighting, not causal effects.","Historical features use fixed expected dates and hash-verified KRX rows; missing days or unmatched ratios are unknown, not zero.","Stored technical factors remain distinct from independently recalculated turnover ratio."]};
+  feature_known_counts:featureCoverage(valid),additional_features_all:byFeature(valid),patterns:result,notes:["Base signal membership is never used as an additional feature. All 16 search flags and signal count are excluded there.","Cohorts overlap; do not add their counts. Co-signals are separate.","Only complete outcome and full scanner-universe dates. Same-day and market overlap weighting, not causal effects.","Historical features use fixed expected dates and hash-verified KRX rows; missing days or unmatched ratios are unknown, not zero.","Stored technical factors remain distinct from independently recalculated turnover ratio."]};
 }
 
 function withinTest(compare){
