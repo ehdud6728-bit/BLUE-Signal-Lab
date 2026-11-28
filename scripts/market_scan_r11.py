@@ -496,6 +496,8 @@ def main():
                    help="Reuse original byte-verified previous v2 KRX days, no new provider calls")
     p.add_argument("--research-v2-global-scope", action="store_true",
                    help="V2 only: include the 50 pinned KOSDAQ GLOBAL histories")
+    p.add_argument("--daily-global-scope", action="store_true",
+                   help="Verified daily target only: project KOSDAQ GLOBAL history in analysis copy")
     p.add_argument("--reuse-target-eod-dir", default="",
                    help="Reuse the already verified daily KRX target if history needs no other missing weekdays")
     p.add_argument("--daily-provider", choices=["auto", "openapi", "pykrx"], default="auto")
@@ -507,6 +509,8 @@ def main():
                    help="Active KRX symbols per parallel research partition (1..1000)")
     p.add_argument("--diagnose-code", default="", help="optional six-character ticker; research-only as-of signal audit")
     args = p.parse_args()
+    if args.daily_global_scope and (not args.reuse_target_eod_dir or args.verified_eod_dir or args.research_v2_global_scope or args.targeted_history_dir or args.prior_eod_root or args.date == "latest"):
+        raise ValueError("GLOBAL_SCOPE_REQUIRES_EXACT_DAILY_TARGET")
     raw, hashes = load_marcap([int(x) for x in args.years.split(",")], args.local_data_dir)
     targeted_history_sha = None
     if args.targeted_history_dir:
@@ -559,6 +563,12 @@ def main():
             force_exact_day=bool(args.turso_indicators_out))
     else:
         upgraded, days, target_source = raw, [], "FinanceData/marcap daily"
+    if args.daily_global_scope:
+        from daily_global_history_scope import prepare_verified_daily_scope
+        daily_verified, _ = load_verified_day(args.reuse_target_eod_dir, target)
+        upgraded, market_scope = prepare_verified_daily_scope(upgraded, daily_verified, target)
+        verified_count = len(daily_verified)
+        print("BLUE_DAILY_GLOBAL_SCOPE", json.dumps(market_scope), flush=True)
     # Keep the independently date-verified raw candles intact. Adjust only
     # the analysis working copy, with a traceable company-IR event registry.
     analysis_raw, corporate_actions_audit = adjust_verified_actions(upgraded, target)
@@ -572,6 +582,8 @@ def main():
         row["source"] = target_source
         row["data_frequency"] = "EOD_DAILY"
         row["intraday_verified"] = False
+        if args.daily_global_scope:
+            row["history_scope"] = market_scope["scope"]
     audit.update({
         "target_day_source": target_source,
         "supplemental_dates": days,

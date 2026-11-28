@@ -3,7 +3,7 @@ import sys
 from pathlib import Path
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]/"scripts"))
 import pandas as pd
-from daily_global_history_scope import project_daily_global
+from daily_global_history_scope import project_daily_global, prepare_verified_daily_scope
 from market_scan import normalise
 from daily_global_history_preflight import compare_history
 
@@ -47,4 +47,28 @@ class GlobalScopeTests(unittest.TestCase):
         ref[days[0]]={}
         self.assertEqual(compare_history("000001",days[-1],clean,days[:-1],ref)["official_no_usable_trade_rows"],1)
         self.assertFalse(compare_history("000001",days[-1],clean,days[:-1],ref)["prior20_exact_krx"])
+    def full_fixture(self):
+        day="2026-11-19"
+        verified=pd.DataFrame([row(f"{i:06d}",day,"KOSDAQ" if i<=850 else "KOSPI") for i in range(1,1701)])
+        history=pd.DataFrame([row("000001","2026-11-18","KOSDAQ GLOBAL"),row("001700","2026-11-18","KOSPI")])
+        return pd.concat([history,verified],ignore_index=True),verified,day
+    def test_verified_daily_full_target_preserved(self):
+        raw,verified,day=self.full_fixture()
+        result,audit=prepare_verified_daily_scope(raw,verified,day)
+        self.assertEqual(audit["valid_prior_rows_restored"],1)
+        self.assertEqual(audit["target_rows"],1700)
+        self.assertTrue(audit["target_ohlcva_exact"])
+        self.assertTrue(audit["unaffected_history_exact"])
+        self.assertEqual(raw.Market.iloc[0],"KOSDAQ GLOBAL")
+        self.assertEqual(result.Market.iloc[0],"KOSDAQ")
+    def test_verified_daily_reject_target_amount_mismatch(self):
+        raw,verified,day=self.full_fixture()
+        raw.loc[raw.Date.eq(day)&raw.Code.eq("000001"),"Amount"]=101
+        with self.assertRaisesRegex(ValueError,"GLOBAL_SCOPE_TARGET_PARITY"):
+            prepare_verified_daily_scope(raw,verified,day)
+    def test_verified_daily_reject_target_missing_symbol(self):
+        raw,verified,day=self.full_fixture()
+        raw=raw.loc[~(raw.Date.eq(day)&raw.Code.eq("000001"))]
+        with self.assertRaisesRegex(ValueError,"GLOBAL_SCOPE_TARGET_PARITY"):
+            prepare_verified_daily_scope(raw,verified,day)
 if __name__=="__main__":unittest.main()
