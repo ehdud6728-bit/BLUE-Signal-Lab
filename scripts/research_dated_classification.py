@@ -8,6 +8,8 @@ import io
 import json
 import re
 import time
+import math
+from datetime import date, timedelta
 from pathlib import Path
 
 DAYS=("2026-11-16","2026-11-17","2026-11-18","2026-11-19","2026-11-20","2026-11-23","2026-11-24","2026-11-25","2026-11-26")
@@ -156,6 +158,46 @@ def collect_theme_members(stock,wait=time.sleep,days=DAYS):
     return {"schema":"BLUE_DATED_THEME_MEMBERS_V1","source":"KRX_VIA_PYKRX_1_2_9","requested_days":list(days),"coverage":coverage,"groups":groups,"writes":0,
         "limitations":["Provider catalog/name metadata may be current; dated member request without fallback does not independently prove historical membership.","All constituent lists must be joined to dated KRX universe and checked for date/identity before use. Unknown groups are not nonmembership.","KRX theme index family is not an exhaustive commercial theme taxonomy. No DB writes or performance ranking."]}
 
+PRIOR_DAYS=("2026-11-09","2026-11-10","2026-11-11","2026-11-12","2026-11-13")
+def expected_index_days():
+    # Exact weekdays within the already audited 2026-10-12..11-26 interval.
+    start=date(2026,10,12);end=date(2026,11,26)
+    return [(start+timedelta(days=i)).isoformat() for i in range((end-start).days+1) if (start+timedelta(days=i)).weekday()<5]
+
+def context_source(stock,wait=time.sleep):
+    rows=[];coverage=[];indices=[]
+    for day in PRIOR_DAYS:
+        for market in MARKETS:
+            wait(1.1)
+            try:
+                a=normalize(stock.get_market_sector_classifications(day.replace("-",""),market),day,market)
+                rows.extend(a)
+                coverage.append({"day":day,"market":market,"status":"RECEIVED_NOT_PRICE_VERIFIED","rows":len(a),"classified":sum(r["industry"] is not None for r in a),"sha256":hashlib.sha256(canonical(a)).hexdigest()})
+            except Exception as exc:
+                coverage.append({"day":day,"market":market,"status":"UNAVAILABLE","rows":0,"exception_type":type(exc).__name__})
+    dates=expected_index_days()
+    for market,code,labels in (("KOSPI","1001",("코스피","코스피지수","KOSPI")),("KOSDAQ","2001",("코스닥","코스닥지수","KOSDAQ"))):
+        item={"market":market,"index_code":code,"status":"UNAVAILABLE","series":[]}
+        try:
+            wait(1.1)
+            name=stock.get_index_ticker_name(code)
+            need(isinstance(name,str) and name.replace(" ","").upper() in labels,"INDEX_IDENTITY")
+            wait(1.1)
+            df=stock.get_index_ohlcv(dates[0].replace("-",""),dates[-1].replace("-",""),code)
+            need("종가" in df.columns,"INDEX_COLUMNS")
+            series=[]
+            for ix,val in df["종가"].items():
+                d=ix.strftime("%Y-%m-%d");p=float(val)
+                need(math.isfinite(p) and p>0,"INDEX_PRICE")
+                series.append({"day":d,"close":p})
+            need([x["day"] for x in series]==dates,"INDEX_CALENDAR_MISMATCH")
+            item.update(name=name,status="RECEIVED_NOT_INDEPENDENTLY_VERIFIED",series=series,sha256=hashlib.sha256(canonical(series)).hexdigest())
+        except Exception as exc:
+            item.update(reason=str(exc) if type(exc) is ValueError and str(exc) in ("INDEX_IDENTITY","INDEX_COLUMNS","INDEX_PRICE","INDEX_CALENDAR_MISMATCH") else "INDEX_UNAVAILABLE",exception_type=type(exc).__name__)
+        indices.append(item)
+    return {"schema":"BLUE_MARKET_CONTEXT_SOURCE_V1","source":"KRX_VIA_PYKRX_1_2_9","requested_prior_days":list(PRIOR_DAYS),"expected_index_days":dates,"industry_coverage":coverage,"industry_rows":rows,"indices":indices,"writes":0,
+        "limitations":["Prior five dates only, not a replacement for previously frozen nine dates.","Official index close series requested with exact calendar and identity, independent price verification still needed.","Equal-weight breadth is distinct from official index trend; no future outcomes or recommendations."]}
+
 def self_test():
     import pandas as pd
     d=pd.DataFrame({"종목명":["테스트"]*400,"업종명":["서비스업"]*399+["0"],"종가":[100]*400},index=[str(i).zfill(6) for i in range(400)])
@@ -210,12 +252,27 @@ def self_test():
         def get_index_portfolio_deposit_file(self,*args,**kwargs): raise AssertionError("must not call")
     m=collect_theme_members(MissingNames(),lambda _:None,days=[DAYS[0]])
     assert all(x["reason"]=="NAME_UNAVAILABLE" for x in m["groups"])
-    print("BLUE_DATED_CLASSIFICATION_TESTS 18")
+    class Context(Fake):
+        def get_index_ticker_name(self,code):return {"1001":"코스피","2001":"코스닥"}[code]
+        def get_index_ohlcv(self,start,end,code):
+            assert start=="20261012" and end=="20261126"
+            return pd.DataFrame({"종가":[100.0]*len(expected_index_days())},index=pd.to_datetime(expected_index_days()))
+    ctx=context_source(Context(),lambda _:None)
+    assert len(ctx["industry_coverage"])==10 and len(ctx["industry_rows"])==4000
+    assert len(expected_index_days())==34 and all(len(x["series"])==34 for x in ctx["indices"])
+    class BadCalendar(Context):
+        def get_index_ohlcv(self,*args):return super().get_index_ohlcv(*args).iloc[:-1]
+    assert all(x["reason"]=="INDEX_CALENDAR_MISMATCH" for x in context_source(BadCalendar(),lambda _:None)["indices"])
+    class BadIdentity(Context):
+        def get_index_ticker_name(self,code):return "다른 지수"
+    assert all(x["reason"]=="INDEX_IDENTITY" for x in context_source(BadIdentity(),lambda _:None)["indices"])
+    print("BLUE_DATED_CLASSIFICATION_TESTS 22")
 if __name__=="__main__":
     p=argparse.ArgumentParser()
     p.add_argument("--test",action="store_true")
     p.add_argument("--theme-probe",action="store_true")
     p.add_argument("--theme-members",action="store_true")
+    p.add_argument("--context-source",action="store_true")
     p.add_argument("--output",type=Path)
     args=p.parse_args()
     if args.test:self_test()
@@ -223,10 +280,12 @@ if __name__=="__main__":
         need(args.output is not None,"OUTPUT_REQUIRED")
         with contextlib.redirect_stdout(io.StringIO()),contextlib.redirect_stderr(io.StringIO()):
             from pykrx import stock
-            result=collect_theme_members(stock) if args.theme_members else theme_probe(stock) if args.theme_probe else collect(stock)
+            result=context_source(stock) if args.context_source else collect_theme_members(stock) if args.theme_members else theme_probe(stock) if args.theme_probe else collect(stock)
         args.output.parent.mkdir(parents=True,exist_ok=True)
         args.output.write_bytes(canonical(result)+b"\n")
-        if args.theme_members:
+        if args.context_source:
+            print("BLUE_MARKET_CONTEXT_SOURCE_RESULT",json.dumps({"coverage":result["industry_coverage"],"indices":[{k:v for k,v in x.items() if k!="series"} | {"count":len(x["series"])} for x in result["indices"]],"writes":0},ensure_ascii=False))
+        elif args.theme_members:
             print("BLUE_DATED_THEME_MEMBERS_RESULT",json.dumps({"coverage":result["coverage"],"writes":0},ensure_ascii=False))
         elif args.theme_probe:
             print("BLUE_DATED_THEME_PROBE_RESULT",json.dumps({"checks":[{k:v for k,v in row.items() if k not in ("index_codes","sample")} for row in result["checks"]],"writes":0},ensure_ascii=False))
