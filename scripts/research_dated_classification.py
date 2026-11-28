@@ -52,9 +52,9 @@ def theme_catalog(stock,day):
         need(clean(label),"THEME_NAME_INVALID")
         rows.append({"index_code":code,"name":label.strip()})
     return sorted(rows,key=lambda x:x["index_code"])
-def collect(stock,wait=time.sleep):
+def collect(stock,wait=time.sleep,days=DAYS):
     industries=[];catalogs=[];coverage=[]
-    for day in DAYS:
+    for day in days:
         for market in MARKETS:
             wait(1.1)
             try:
@@ -69,7 +69,7 @@ def collect(stock,wait=time.sleep):
             catalogs.append({"day":day,"status":"RECEIVED_CATALOG_ONLY","indices":rows,"sha256":hashlib.sha256(canonical(rows)).hexdigest()})
         except Exception:
             catalogs.append({"day":day,"status":"UNAVAILABLE","indices":[]})
-    return {"schema":"BLUE_DATED_CLASSIFICATION_SOURCE_V1","source":"KRX_VIA_PYKRX_1_2_9","requested_days":list(DAYS),"industry_coverage":coverage,"industry_rows":industries,"theme_catalogs":catalogs,"writes":0,"limitations":["Requested-date classification; verify close against immutable KRX EOD before joining. No current KIS master fallback.","Theme catalogs are NOT constituent lists; no stock theme membership asserted.","Missing classification is unknown; no inference from company name."]}
+    return {"schema":"BLUE_DATED_CLASSIFICATION_SOURCE_V1","source":"KRX_VIA_PYKRX_1_2_9","requested_days":list(days),"industry_coverage":coverage,"industry_rows":industries,"theme_catalogs":catalogs,"writes":0,"limitations":["Requested-date classification; verify close against immutable KRX EOD before joining. No current KIS master fallback.","Theme catalogs are NOT constituent lists; no stock theme membership asserted.","Missing classification is unknown; no inference from company name."]}
 def probe_index_scope(stock,day,scope,wait=time.sleep):
     # Diagnose retrieval, list validity and name lookup separately. Never
     # print raw provider payloads, exceptions, URLs or account information.
