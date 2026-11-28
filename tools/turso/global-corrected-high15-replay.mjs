@@ -70,11 +70,14 @@ async function run(){
   const common=DAYS.filter(d=>orig.report.coverage.find(c=>c.day===d)?.signals==='FULL_RECORDED_UNIVERSE');
   need(common.length>0,'REPLAY_NO_COMMON_DAYS');
   const subset=x=>buildReport({...x.data,events:x.data.events.filter(e=>common.includes(e.day))});
-  const before=subset(orig),after=subset(replay);
+  const markReplay=r=>({...r,schema:'BLUE_DISCOVERY_HIGH15_CORRECTED_REPLAY_V1',
+    reference:'REPLAY_DISCOVERY_CLOSE_MATCHED_TO_KRX_EOD',
+    limitations:['Corrected reconstructed historical records; NOT original actual discoveries.',...r.limitations.filter(x=>!x.startsWith('Recorded V1 discovery rows only'))]});
+  const before=subset(orig),after=markReplay(subset(replay));
   const report={schema:'BLUE_GLOBAL_CORRECTED_HIGH15_REPLAY_V1',writes:0,source_scope:SCOPE,
     day_sources:[...snapshots].map(([day,s])=>({day,source_sha256_by_year:s.audit.source_sha256_by_year,source_audit_sha256:s.manifest.source_audit_sha256,payload_sha256:s.manifest.payload_sha256,restored_rows:s.audit.valid_prior_rows_restored,affected_codes:s.audit.changed_codes})),
     membership:membership(orig.cases.cases,replay.cases.cases),common_full_universe_days:common,
-    original_recorded:orig.report,corrected_replay:replay.report,
+    original_recorded:orig.report,corrected_replay:markReplay(replay.report),
     same_full_dates:{original:before,corrected:after},
     limitations:['Reconstructed historical signals, NOT original discoveries; current immutable-in-run MARCAP bytes can differ from historical source.','Original 11/16 and 11/17 partial scanner universe handled separately; compare same full dates.','No new conditions selected. Fixed outcomes and original frozen hypotheses; not independent holdout.','Corporate actions, long historical prices and actual execution not independently certified.','No writes to Turso or D1.']};
   await mkdir(join(root,'public'),{recursive:true});
@@ -85,14 +88,21 @@ async function run(){
   console.log('BLUE_GLOBAL_REPLAY_RESULT',JSON.stringify({original:orig.cases.cases.length,replay:replay.cases.cases.length,common_days:common.length,private_sha256:sealed.payload_sha256,writes:0}));
  }finally{db.close()}
 }
-function selfTest(){
+async function selfTest(){
  let n=0;const t=x=>{need(x,'REPLAY_TEST_FAILED');n++};
  const w={complete:true,status:'HIT'},a=(code,signals)=>({day:DAYS[0],code,signal_names:signals,windows:{1:w,3:w,5:w,ASOF:w}});
  const m=membership([a('A',['ENV20']),a('B',['BB40'])],[a('A',['ENV40']),a('C',['BB40'])])[0];
  t(m.retained===1&&m.added===1&&m.removed===1&&m.changed_signal_names===1);
  t(m.added_outcomes['3'].hits===1&&m.removed_outcomes['3'].complete===1);
  t(!JSON.stringify(m).includes('"code"'));
+ let forwarded=0;
+ const adapter=replayAdapter({execute:async()=>{forwarded++;return {rows:[]}}},new Map([[DAYS[0],{rows:[{trade_day:DAYS[0],code:'000001',raw:'fixture',row_sha256:'a'}],manifest:{observed_stocks:1700,signal_events:1,payload_sha256:'hash'}}]]));
+ t((await adapter.execute({sql:'SELECT row_count FROM blue_research_signal_audit_v1',args:[DAYS[0]]})).rows[0].row_count===1);
+ t((await adapter.execute({sql:'SELECT code FROM blue_research_signals_v1',args:[DAYS[0],5,0]})).rows[0].record_json==='fixture');
+ t((await adapter.execute({sql:'SELECT code FROM blue_research_signals_v1',args:[DAYS[0],5,5]})).rows.length===0);
+ await adapter.execute({sql:'SELECT code FROM blue_eod_daily_v1',args:[DAYS[0]]});t(forwarded===1);
+ let blocked=false;try{await adapter.execute({sql:'DELETE FROM blue_research_signals_v1',args:[]})}catch(e){blocked=e.message==='REPLAY_SELECT_ONLY'}t(blocked&&forwarded===1);
  return n;
 }
-if(process.argv.includes('--test'))console.log('BLUE_GLOBAL_REPLAY_TESTS',selfTest());
+if(process.argv.includes('--test'))console.log('BLUE_GLOBAL_REPLAY_TESTS',await selfTest());
 else run().catch(e=>{console.error('BLUE_GLOBAL_REPLAY_FAILED',/^[A-Z_]+$/.test(e?.message||'')?e.message:'SANITIZED_FAILURE');process.exitCode=1});
