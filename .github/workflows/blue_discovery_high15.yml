@@ -4,6 +4,7 @@ on:
     paths:
       - 'tools/turso/discovery-high15.mjs'
       - 'tools/turso/discovery-high15-conditional.mjs'
+      - 'tools/turso/discovery-high15-within-signal.mjs'
       - '.github/workflows/blue_discovery_high15.yml'
   workflow_dispatch:
 permissions:
