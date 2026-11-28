@@ -97,6 +97,26 @@ function structure(event,record,calendar,barAt){
  return {features:f,raw,history21:short.status,history61:long.status,audited61:long.checked??0};
 }
 const horizons=[1,2,3,4,5,6,7,8,9,10,15,20],targets=[3,5,7,10,15,20];
+const outcomeLabels=["TARGET_MET_PROFIT","TARGET_MET_FLAT","TARGET_MET_LOSS","TARGET_MISSED_PROFIT","TARGET_MISSED_FLAT","TARGET_MISSED_LOSS"];
+// Target achievement (intraday high) and horizon close P/L are orthogonal.
+function classifyOutcome(result,target=15){
+ if(!result.complete)return null;
+ const hit=result.first[target]!==null;
+ return (hit?"TARGET_MET_":"TARGET_MISSED_")+(result.exit>result.entry?"PROFIT":result.exit<result.entry?"LOSS":"FLAT");
+}
+function pathRisk(path,p,first){
+ const downside_first={};
+ for(const t of targets){
+  const i=path.findIndex(b=>BigInt(b.low)*100n<=BigInt(p)*BigInt(100-t));
+  downside_first[t]=i<0?null:i+1;
+ }
+ const first15=first[15],before=first15===null?[]:path.slice(0,first15-1);
+ return {downside_first,pre_target15_prior_sessions_low_pct:before.length?pct(Math.min(...before.map(b=>b.low)),p):null,
+  target15_then_later_close_below_entry:first15===null?null:path.slice(first15).some(b=>b.close<p),
+  target15_and_downside_same_session:Object.fromEntries(targets.map(t=>[t,first15!==null&&downside_first[t]===first15])),
+  first_negative_close:(()=>{const i=path.findIndex(b=>b.close<p);return i<0?null:i+1})(),
+  peak_to_final_close_pct:pct(path.at(-1).close,Math.max(...path.map(b=>b.high)))};
+}
 function evaluate(e,sessions,barAt,h,entry){
  const index=sessions.indexOf(e.day);if(index<0)throw Error("STRUCTURE_DISCOVERY_CALENDAR");
  const days=sessions.slice(index+1,index+1+h),base=e.base;
@@ -111,14 +131,27 @@ function evaluate(e,sessions,barAt,h,entry){
  if(!Number.isSafeInteger(p)||p<=0)throw Error("STRUCTURE_ENTRY_PRICE");
  const high=Math.max(...path.map(b=>b.high)),low=Math.min(...path.map(b=>b.low));
  const first={};for(const t of targets){const i=path.findIndex(b=>BigInt(b.high)*100n>=BigInt(p)*BigInt(100+t));first[t]=i<0?null:i+1}
- return {complete:true,entry:p,exit:path.at(-1).close,return_pct:pct(path.at(-1).close,p),max_pct:pct(high,p),min_pct:pct(low,p),first,opening_gap_pct:pct(path[0].open,base.close)};
+ const result={complete:true,entry:p,exit:path.at(-1).close,return_pct:pct(path.at(-1).close,p),max_pct:pct(high,p),min_pct:pct(low,p),first,opening_gap_pct:pct(path[0].open,base.close)};
+ return {...result,outcome15:classifyOutcome(result),risk:pathRisk(path,p,first)};
+}
+function outcomeStats(a,agg){
+ const count=flag=>a.filter(x=>flag(x.result)).length;
+ const metric=n=>({n,rate_pct:a.length?r4(100*n/a.length):null});
+ const per_target=Object.fromEntries(targets.map(t=>[t,Object.fromEntries(outcomeLabels.map(label=>[label,metric(count(r=>classifyOutcome(r,t)===label))]))]));
+ const hits=a.filter(x=>x.result.first[15]!==null);
+ return {by_target:per_target,profit:metric(count(r=>r.exit>r.entry)),flat:metric(count(r=>r.exit===r.entry)),loss:metric(count(r=>r.exit<r.entry)),
+  target15_hit_then_close_loss:metric(count(r=>classifyOutcome(r)==="TARGET_MET_LOSS")),
+  target15_hit_then_close_loss_given_hit:{n:count(r=>classifyOutcome(r)==="TARGET_MET_LOSS"),denominator:hits.length,rate_pct:hits.length?r4(100*count(r=>classifyOutcome(r)==="TARGET_MET_LOSS")/hits.length):null},
+  downside_targets:Object.fromEntries(targets.map(t=>[t,{...metric(count(r=>r.risk.downside_first[t]!==null)),first_day:agg(a.map(x=>x.result.risk.downside_first[t]).filter(x=>x!==null))}])),
+  prior_sessions_low_before_target15:agg(hits.map(x=>x.result.risk.pre_target15_prior_sessions_low_pct).filter(x=>x!==null)),
+  peak_to_final_close:agg(a.map(x=>x.result.risk.peak_to_final_close_pct))};
 }
 function stats(rows){
  const a=rows.filter(x=>x.result.complete),ret=a.map(x=>x.result.return_pct);
  const med=xs=>{if(!xs.length)return null;const s=[...xs].sort((a,b)=>a-b),i=Math.floor(s.length/2);return s.length%2?s[i]:(s[i-1]+s[i])/2};
  const agg=xs=>({mean:xs.length?r4(mean(xs)):null,median:r4(med(xs)??NaN)});
  return {n:rows.length,complete:a.length,unknown:rows.length-a.length,stocks:new Set(a.map(x=>x.code)).size,dates:new Set(a.map(x=>x.day)).size,
-  positive_close:a.filter(x=>x.result.return_pct>0).length,close_return:agg(ret),max_return:agg(a.map(x=>x.result.max_pct)),min_return:agg(a.map(x=>x.result.min_pct)),
+  positive_close:a.filter(x=>x.result.return_pct>0).length,outcome_summary:outcomeStats(a,agg),close_return:agg(ret),max_return:agg(a.map(x=>x.result.max_pct)),min_return:agg(a.map(x=>x.result.min_pct)),
   targets:Object.fromEntries(targets.map(t=>{const hits=a.filter(x=>x.result.first[t]!==null);return [t,{hits:hits.length,rate_pct:a.length?r4(100*hits.length/a.length):null,first_day:agg(hits.map(x=>x.result.first[t]))}]}))};
 }
 function ratioBand(e){if(e.amountAudit!=="MATCH"||!numeric(e.amountRatio)||e.amountRatio<0)return null;return band(e.amountRatio,[1,3,5,10],["LT1","1_3","3_5","5_10","GE10"])}
@@ -128,8 +161,13 @@ function contrast(rows,key,value,compare){
  const tagged=valid.map(e=>({...e,result:{...e.result,status:e.result.first[15]!==null?"HIT":"MISS"}}));
  const matched=compare(tagged,flag),known=tagged.filter(e=>ratioBand(e)!==null).map(e=>({...e,base:{...e.base,market:e.base.market+"|"+ratioBand(e)}}));
  const amountAdjusted=compare(known,flag);
+ const relabel=(cohort,predicate)=>cohort.map(e=>({...e,result:{...e.result,status:predicate(e.result)?"HIT":"MISS"}}));
+ const loss=r=>r.exit<r.entry,profit=r=>r.exit>r.entry;
+ const lossMatched=compare(relabel(tagged,loss),flag),lossAmount=compare(relabel(known,loss),flag);
+ const profitMatched=compare(relabel(tagged,profit),flag),profitAmount=compare(relabel(known,profit),flag);
  return {key,value,source_tier:groups[key]===21?"RECENT_KRX_OHLC_MATCH":groups[key]===61?"PINNED_61_WITH_KRX_OVERLAP":"STORED_ESTIMATE_NOT_INDEPENDENT",yes:stats(yes),no:stats(no),unknown:valid.length-yes.length-no.length,
   day_market_overlap:matched.overlap,day_market_amount_overlap:amountAdjusted.overlap,amount_known_n:known.length,
+  loss_day_market_overlap:lossMatched.overlap,loss_day_market_amount_overlap:lossAmount.overlap,profit_day_market_overlap:profitMatched.overlap,profit_day_market_amount_overlap:profitAmount.overlap,
   small_sample:matched.small_sample||new Set(yes.map(x=>x.code)).size<30||new Set(no.map(x=>x.code)).size<30};
 }
 function study(events,sessions,barAt,compare){
@@ -159,4 +197,4 @@ function study(events,sessions,barAt,compare){
  const known=cohort=>Object.fromEntries(Object.keys({...groups,...extraGroups}).map(k=>[k,cohort.filter(e=>e.structure.features[k]!==undefined&&e.structure.features[k]!=="UNKNOWN").length]));
  return {history_quality:{recent21:counts("history21"),long61:counts("history61")},feature_known_counts:known(events),feature_known_by_pattern:patterns.map(pattern=>({pattern,n:events.filter(e=>e.signalNames.includes(pattern)).length,known:known(events.filter(e=>e.signalNames.includes(pattern)))})),rows,privateRows};
 }
-export {structure,evaluate,study,groups,stochastic,classifyHistory,stats};
+export {structure,evaluate,study,groups,stochastic,classifyHistory,stats,classifyOutcome};
