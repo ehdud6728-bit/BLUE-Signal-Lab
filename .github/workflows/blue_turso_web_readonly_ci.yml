@@ -4,6 +4,7 @@ on:
   pull_request:
     paths:
       - 'web/src/**'
+      - 'tests/test_exploratory_search_tip.mjs'
       - 'web/package*.json'
       - 'web/tsconfig*.json'
       - 'web/src/turso-research-reader.ts'
@@ -86,7 +87,7 @@ jobs:
         working-directory: worker
         run: npm install --no-package-lock --no-audit --no-fund
       - name: Verify Turso-first browser API read contracts (no credentials)
-        run: node --experimental-strip-types --test tests/test_research_gold_highlight.mjs tests/test_stock_research_reference.mjs tests/test_stock_research_synthesis.mjs tests/test_stock_observation_context.mjs tests/test_combined_pattern_match.mjs tests/test_turso_research_reader.mjs tests/test_turso_research_api.mjs tests/test_turso_private_combined_cases.mjs tests/test_turso_research_request.mjs tests/test_turso_research_request_route.mjs tests/test_turso_research_progress.mjs tests/test_turso_basket_browser.mjs tests/test_turso_tracking_registry.mjs tests/test_basket_tracking_limits.mjs tests/test_basket_compact_actions.mjs tests/test_basket_immediate_quick_add.mjs tests/test_turso_basket_prices.mjs tests/test_turso_provisional_search.mjs tests/test_turso_market_rotation.mjs tests/test_basket_top_basis.mjs tests/test_stop_loss_r15107.mjs tests/test_basket_observed_low.mjs tests/test_turso_market_ai.mjs tests/test_turso_forward_view.mjs
+        run: node --experimental-strip-types --test tests/test_exploratory_search_tip.mjs tests/test_research_gold_highlight.mjs tests/test_stock_research_reference.mjs tests/test_stock_research_synthesis.mjs tests/test_stock_observation_context.mjs tests/test_combined_pattern_match.mjs tests/test_turso_research_reader.mjs tests/test_turso_research_api.mjs tests/test_turso_private_combined_cases.mjs tests/test_turso_research_request.mjs tests/test_turso_research_request_route.mjs tests/test_turso_research_progress.mjs tests/test_turso_basket_browser.mjs tests/test_turso_tracking_registry.mjs tests/test_basket_tracking_limits.mjs tests/test_basket_compact_actions.mjs tests/test_basket_immediate_quick_add.mjs tests/test_turso_basket_prices.mjs tests/test_turso_provisional_search.mjs tests/test_turso_market_rotation.mjs tests/test_basket_top_basis.mjs tests/test_stop_loss_r15107.mjs tests/test_basket_observed_low.mjs tests/test_turso_market_ai.mjs tests/test_turso_forward_view.mjs
       - name: Install browser build dependencies
         working-directory: web
         run: npm install --no-package-lock --no-audit --no-fund
