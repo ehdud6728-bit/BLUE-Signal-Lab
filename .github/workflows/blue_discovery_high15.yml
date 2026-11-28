@@ -3,6 +3,7 @@ on:
   pull_request:
     paths:
       - 'tools/turso/discovery-high15.mjs'
+      - 'tools/turso/discovery-high15-conditional.mjs'
       - '.github/workflows/blue_discovery_high15.yml'
   workflow_dispatch:
 permissions:
