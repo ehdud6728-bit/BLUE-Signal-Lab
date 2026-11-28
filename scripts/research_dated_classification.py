@@ -35,12 +35,17 @@ def normalize(df,day,market):
         industry=sector.strip() if clean(sector) and sector.strip() not in ("0","-","미분류") else None
         rows.append({"day":day,"market":market,"code":code,"name":name.strip(),"industry":industry,"close":p})
     return sorted(rows,key=lambda x:x["code"])
+def valid_index_code(code,scope):
+    # Theme identifier can contain a provider group prefix. Keep it opaque;
+    # never coerce to int, pad, strip or infer a replacement.
+    return isinstance(code,str) and bool(re.fullmatch(r"[0-9A-Za-z]{4,12}" if scope=="테마" else r"[0-9]{4,6}",code))
+
 def theme_catalog(stock,day):
     codes=stock.get_index_ticker_list(day.replace("-",""),market="테마")
     need(isinstance(codes,list) and 0<len(codes)<=600 and len(codes)==len(set(codes)),"THEME_CATALOG_INVALID")
     rows=[]
     for code in codes:
-        need(isinstance(code,str) and re.fullmatch(r"[0-9]{4,6}",code),"THEME_CODE_INVALID")
+        need(valid_index_code(code,"테마"),"THEME_CODE_INVALID")
         label=stock.get_index_ticker_name(code)
         need(clean(label),"THEME_NAME_INVALID")
         rows.append({"index_code":code,"name":label.strip()})
@@ -81,8 +86,10 @@ def probe_index_scope(stock,day,scope,wait=time.sleep):
         row["reason"]="LIST_EMPTY";return row
     if len(codes)>600:
         row["reason"]="LIST_TOO_LARGE";return row
-    if any(not isinstance(code,str) or not re.fullmatch(r"[0-9]{4,6}",code) for code in codes):
-        row["reason"]="LIST_CODE_FORMAT";return row
+    if any(not valid_index_code(code,scope) for code in codes):
+        row["reason"]="LIST_CODE_FORMAT"
+        row["invalid_shapes"]=[{"type":type(code).__name__,"length":len(code) if isinstance(code,str) else None,"ascii_alnum":code.isascii() and code.isalnum() if isinstance(code,str) else False} for code in codes if not valid_index_code(code,scope)][:10]
+        return row
     if len(set(codes))!=len(codes):
         row["reason"]="LIST_DUPLICATE";return row
     row.update(stage="NAME",status="CATALOG_LIST_RECEIVED",index_codes=sorted(codes),list_sha256=hashlib.sha256(canonical(sorted(codes))).hexdigest())
@@ -108,6 +115,46 @@ def theme_probe(stock,wait=time.sleep):
     rows=[probe_index_scope(stock,day,scope,wait) for day in (DAYS[0],DAYS[-1]) for scope in ("테마","KRX","KOSPI","KOSDAQ")]
     return {"schema":"BLUE_DATED_THEME_PROBE_V1","source":"KRX_VIA_PYKRX_1_2_9","checks":rows,"writes":0,
         "limitations":["Only first and last discovery dates and up to five name lookups per scope/date.","Requested date is not an independent historical membership proof.","KRX family includes broad and other indices; never classify all as themes.","No constituent membership, no investment results, no DB write."]}
+
+def collect_theme_members(stock,wait=time.sleep,days=DAYS):
+    # Dates are explicit; never substitute the latest constituents or a
+    # previous trading day. The endpoint returns codes, not effective dates.
+    # Keep historical identity and independent verification unresolved.
+    groups=[];coverage=[];names={}
+    for day in days:
+        wait(1.1)
+        try:
+            codes=stock.get_index_ticker_list(day.replace("-",""),market="테마")
+            need(isinstance(codes,list) and 0<len(codes)<=100 and all(valid_index_code(c,"테마") for c in codes) and len(set(codes))==len(codes),"THEME_LIST_INVALID")
+        except Exception as exc:
+            coverage.append({"day":day,"status":"CATALOG_UNAVAILABLE","exception_type":type(exc).__name__,"catalog_count":0,"members_received":0})
+            continue
+        n=0
+        for code in sorted(codes):
+            row={"day":day,"index_code":code,"name":None,"status":"UNAVAILABLE","members":[]}
+            if code not in names:
+                wait(1.1)
+                try:
+                    label=stock.get_index_ticker_name(code)
+                    if clean(label):names[code]=label.strip()
+                except Exception:
+                    pass
+            if code not in names:
+                row["reason"]="NAME_UNAVAILABLE";groups.append(row);continue
+            row["name"]=names[code]
+            wait(1.1)
+            try:
+                members=stock.get_index_portfolio_deposit_file(code,day.replace("-",""),alternative=False)
+                need(isinstance(members,list) and 0<len(members)<=3000 and all(isinstance(c,str) and CODE.fullmatch(c) for c in members) and len(set(members))==len(members),"THEME_MEMBERS_INVALID")
+                members=sorted(members)
+                row.update(status="REQUESTED_DATE_MEMBERS_UNVERIFIED",members=members,member_count=len(members),sha256=hashlib.sha256(canonical(members)).hexdigest())
+                n+=1
+            except Exception as exc:
+                row.update(reason="MEMBERS_UNAVAILABLE_OR_INVALID",exception_type=type(exc).__name__)
+            groups.append(row)
+        coverage.append({"day":day,"status":"REQUESTED_DATE_SOURCE_ONLY" if n==len(codes) else "PARTIAL_OR_UNAVAILABLE","catalog_count":len(codes),"members_received":n,"catalog_sha256":hashlib.sha256(canonical(sorted(codes))).hexdigest()})
+    return {"schema":"BLUE_DATED_THEME_MEMBERS_V1","source":"KRX_VIA_PYKRX_1_2_9","requested_days":list(days),"coverage":coverage,"groups":groups,"writes":0,
+        "limitations":["Provider catalog/name metadata may be current; dated member request without fallback does not independently prove historical membership.","All constituent lists must be joined to dated KRX universe and checked for date/identity before use. Unknown groups are not nonmembership.","KRX theme index family is not an exhaustive commercial theme taxonomy. No DB writes or performance ranking."]}
 
 def self_test():
     import pandas as pd
@@ -144,11 +191,31 @@ def self_test():
         def get_index_ticker_list(self,date,market): raise RuntimeError("PRIVATE_PROVIDER_DETAIL")
     probe=probe_index_scope(CallFail(),DAYS[0],"테마",lambda _:None)
     assert probe["reason"]=="LIST_CALL_FAILED" and "PRIVATE_PROVIDER_DETAIL" not in json.dumps(probe)
-    print("BLUE_DATED_CLASSIFICATION_TESTS 12")
+    class Alpha(Fake):
+        def get_index_ticker_list(self,date,market): return ["A123","0012"] if market=="테마" else ["1234"]
+        def get_index_portfolio_deposit_file(self,code,date,alternative=True):
+            assert alternative is False and date=="20261116" and code in ("A123","0012")
+            return ["000002","000001"]
+    assert valid_index_code("A123","테마") and not valid_index_code("A123","KRX") and not valid_index_code("../A123","테마")
+    assert [x["index_code"] for x in theme_catalog(Alpha(),DAYS[0])]==["0012","A123"]
+    assert probe_index_scope(Alpha(),DAYS[0],"테마",lambda _:None)["count"]==2
+    m=collect_theme_members(Alpha(),lambda _:None,days=[DAYS[0]])
+    assert m["coverage"][0]["members_received"]==2 and all(x["members"]==["000001","000002"] and x["status"]=="REQUESTED_DATE_MEMBERS_UNVERIFIED" for x in m["groups"])
+    class BadMembers(Alpha):
+        def get_index_portfolio_deposit_file(self,code,date,alternative=True): return ["000001","000001"]
+    m=collect_theme_members(BadMembers(),lambda _:None,days=[DAYS[0]])
+    assert m["coverage"][0]["members_received"]==0 and all(x["members"]==[] for x in m["groups"])
+    class MissingNames(Alpha):
+        def get_index_ticker_name(self,code): return None
+        def get_index_portfolio_deposit_file(self,*args,**kwargs): raise AssertionError("must not call")
+    m=collect_theme_members(MissingNames(),lambda _:None,days=[DAYS[0]])
+    assert all(x["reason"]=="NAME_UNAVAILABLE" for x in m["groups"])
+    print("BLUE_DATED_CLASSIFICATION_TESTS 18")
 if __name__=="__main__":
     p=argparse.ArgumentParser()
     p.add_argument("--test",action="store_true")
     p.add_argument("--theme-probe",action="store_true")
+    p.add_argument("--theme-members",action="store_true")
     p.add_argument("--output",type=Path)
     args=p.parse_args()
     if args.test:self_test()
@@ -156,9 +223,11 @@ if __name__=="__main__":
         need(args.output is not None,"OUTPUT_REQUIRED")
         with contextlib.redirect_stdout(io.StringIO()),contextlib.redirect_stderr(io.StringIO()):
             from pykrx import stock
-            result=theme_probe(stock) if args.theme_probe else collect(stock)
+            result=collect_theme_members(stock) if args.theme_members else theme_probe(stock) if args.theme_probe else collect(stock)
         args.output.parent.mkdir(parents=True,exist_ok=True)
         args.output.write_bytes(canonical(result)+b"\n")
-        if args.theme_probe:
+        if args.theme_members:
+            print("BLUE_DATED_THEME_MEMBERS_RESULT",json.dumps({"coverage":result["coverage"],"writes":0},ensure_ascii=False))
+        elif args.theme_probe:
             print("BLUE_DATED_THEME_PROBE_RESULT",json.dumps({"checks":[{k:v for k,v in row.items() if k not in ("index_codes","sample")} for row in result["checks"]],"writes":0},ensure_ascii=False))
         else: print("BLUE_DATED_CLASSIFICATION_RESULT",json.dumps({"coverage":result["industry_coverage"],"theme_catalogs":[{"day":c["day"],"status":c["status"],"count":len(c["indices"])} for c in result["theme_catalogs"]],"writes":0},ensure_ascii=False))
