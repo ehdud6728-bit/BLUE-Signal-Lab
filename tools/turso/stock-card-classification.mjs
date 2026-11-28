@@ -45,21 +45,28 @@ export function prepareCardSnapshot(day,source,themes,eod,auditHash){
  }
  for(const market of markets)need(counts[market]?.eligible>=400&&5*counts[market].matched>=4*counts[market].eligible,'CARD_COVERAGE_TOO_LOW');
  const catalogs=source.theme_catalogs.filter(x=>x.day===day),groups=themes.groups.filter(x=>x.day===day),coverage=themes.coverage.filter(x=>x.day===day);
- need(catalogs.length===1&&catalogs[0].status==='RECEIVED_CATALOG_ONLY'&&sha(canonical(catalogs[0].indices))===catalogs[0].sha256&&coverage.length===1&&groups.length===coverage[0].catalog_count&&groups.length>0&&groups.length<=100,'CARD_THEME_CATALOG');
- const ids=catalogs[0].indices.map(x=>x.index_code).sort(),groupIds=groups.map(x=>x.index_code).sort();
- need(new Set(ids).size===ids.length&&JSON.stringify(ids)===JSON.stringify(groupIds)&&sha(canonical(ids))===coverage[0].catalog_sha256,'CARD_THEME_IDENTITY');
+ need(catalogs.length===1&&coverage.length===1&&groups.length===coverage[0].catalog_count&&groups.length>0&&groups.length<=100,'CARD_THEME_CATALOG');
+ const groupIds=groups.map(x=>x.index_code).sort();
+ need(new Set(groupIds).size===groupIds.length&&sha(canonical(groupIds))===coverage[0].catalog_sha256,'CARD_THEME_IDENTITY');
+ // The frozen industry run predates the alphanumeric theme-code fix.
+ // Its catalog was unavailable; the later separate constituent run has its own catalog digest.
+ const catalogChecked=catalogs[0].status==='RECEIVED_CATALOG_ONLY';
+ if(catalogChecked){
+  const ids=catalogs[0].indices.map(x=>x.index_code).sort();
+  need(sha(canonical(catalogs[0].indices))===catalogs[0].sha256&&JSON.stringify(ids)===JSON.stringify(groupIds),'CARD_THEME_CATALOG_MISMATCH');
+ }else need(catalogs[0].status==='UNAVAILABLE'&&catalogs[0].indices.length===0,'CARD_THEME_CATALOG_STATUS');
  const byIndex=new Map(catalogs[0].indices.map(x=>[x.index_code,x.name]));
  let available=0,links=0;
  for(const g of groups){
   need(/^[0-9A-Za-z]{4,12}$/.test(g.index_code)&&Array.isArray(g.members),'CARD_THEME_GROUP');
   if(g.status==='UNAVAILABLE'){need(g.members.length===0,'CARD_THEME_UNAVAILABLE');continue}
-  need(g.status==='REQUESTED_DATE_MEMBERS_UNVERIFIED'&&clean(g.name)&&byIndex.get(g.index_code)===g.name&&g.members.length===g.member_count&&g.members.length>0&&g.members.length<=3000&&new Set(g.members).size===g.members.length&&sha(canonical(g.members))===g.sha256,'CARD_THEME_HASH');
+  need(g.status==='REQUESTED_DATE_MEMBERS_UNVERIFIED'&&clean(g.name)&&(!catalogChecked||byIndex.get(g.index_code)===g.name)&&g.members.length===g.member_count&&g.members.length>0&&g.members.length<=3000&&new Set(g.members).size===g.members.length&&sha(canonical(g.members))===g.sha256,'CARD_THEME_HASH');
   available++;
-  for(const c of g.members){need(code.test(c)&&industry.has(c),'CARD_THEME_MEMBER_IDENTITY');const row=rows[c],tag=labels[g.name];if(row&&tag){row.themes.push({label:tag,index:g.name});links++}}
+  for(const c of g.members){need(code.test(c)&&industry.has(c),'CARD_THEME_MEMBER_IDENTITY');const row=rows[c],tag=Object.hasOwn(labels,g.name)?labels[g.name]:null;if(row&&tag){row.themes.push({label:tag,index:g.name});links++}}
  }
  need(available===coverage[0].members_received&&available>0,'CARD_THEME_COVERAGE');
  for(const row of Object.values(rows))row.themes.sort((a,b)=>a.label.localeCompare(b.label)||a.index.localeCompare(b.index));
- return {schema:'BLUE_STOCK_CARD_CLASSIFICATION_V1',day,eod_sha256:auditHash,industry_source:'KRX_VIA_PYKRX_1_2_9',theme_status:'REQUESTED_DATE_MEMBERS_UNVERIFIED',theme_coverage:{available,total:groups.length},coverage:counts,links,rows};
+ return {schema:'BLUE_STOCK_CARD_CLASSIFICATION_V1',day,eod_sha256:auditHash,industry_source:'KRX_VIA_PYKRX_1_2_9',theme_status:'REQUESTED_DATE_MEMBERS_UNVERIFIED',theme_coverage:{available,total:groups.length,catalog_crosscheck:catalogChecked},coverage:counts,links,rows};
 }
 async function main(){
  const mode=process.argv[2],kind=process.argv[3];
