@@ -191,7 +191,7 @@ async function readReport(db){
     const record=JSON.parse(raw),ev=evidence(r,{day,code:r.code,names},base,{details:true});
     const supply=storedContext(raw,base.close).supply;
     const hist=historicalFeatures(base,historyDays,barAt,ev.amount_ratio20);
-    events.push({day,code:r.code,base,full,signalNames:names,amountRatio:ev.amount_ratio20,amountAudit:hist.audit,features:features(base,record,ev,supply,market),historyFeatures:hist.features});
+    events.push({day,code:r.code,base,full,signalNames:names,amountRatio:ev.amount_ratio20,amountAudit:hist.audit,features:features(base,record,ev,supply,market),historyFeatures:{...hist.features,supply_grade_stored:supply.status==="STORED_ESTIMATE"&&supply.grade?supply.grade:"UNKNOWN"}});
    }
    if(rows.length<5)break;
   }
