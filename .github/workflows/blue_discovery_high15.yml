@@ -5,8 +5,17 @@ on:
       - 'tools/turso/discovery-high15.mjs'
       - 'tools/turso/discovery-high15-conditional.mjs'
       - 'tools/turso/discovery-high15-within-signal.mjs'
+      - 'tools/turso/discovery-high15-case-study.mjs'
+      - 'tools/turso/discovery-high15-case-seal.mjs'
       - '.github/workflows/blue_discovery_high15.yml'
   workflow_dispatch:
+    inputs:
+      study_window:
+        description: 'discovery: Nov 16–26 with cases; holdout: Nov 30–Dec 11 after Dec 18 EOD'
+        type: choice
+        options: [discovery, holdout]
+        required: true
+        default: discovery
 permissions:
   contents: read
 concurrency:
@@ -30,7 +39,8 @@ jobs:
         env:
           TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
           TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
-        run: node tools/turso/discovery-high15.mjs --out=output/high15/report.json
+          STUDY_WINDOW: ${{ inputs.study_window }}
+        run: node tools/turso/discovery-high15.mjs --mode="$STUDY_WINDOW" --out=output/high15/report.json --cases=output/high15/cases.sealed.json
       - uses: actions/upload-artifact@v4
         if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.repository == 'ehdud6728-bit/BLUE-Signal-Lab'
         with:
@@ -38,3 +48,10 @@ jobs:
           path: output/high15/report.json
           if-no-files-found: error
           retention-days: 7
+      - uses: actions/upload-artifact@v4
+        if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.repository == 'ehdud6728-bit/BLUE-Signal-Lab' && inputs.study_window == 'discovery'
+        with:
+          name: BLUE_HIGH15_PRIVATE_CASES_SEALED
+          path: output/high15/cases.sealed.json
+          if-no-files-found: error
+          retention-days: 3
